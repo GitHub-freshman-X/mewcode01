@@ -1,0 +1,7 @@
+/mewcode
+/mewcode.exe
+/config.yaml
+/mewcode.yaml
+/*.local.yaml
+/coverage.out
+/*.test

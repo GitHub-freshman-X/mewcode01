@@ -1,0 +1,12 @@
+# Anthropic Messages API example. Copy to your platform config path and protect it.
+protocol: anthropic
+model: claude-sonnet-4-6
+base_url: https://api.anthropic.com
+api_key: replace-with-your-anthropic-key
+max_tokens: 4096
+thinking:
+  enabled: true
+  budget_tokens: 2048
+
+# For OpenAI Responses API, use protocol: openai, an OpenAI model/base_url,
+# and remove the thinking section.
