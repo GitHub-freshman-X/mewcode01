@@ -95,8 +95,16 @@ func (w *Workspace) WriteText(path string, content string) (string, int, *ToolEr
 		return "", 0, &ToolError{Type: ErrorValidation, Message: "path is a directory", Details: map[string]any{"path": rel}}
 	}
 	parent := filepath.Dir(abs)
-	if info, err := os.Stat(parent); err != nil || !info.IsDir() {
-		return "", 0, &ToolError{Type: ErrorNotFound, Message: "parent directory does not exist", Details: map[string]any{"path": filepath.ToSlash(parent)}}
+	if info, err := os.Stat(parent); err == nil {
+		if !info.IsDir() {
+			return "", 0, &ToolError{Type: ErrorValidation, Message: "parent path is not a directory", Details: map[string]any{"path": filepath.ToSlash(parent)}}
+		}
+	} else if errors.Is(err, fs.ErrNotExist) {
+		if err := os.MkdirAll(parent, 0o755); err != nil {
+			return "", 0, &ToolError{Type: ErrorExecution, Message: "failed to create parent directory", Details: map[string]any{"path": filepath.ToSlash(parent), "cause": err.Error()}}
+		}
+	} else {
+		return "", 0, &ToolError{Type: ErrorExecution, Message: "failed to stat parent directory", Details: map[string]any{"path": filepath.ToSlash(parent), "cause": err.Error()}}
 	}
 	if err := os.WriteFile(abs, []byte(content), 0o644); err != nil {
 		return "", 0, &ToolError{Type: ErrorExecution, Message: "failed to write file", Details: map[string]any{"path": rel, "cause": err.Error()}}

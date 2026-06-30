@@ -39,6 +39,10 @@ func TestDefaultRegistryAndCoreTools(t *testing.T) {
 	if got, err := os.ReadFile(filepath.Join(root, "new.txt")); err != nil || string(got) != "new content" {
 		t.Fatalf("written content=%q err=%v", got, err)
 	}
+	runTool(t, registry, "write_file", map[string]any{"path": "test/test1/test2/test3.txt", "content": "Hello, world!"}, true)
+	if got, err := os.ReadFile(filepath.Join(root, "test", "test1", "test2", "test3.txt")); err != nil || string(got) != "Hello, world!" {
+		t.Fatalf("nested written content=%q err=%v", got, err)
+	}
 	runTool(t, registry, "edit_file", map[string]any{"path": "hello.txt", "old_text": "world", "new_text": "agent"}, true)
 	if got, _ := os.ReadFile(filepath.Join(root, "hello.txt")); string(got) != "hello agent\n" {
 		t.Fatalf("edited content=%q", got)
