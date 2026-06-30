@@ -13,6 +13,7 @@ import (
 	"github.com/GitHub-freshman-X/mewcode01/internal/conversation"
 	"github.com/GitHub-freshman-X/mewcode01/internal/provider"
 	"github.com/GitHub-freshman-X/mewcode01/internal/provider/factory"
+	"github.com/GitHub-freshman-X/mewcode01/internal/tools"
 	"github.com/GitHub-freshman-X/mewcode01/internal/tui"
 )
 
@@ -55,7 +56,23 @@ func run(args []string, stderr io.Writer) int {
 		fmt.Fprintln(stderr, provider.UserError(err))
 		return 1
 	}
-	c := conversation.NewConversation(p, conversation.ChatOptions{MaxTokens: cfg.MaxTokens, Thinking: provider.ThinkingOptions{Enabled: cfg.Thinking.Enabled, BudgetTokens: cfg.Thinking.BudgetTokens}})
+	root, err := os.Getwd()
+	if err != nil {
+		fmt.Fprintln(stderr, err)
+		return 1
+	}
+	registry, err := tools.NewDefaultRegistry(root)
+	if err != nil {
+		fmt.Fprintln(stderr, err)
+		return 1
+	}
+	executor := tools.NewExecutor(registry, 30*time.Second)
+	c := conversation.NewConversation(p, conversation.ChatOptions{
+		MaxTokens: cfg.MaxTokens,
+		Thinking:  provider.ThinkingOptions{Enabled: cfg.Thinking.Enabled, BudgetTokens: cfg.Thinking.BudgetTokens},
+		Tools:     registry.Definitions(),
+		Executor:  executor,
+	})
 	if err := runTUI(c); err != nil {
 		fmt.Fprintln(stderr, "tui:", err)
 		return 1

@@ -1,6 +1,7 @@
 package anthropic
 
 import (
+	"encoding/json"
 	"fmt"
 
 	"github.com/GitHub-freshman-X/mewcode01/internal/provider"
@@ -12,6 +13,7 @@ type requestBody struct {
 	MaxTokens int              `json:"max_tokens"`
 	Stream    bool             `json:"stream"`
 	Thinking  *thinkingConfig  `json:"thinking,omitempty"`
+	Tools     []requestTool    `json:"tools,omitempty"`
 }
 
 type requestMessage struct {
@@ -19,20 +21,34 @@ type requestMessage struct {
 	Content []requestBlock `json:"content"`
 }
 type requestBlock struct {
-	Type      string `json:"type"`
-	Text      string `json:"text,omitempty"`
-	Thinking  string `json:"thinking,omitempty"`
-	Signature string `json:"signature,omitempty"`
+	Type      string         `json:"type"`
+	Text      string         `json:"text,omitempty"`
+	Thinking  string         `json:"thinking,omitempty"`
+	Signature string         `json:"signature,omitempty"`
+	ID        string         `json:"id,omitempty"`
+	Name      string         `json:"name,omitempty"`
+	Input     map[string]any `json:"input,omitempty"`
+	ToolUseID string         `json:"tool_use_id,omitempty"`
+	Content   string         `json:"content,omitempty"`
+	IsError   bool           `json:"is_error,omitempty"`
 }
 type thinkingConfig struct {
 	Type         string `json:"type"`
 	BudgetTokens int    `json:"budget_tokens"`
+}
+type requestTool struct {
+	Name        string         `json:"name"`
+	Description string         `json:"description"`
+	InputSchema map[string]any `json:"input_schema"`
 }
 
 func buildRequest(model string, req provider.ChatRequest) (requestBody, error) {
 	body := requestBody{Model: model, MaxTokens: req.MaxTokens, Stream: true}
 	if req.Thinking.Enabled {
 		body.Thinking = &thinkingConfig{Type: "enabled", BudgetTokens: req.Thinking.BudgetTokens}
+	}
+	for _, tool := range req.Tools {
+		body.Tools = append(body.Tools, requestTool{Name: tool.Name, Description: tool.Description, InputSchema: tool.Schema})
 	}
 	for _, message := range req.Messages {
 		if message.Role != provider.RoleUser && message.Role != provider.RoleAssistant {
@@ -48,6 +64,25 @@ func buildRequest(model string, req provider.ChatRequest) (requestBody, error) {
 					return body, requestErr("assistant thinking requires a signature", nil)
 				}
 				out.Content = append(out.Content, requestBlock{Type: "thinking", Thinking: block.Text, Signature: block.Signature})
+			case provider.BlockToolCall:
+				if message.Role != provider.RoleAssistant || block.ToolCall == nil {
+					return body, requestErr("assistant tool call block is invalid", nil)
+				}
+				var input map[string]any
+				if len(block.ToolCall.Arguments) > 0 {
+					if err := json.Unmarshal(block.ToolCall.Arguments, &input); err != nil {
+						return body, requestErr("assistant tool call arguments must be a JSON object", err)
+					}
+				}
+				if input == nil {
+					input = map[string]any{}
+				}
+				out.Content = append(out.Content, requestBlock{Type: "tool_use", ID: block.ToolCall.ID, Name: block.ToolCall.Name, Input: input})
+			case provider.BlockToolResult:
+				if message.Role != provider.RoleUser || block.ToolResult == nil {
+					return body, requestErr("user tool result block is invalid", nil)
+				}
+				out.Content = append(out.Content, requestBlock{Type: "tool_result", ToolUseID: block.ToolResult.CallID, Content: block.ToolResult.Content, IsError: block.ToolResult.IsError})
 			default:
 				return body, requestErr(fmt.Sprintf("unsupported content block %q", block.Type), nil)
 			}

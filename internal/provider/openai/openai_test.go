@@ -57,3 +57,23 @@ func TestErrorsSafe(t *testing.T) {
 		t.Fatalf("err=%v", err)
 	}
 }
+
+func TestTextOutputItemDoneIsIgnored(t *testing.T) {
+	event, emit, err := parseEvent([]byte(`{"type":"response.output_item.done","output_index":0,"item":{"type":"message"}}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if emit || event.Type != "" {
+		t.Fatalf("event=%+v emit=%v", event, emit)
+	}
+}
+
+func TestFunctionOutputItemDoneEmitsToolDone(t *testing.T) {
+	event, emit, err := parseEvent([]byte(`{"type":"response.output_item.done","output_index":2,"item":{"type":"function_call","call_id":"call_1","name":"read_file","arguments":"{\"path\":\"README.md\"}"}}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !emit || event.Type != provider.EventToolCallDone || event.BlockIndex != 2 || event.ToolCall.ID != "call_1" || event.ToolCall.Name != "read_file" {
+		t.Fatalf("event=%+v emit=%v", event, emit)
+	}
+}

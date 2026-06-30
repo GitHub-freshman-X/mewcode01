@@ -6,8 +6,23 @@ import (
 )
 
 type streamEnvelope struct {
-	Type  string `json:"type"`
-	Delta string `json:"delta"`
+	Type        string `json:"type"`
+	Delta       string `json:"delta"`
+	OutputIndex int    `json:"output_index"`
+	Item        struct {
+		Type      string `json:"type"`
+		ID        string `json:"id"`
+		CallID    string `json:"call_id"`
+		Name      string `json:"name"`
+		Arguments string `json:"arguments"`
+	} `json:"item"`
+	ResponseOutput struct {
+		Type      string `json:"type"`
+		ID        string `json:"id"`
+		CallID    string `json:"call_id"`
+		Name      string `json:"name"`
+		Arguments string `json:"arguments"`
+	} `json:"output"`
 	Error struct {
 		Message string `json:"message"`
 	} `json:"error"`
@@ -31,6 +46,57 @@ func parseEvent(data []byte) (provider.StreamEvent, bool, error) {
 		return provider.StreamEvent{Type: provider.EventStarted}, true, nil
 	case "response.output_text.delta":
 		return provider.StreamEvent{Type: provider.EventTextDelta, Delta: e.Delta}, true, nil
+	case "response.output_item.added":
+		if e.Item.Type == "function_call" {
+			id := e.Item.CallID
+			if id == "" {
+				id = e.Item.ID
+			}
+			return provider.StreamEvent{Type: provider.EventToolCallStart, BlockIndex: e.OutputIndex, ToolCall: &provider.ToolCallDelta{ID: id, Name: e.Item.Name, Arguments: e.Item.Arguments}}, true, nil
+		}
+		return provider.StreamEvent{}, false, nil
+	case "response.function_call_arguments.delta":
+		return provider.StreamEvent{Type: provider.EventToolCallDelta, BlockIndex: e.OutputIndex, ToolCall: &provider.ToolCallDelta{ArgumentsDelta: e.Delta}}, true, nil
+	case "response.output_item.delta":
+		if e.Item.Type == "function_call" || e.ResponseOutput.Type == "function_call" {
+			return provider.StreamEvent{Type: provider.EventToolCallDelta, BlockIndex: e.OutputIndex, ToolCall: &provider.ToolCallDelta{ArgumentsDelta: e.Delta}}, true, nil
+		}
+		return provider.StreamEvent{}, false, nil
+	case "response.function_call_arguments.done":
+		args := e.Item.Arguments
+		name := e.Item.Name
+		id := e.Item.CallID
+		if id == "" {
+			id = e.Item.ID
+		}
+		if args == "" {
+			args = e.ResponseOutput.Arguments
+			name = e.ResponseOutput.Name
+			id = e.ResponseOutput.CallID
+			if id == "" {
+				id = e.ResponseOutput.ID
+			}
+		}
+		return provider.StreamEvent{Type: provider.EventToolCallDone, BlockIndex: e.OutputIndex, ToolCall: &provider.ToolCallDelta{ID: id, Name: name, Arguments: args}}, true, nil
+	case "response.output_item.done":
+		if e.Item.Type != "function_call" && e.ResponseOutput.Type != "function_call" {
+			return provider.StreamEvent{}, false, nil
+		}
+		args := e.Item.Arguments
+		name := e.Item.Name
+		id := e.Item.CallID
+		if id == "" {
+			id = e.Item.ID
+		}
+		if args == "" {
+			args = e.ResponseOutput.Arguments
+			name = e.ResponseOutput.Name
+			id = e.ResponseOutput.CallID
+			if id == "" {
+				id = e.ResponseOutput.ID
+			}
+		}
+		return provider.StreamEvent{Type: provider.EventToolCallDone, BlockIndex: e.OutputIndex, ToolCall: &provider.ToolCallDelta{ID: id, Name: name, Arguments: args}}, true, nil
 	case "response.completed":
 		return provider.StreamEvent{Type: provider.EventCompleted}, true, nil
 	case "response.failed", "response.incomplete", "error":

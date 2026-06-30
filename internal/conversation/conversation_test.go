@@ -2,7 +2,9 @@ package conversation
 
 import (
 	"context"
+	"encoding/json"
 	"github.com/GitHub-freshman-X/mewcode01/internal/provider"
+	"github.com/GitHub-freshman-X/mewcode01/internal/tools"
 	"testing"
 )
 
@@ -61,4 +63,59 @@ func TestCancelDoesNotCommit(t *testing.T) {
 	if _, _, err := c.Start(context.Background(), "again"); err != nil {
 		t.Fatal(err)
 	}
+}
+
+func TestToolRoundTripCommitsResultAndStops(t *testing.T) {
+	f := &fakeProvider{events: make(chan provider.StreamEvent), done: make(chan error)}
+	registry := tools.NewRegistry()
+	if err := registry.Register(fakeTool{name: "echo_tool"}); err != nil {
+		t.Fatal(err)
+	}
+	c := NewConversation(f, ChatOptions{MaxTokens: 10, Tools: registry.Definitions(), Executor: tools.NewExecutor(registry, 1000000000)})
+	if _, _, err := c.Start(context.Background(), "use a tool"); err != nil {
+		t.Fatal(err)
+	}
+	if len(f.requests[0].Tools) != 1 || f.requests[0].Tools[0].Name != "echo_tool" {
+		t.Fatalf("tools=%+v", f.requests[0].Tools)
+	}
+	for _, e := range []provider.StreamEvent{
+		{Type: provider.EventToolCallStart, BlockIndex: 0, ToolCall: &provider.ToolCallDelta{ID: "call-1", Name: "echo_tool"}},
+		{Type: provider.EventToolCallDelta, BlockIndex: 0, ToolCall: &provider.ToolCallDelta{ArgumentsDelta: `{"value":"ok"`}},
+		{Type: provider.EventToolCallDelta, BlockIndex: 0, ToolCall: &provider.ToolCallDelta{ArgumentsDelta: `}`}},
+		{Type: provider.EventCompleted},
+	} {
+		if err := c.Apply(e); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := c.Complete(); err != nil {
+		t.Fatal(err)
+	}
+	history := c.History()
+	if len(history) != 3 {
+		t.Fatalf("history=%+v", history)
+	}
+	result := history[2].Blocks[0].ToolResult
+	if result == nil || result.CallID != "call-1" || result.IsError {
+		t.Fatalf("tool result=%+v", result)
+	}
+	if _, _, err := c.Start(context.Background(), "next"); err != nil {
+		t.Fatal(err)
+	}
+	if got := len(f.requests); got != 2 {
+		t.Fatalf("provider calls=%d", got)
+	}
+	if got := len(f.requests[1].Messages); got != 4 {
+		t.Fatalf("next request messages=%d", got)
+	}
+}
+
+type fakeTool struct{ name string }
+
+func (t fakeTool) Metadata() tools.Metadata {
+	return tools.Metadata{Name: t.name, Description: "fake test tool", Schema: tools.Schema{"type": "object", "properties": map[string]any{"value": map[string]any{"type": "string"}}}}
+}
+
+func (t fakeTool) Execute(_ context.Context, input json.RawMessage) tools.Result {
+	return tools.Success(t.name, map[string]any{"input": string(input)})
 }

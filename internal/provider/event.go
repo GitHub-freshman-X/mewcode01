@@ -12,6 +12,9 @@ const (
 	EventThinkingDelta  EventType = "thinking_delta"
 	EventTextDelta      EventType = "text_delta"
 	EventSignatureDelta EventType = "signature_delta"
+	EventToolCallStart  EventType = "tool_call_start"
+	EventToolCallDelta  EventType = "tool_call_delta"
+	EventToolCallDone   EventType = "tool_call_done"
 	EventCompleted      EventType = "completed"
 )
 
@@ -19,6 +22,14 @@ type StreamEvent struct {
 	Type       EventType
 	BlockIndex int
 	Delta      string
+	ToolCall   *ToolCallDelta
+}
+
+type ToolCallDelta struct {
+	ID             string
+	Name           string
+	ArgumentsDelta string
+	Arguments      string
 }
 
 type ErrorStage string
@@ -50,7 +61,10 @@ func UserError(err error) string {
 	if appErr, ok := err.(*AppError); ok {
 		return appErr.Error()
 	}
-	return "request failed; check your connection and configuration"
+	if err != nil {
+		return "request failed: " + err.Error()
+	}
+	return "request failed"
 }
 
 // Sanitize removes a configured credential from errors that may contain

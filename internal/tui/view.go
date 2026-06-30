@@ -62,6 +62,22 @@ func renderMessage(b *strings.Builder, message provider.Message, active, expande
 			} else {
 				fmt.Fprintln(b, thinkingStyle.Render("思考（已折叠，Ctrl+T 展开）"))
 			}
+		case provider.BlockToolCall:
+			if block.ToolCall != nil {
+				fmt.Fprintf(b, "工具调用: %s\n", block.ToolCall.Name)
+			}
+		case provider.BlockToolResult:
+			if block.ToolResult != nil {
+				status := "成功"
+				if block.ToolResult.IsError {
+					status = "失败"
+				}
+				content, truncated := truncateRunes(block.ToolResult.Content, 240)
+				if truncated {
+					content += "..."
+				}
+				fmt.Fprintf(b, "工具结果: %s %s\n%s\n", block.ToolResult.Name, status, content)
+			}
 		}
 	}
 	b.WriteString("\n")
@@ -79,6 +95,12 @@ func (m *Model) statusText() string {
 		return "thinking · Ctrl+C 取消"
 	case conversation.TurnGenerating:
 		return "generating · Ctrl+C 取消"
+	case conversation.TurnToolRequested:
+		return "tool requested · Ctrl+C 取消"
+	case conversation.TurnToolRunning:
+		return "tool running · Ctrl+C 取消"
+	case conversation.TurnToolCompleted:
+		return "tool completed · 可继续输入"
 	case conversation.TurnCompleted:
 		return "completed · Ctrl+T 展开思考"
 	case conversation.TurnCancelled:
@@ -106,4 +128,12 @@ func (m *Model) hasThinking() bool {
 		}
 	}
 	return false
+}
+
+func truncateRunes(value string, limit int) (string, bool) {
+	runes := []rune(value)
+	if len(runes) <= limit {
+		return value, false
+	}
+	return string(runes[:limit]), true
 }
