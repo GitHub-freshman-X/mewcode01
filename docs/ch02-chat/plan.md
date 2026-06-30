@@ -525,7 +525,7 @@ mew01/
 │   └── testutil/
 │       └── streamserver.go
 ├── docs/
-│   └── ch02/
+│   └── ch02-chat/
 │       ├── spec.md
 │       ├── plan.md
 │       ├── task.md

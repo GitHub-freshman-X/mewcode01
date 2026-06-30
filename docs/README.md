@@ -1,0 +1,20 @@
+# MewCode 文档索引
+
+项目文档按章节顺序和主题命名：
+
+```text
+chNN-topic/
+├── spec.md
+├── plan.md
+├── task.md
+└── checklist.md
+```
+
+## 章节
+
+| 章节 | 主题 | 文档 |
+|---|---|---|
+| `ch02-chat` | 纯对话基础：Provider、流式多轮对话、TUI 与配置 | [Spec](ch02-chat/spec.md) · [Plan](ch02-chat/plan.md) · [Tasks](ch02-chat/task.md) · [Checklist](ch02-chat/checklist.md) |
+| `ch03-tools` | 工具系统：工具注册、文件与命令工具、工具调用和结果回灌 | [Spec](ch03-tools/spec.md) · [Plan](ch03-tools/plan.md) · [Tasks](ch03-tools/task.md) · [Checklist](ch03-tools/checklist.md) |
+
+新增章节时继续采用 `chNN-topic` 格式，并在本页追加索引。
