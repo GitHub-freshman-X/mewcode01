@@ -16,5 +16,6 @@ chNN-topic/
 |---|---|---|
 | `ch02-chat` | 纯对话基础：Provider、流式多轮对话、TUI 与配置 | [Spec](ch02-chat/spec.md) · [Plan](ch02-chat/plan.md) · [Tasks](ch02-chat/task.md) · [Checklist](ch02-chat/checklist.md) |
 | `ch03-tools` | 工具系统：工具注册、文件与命令工具、工具调用和结果回灌 | [Spec](ch03-tools/spec.md) · [Plan](ch03-tools/plan.md) · [Tasks](ch03-tools/task.md) · [Checklist](ch03-tools/checklist.md) |
+| `ch04-loop` | Agent Loop：自主多轮工具循环、停止边界与 Plan/Do 工作流 | [Spec](ch04/spec.md) · [Plan](ch04/plan.md) · [Tasks](ch04/task.md) · [Checklist](ch04/checklist.md) |
 
 新增章节时继续采用 `chNN-topic` 格式，并在本页追加索引。

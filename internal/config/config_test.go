@@ -25,6 +25,9 @@ func TestLoadAndDefaults(t *testing.T) {
 			if cfg.MaxTokens != DefaultMaxTokens {
 				t.Fatalf("max_tokens=%d", cfg.MaxTokens)
 			}
+			if cfg.Agent.MaxIterations != DefaultMaxIterations {
+				t.Fatalf("max_iterations=%d", cfg.Agent.MaxIterations)
+			}
 		})
 	}
 }
@@ -38,6 +41,7 @@ func TestInvalidConfig(t *testing.T) {
 		"bad protocol":    "protocol: other\nmodel: x\nbase_url: http://localhost\napi_key: " + canary + "\n",
 		"bad url":         "protocol: openai\nmodel: x\nbase_url: nope\napi_key: " + canary + "\n",
 		"zero tokens":     "protocol: openai\nmodel: x\nbase_url: http://localhost\napi_key: " + canary + "\nmax_tokens: 0\n",
+		"negative agent":  "protocol: openai\nmodel: x\nbase_url: http://localhost\napi_key: " + canary + "\nagent:\n  max_iterations: -1\n",
 		"thinking budget": "protocol: anthropic\nmodel: x\nbase_url: http://localhost\napi_key: " + canary + "\nmax_tokens: 1024\nthinking:\n  enabled: true\n  budget_tokens: 1024\n",
 	}
 	for name, body := range cases {

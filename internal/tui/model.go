@@ -6,22 +6,37 @@ import (
 	"charm.land/bubbles/v2/textarea"
 	"charm.land/bubbles/v2/viewport"
 	tea "charm.land/bubbletea/v2"
+	"github.com/GitHub-freshman-X/mewcode01/internal/agent"
 	"github.com/GitHub-freshman-X/mewcode01/internal/conversation"
 	"github.com/GitHub-freshman-X/mewcode01/internal/provider"
 )
 
+type taskView struct {
+	prompt     string
+	text       string
+	iteration  int
+	phase      agent.Phase
+	usage      provider.Usage
+	toolCalls  []provider.ToolCall
+	toolResult []provider.ToolResult
+	terminal   *agent.Summary
+	terminalTy agent.EventType
+	err        error
+}
+
 type Model struct {
-	conversation                 *conversation.Conversation
+	runner                       *agent.Runner
+	session                      *conversation.Session
+	task                         *agent.Task
+	current                      taskView
 	textarea                     textarea.Model
 	viewport                     viewport.Model
 	width, height                int
 	autoFollow, thinkingExpanded bool
-	events                       <-chan provider.StreamEvent
-	done                         <-chan error
 	ctx                          context.Context
 }
 
-func NewModel(c *conversation.Conversation) *Model {
+func NewModel(runner *agent.Runner, session *conversation.Session) *Model {
 	input := textarea.New()
 	input.Placeholder = "输入消息，按 Enter 发送"
 	input.Prompt = "> "
@@ -31,7 +46,7 @@ func NewModel(c *conversation.Conversation) *Model {
 	input.Focus()
 	vp := viewport.New(viewport.WithWidth(80), viewport.WithHeight(16))
 	vp.SoftWrap = true
-	m := &Model{conversation: c, textarea: input, viewport: vp, width: 80, height: 20, autoFollow: true, ctx: context.Background()}
+	m := &Model{runner: runner, session: session, textarea: input, viewport: vp, width: 80, height: 20, autoFollow: true, ctx: context.Background()}
 	m.refreshContent()
 	return m
 }

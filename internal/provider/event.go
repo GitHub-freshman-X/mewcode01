@@ -15,14 +15,29 @@ const (
 	EventToolCallStart  EventType = "tool_call_start"
 	EventToolCallDelta  EventType = "tool_call_delta"
 	EventToolCallDone   EventType = "tool_call_done"
+	EventUsage          EventType = "usage"
 	EventCompleted      EventType = "completed"
 )
+
+type Usage struct {
+	InputTokens  int
+	OutputTokens int
+}
+
+func (u *Usage) Add(other Usage) {
+	if u == nil {
+		return
+	}
+	u.InputTokens += other.InputTokens
+	u.OutputTokens += other.OutputTokens
+}
 
 type StreamEvent struct {
 	Type       EventType
 	BlockIndex int
 	Delta      string
 	ToolCall   *ToolCallDelta
+	Usage      *Usage
 }
 
 type ToolCallDelta struct {

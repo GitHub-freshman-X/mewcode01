@@ -63,6 +63,20 @@ func (r *Registry) Get(name string) (Tool, bool) {
 	return tool, ok
 }
 
+func (r *Registry) FilterBySafety(safety Safety) *Registry {
+	filtered := NewRegistry()
+	want := NormalizeSafety(safety)
+	if r == nil {
+		return filtered
+	}
+	for name, tool := range r.tools {
+		if NormalizeSafety(tool.Metadata().Safety) == want {
+			filtered.tools[name] = tool
+		}
+	}
+	return filtered
+}
+
 func (r *Registry) List() []Tool {
 	names := make([]string, 0, len(r.tools))
 	for name := range r.tools {

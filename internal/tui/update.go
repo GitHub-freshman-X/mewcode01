@@ -1,12 +1,10 @@
 package tui
 
 import (
-	"context"
-	"errors"
 	"strings"
 
 	tea "charm.land/bubbletea/v2"
-	"github.com/GitHub-freshman-X/mewcode01/internal/provider"
+	"github.com/GitHub-freshman-X/mewcode01/internal/agent"
 )
 
 func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
@@ -22,10 +20,9 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case tea.KeyPressMsg:
 		key := msg.String()
 		if key == keyCancelOrQuit {
-			if m.conversation.IsBusy() {
-				m.conversation.Cancel()
-				m.refreshContent()
-				return m, waitForStream(m.events, m.done)
+			if m.task != nil {
+				m.task.Cancel()
+				return m, waitForAgent(m.task.Events)
 			}
 			return m, tea.Quit
 		}
@@ -41,58 +38,90 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.autoFollow = m.viewport.AtBottom()
 			return m, nil
 		}
-		if !m.conversation.IsBusy() && key == keySubmit {
+		if m.task == nil && key == keySubmit {
 			input := strings.TrimSpace(m.textarea.Value())
 			if input == "" {
 				return m, nil
 			}
-			events, done, err := m.conversation.Start(m.ctx, input)
+			req, err := parseRequest(input)
 			if err != nil {
+				m.current = taskView{prompt: input, terminalTy: agent.EventFailed, err: err}
+				m.refreshContent()
 				return m, nil
 			}
-			m.events, m.done = events, done
+			task, err := m.runner.Start(m.ctx, req)
+			if err != nil {
+				m.current = taskView{prompt: input, terminalTy: agent.EventFailed, err: err}
+				m.refreshContent()
+				return m, nil
+			}
+			m.task = task
+			m.current = taskView{prompt: input}
 			m.textarea.Reset()
 			m.textarea.Blur()
 			m.refreshContent()
-			return m, waitForStream(events, done)
+			return m, waitForAgent(task.Events)
 		}
-	case streamEventMsg:
-		if err := m.conversation.Apply(msg.Event); err != nil {
-			m.conversation.Fail(err)
-			m.textarea.Focus()
-			m.refreshContent()
-			return m, nil
-		}
-		if msg.Event.Type == provider.EventCompleted {
-			m.thinkingExpanded = false
-			if err := m.conversation.Complete(); err != nil {
-				m.conversation.Fail(err)
-			}
-		}
+	case agentEventMsg:
+		m.applyAgentEvent(msg.Event)
 		m.refreshContent()
-		return m, waitForStream(m.events, m.done)
-	case streamErrorMsg:
-		if msg.Err != nil {
-			if errors.Is(msg.Err, context.Canceled) {
-				m.conversation.Cancel()
-			} else {
-				m.conversation.Fail(msg.Err)
-			}
+		if m.task != nil {
+			return m, waitForAgent(m.task.Events)
 		}
-		m.events, m.done = nil, nil
-		cmd := m.textarea.Focus()
+		return m, m.textarea.Focus()
+	case agentClosedMsg:
+		m.task = nil
 		m.refreshContent()
-		return m, cmd
+		return m, m.textarea.Focus()
 	}
 	var cmd tea.Cmd
-	if m.conversation.IsBusy() {
-		before := m.viewport.AtBottom()
+	if m.task != nil {
 		m.viewport, cmd = m.viewport.Update(msg)
-		m.autoFollow = before && m.viewport.AtBottom()
 		return m, cmd
 	}
 	m.textarea, cmd = m.textarea.Update(msg)
 	return m, cmd
+}
+
+func parseRequest(input string) (agent.Request, error) {
+	if input == "/do" {
+		return agent.Request{Mode: agent.ModeDo}, nil
+	}
+	if input == "/plan" || strings.HasPrefix(input, "/plan ") {
+		prompt := strings.TrimSpace(strings.TrimPrefix(input, "/plan"))
+		if prompt == "" {
+			return agent.Request{}, &commandError{"/plan requires a task"}
+		}
+		return agent.Request{Mode: agent.ModePlan, Prompt: prompt}, nil
+	}
+	return agent.Request{Mode: agent.ModeAct, Prompt: input}, nil
+}
+
+type commandError struct{ message string }
+
+func (e *commandError) Error() string { return e.message }
+
+func (m *Model) applyAgentEvent(event agent.Event) {
+	m.current.iteration, m.current.phase = event.Iteration, event.Phase
+	switch event.Type {
+	case agent.EventTextDelta:
+		m.current.text += event.Text
+	case agent.EventToolCall:
+		if event.ToolCall != nil {
+			m.current.toolCalls = append(m.current.toolCalls, *event.ToolCall)
+		}
+	case agent.EventToolResult:
+		if event.ToolResult != nil {
+			m.current.toolResult = append(m.current.toolResult, *event.ToolResult)
+		}
+	case agent.EventUsage:
+		if event.Usage != nil {
+			m.current.usage.Add(*event.Usage)
+		}
+	case agent.EventCompleted, agent.EventStopped, agent.EventCancelled, agent.EventFailed:
+		m.current.terminal, m.current.terminalTy, m.current.err = event.Summary, event.Type, event.Err
+		m.task = nil
+	}
 }
 
 func min(a, b int) int {

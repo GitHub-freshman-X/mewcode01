@@ -7,11 +7,11 @@ max_tokens: 4096
 thinking:
   enabled: true
   budget_tokens: 2048
+agent:
+  max_iterations: 20
 
-# For OpenAI Responses API, use protocol: openai, an OpenAI model/base_url,
-# and remove the thinking section.
-protocol: openai
-model: gpt-4.1-mini
-base_url: https://api.openai-proxy.org/v1
-api_key: replace-with-your-openai-key
-max_tokens: 4096
+# For OpenAI Responses API, remove the thinking section and use values like:
+# protocol: openai
+# model: gpt-4.1-mini
+# base_url: https://api.openai-proxy.org/v1
+# api_key: replace-with-your-openai-key

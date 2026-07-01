@@ -22,7 +22,7 @@ func TestRequestStreamThinking(t *testing.T) {
 			t.Error(err)
 		}
 		w.Header().Set("Content-Type", "text/event-stream")
-		for _, frame := range []string{`{"type":"message_start"}`, `{"type":"content_block_delta","index":0,"delta":{"type":"thinking_delta","thinking":"想"}}`, `{"type":"content_block_delta","index":0,"delta":{"type":"signature_delta","signature":"sig"}}`, `{"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":"好"}}`, `{"type":"message_stop"}`} {
+		for _, frame := range []string{`{"type":"message_start","message":{"usage":{"input_tokens":7}}}`, `{"type":"content_block_delta","index":0,"delta":{"type":"thinking_delta","thinking":"想"}}`, `{"type":"content_block_delta","index":0,"delta":{"type":"signature_delta","signature":"sig"}}`, `{"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":"好"}}`, `{"type":"message_delta","usage":{"output_tokens":3}}`, `{"type":"message_stop"}`} {
 			_, _ = w.Write([]byte("data: " + frame + "\n\n"))
 			w.(http.Flusher).Flush()
 		}
@@ -32,13 +32,17 @@ func TestRequestStreamThinking(t *testing.T) {
 	p := New(Options{BaseURL: u, APIKey: "canary", Model: "claude", HTTPClient: s.Client()})
 	events, done := p.Stream(context.Background(), provider.ChatRequest{Messages: []provider.Message{{Role: provider.RoleUser, Blocks: []provider.ContentBlock{{Type: provider.BlockText, Text: "hi"}}}}, MaxTokens: 4096, Thinking: provider.ThinkingOptions{Enabled: true, BudgetTokens: 1024}})
 	var types []provider.EventType
+	var usage *provider.Usage
 	for e := range events {
 		types = append(types, e.Type)
+		if e.Type == provider.EventUsage {
+			usage = e.Usage
+		}
 	}
 	if err := <-done; err != nil {
 		t.Fatal(err)
 	}
-	if len(types) != 5 || got.Thinking == nil || !got.Stream {
+	if len(types) != 6 || usage == nil || usage.InputTokens != 7 || usage.OutputTokens != 3 || got.Thinking == nil || !got.Stream {
 		t.Fatalf("types=%v body=%+v", types, got)
 	}
 }

@@ -10,29 +10,28 @@ import (
 )
 
 type Executor struct {
-	Registry *Registry
-	Timeout  time.Duration
+	Timeout time.Duration
 }
 
-func NewExecutor(registry *Registry, timeout time.Duration) *Executor {
+func NewExecutor(timeout time.Duration) *Executor {
 	if timeout <= 0 {
 		timeout = 30 * time.Second
 	}
-	return &Executor{Registry: registry, Timeout: timeout}
+	return &Executor{Timeout: timeout}
 }
 
-func (e *Executor) Execute(ctx context.Context, call provider.ToolCall) provider.ToolResult {
+func (e *Executor) Execute(ctx context.Context, registry *Registry, call provider.ToolCall) provider.ToolResult {
 	name := call.Name
 	callID := call.ID
-	result := e.execute(ctx, call)
+	result := e.execute(ctx, registry, call)
 	return provider.ToolResult{CallID: callID, Name: name, Content: result.JSON(), IsError: !result.Success}
 }
 
-func (e *Executor) execute(ctx context.Context, call provider.ToolCall) (result Result) {
-	if e == nil || e.Registry == nil {
+func (e *Executor) execute(ctx context.Context, registry *Registry, call provider.ToolCall) (result Result) {
+	if e == nil || registry == nil {
 		return Failure(call.Name, ErrorInternal, "tool executor is not configured", nil)
 	}
-	tool, ok := e.Registry.Get(call.Name)
+	tool, ok := registry.Get(call.Name)
 	if !ok {
 		return Failure(call.Name, ErrorNotFound, "tool is not registered", map[string]any{"tool": call.Name})
 	}

@@ -95,6 +95,15 @@ func (c *Client) Stream(ctx context.Context, input provider.ChatRequest) (<-chan
 				return
 			}
 			if emit {
+				if event.Type == provider.EventCompleted && event.Usage != nil {
+					select {
+					case events <- provider.StreamEvent{Type: provider.EventUsage, Usage: event.Usage}:
+					case <-ctx.Done():
+						done <- context.Canceled
+						return
+					}
+					event.Usage = nil
+				}
 				select {
 				case events <- event:
 				case <-ctx.Done():

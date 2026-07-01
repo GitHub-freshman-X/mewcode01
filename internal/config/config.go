@@ -1,6 +1,7 @@
 package config
 
 const DefaultMaxTokens = 4096
+const DefaultMaxIterations = 20
 
 type Protocol string
 
@@ -16,6 +17,11 @@ type Config struct {
 	APIKey    string         `yaml:"api_key"`
 	MaxTokens int            `yaml:"max_tokens,omitempty"`
 	Thinking  ThinkingConfig `yaml:"thinking,omitempty"`
+	Agent     AgentConfig    `yaml:"agent,omitempty"`
+}
+
+type AgentConfig struct {
+	MaxIterations int `yaml:"max_iterations,omitempty"`
 }
 
 type ThinkingConfig struct {
@@ -26,5 +32,8 @@ type ThinkingConfig struct {
 func (c *Config) applyDefaults() {
 	if c.MaxTokens == 0 {
 		c.MaxTokens = DefaultMaxTokens
+	}
+	if c.Agent.MaxIterations == 0 {
+		c.Agent.MaxIterations = DefaultMaxIterations
 	}
 }

@@ -34,12 +34,16 @@ func Load(path string) (Config, error) {
 		APIKey    string         `yaml:"api_key"`
 		MaxTokens *int           `yaml:"max_tokens,omitempty"`
 		Thinking  ThinkingConfig `yaml:"thinking,omitempty"`
+		Agent     AgentConfig    `yaml:"agent,omitempty"`
 	}
 	var raw rawConfig
 	if err := loader.Load(&raw); err != nil {
 		return Config{}, fmt.Errorf("config: parse YAML: %w", err)
 	}
-	cfg := Config{Protocol: raw.Protocol, Model: raw.Model, BaseURL: raw.BaseURL, APIKey: raw.APIKey, Thinking: raw.Thinking, MaxTokens: DefaultMaxTokens}
+	cfg := Config{Protocol: raw.Protocol, Model: raw.Model, BaseURL: raw.BaseURL, APIKey: raw.APIKey, Thinking: raw.Thinking, Agent: raw.Agent, MaxTokens: DefaultMaxTokens}
+	if cfg.Agent.MaxIterations == 0 {
+		cfg.Agent.MaxIterations = DefaultMaxIterations
+	}
 	if raw.MaxTokens != nil {
 		cfg.MaxTokens = *raw.MaxTokens
 	}

@@ -9,6 +9,7 @@ import (
 	"os"
 	"time"
 
+	"github.com/GitHub-freshman-X/mewcode01/internal/agent"
 	"github.com/GitHub-freshman-X/mewcode01/internal/config"
 	"github.com/GitHub-freshman-X/mewcode01/internal/conversation"
 	"github.com/GitHub-freshman-X/mewcode01/internal/provider"
@@ -66,14 +67,14 @@ func run(args []string, stderr io.Writer) int {
 		fmt.Fprintln(stderr, err)
 		return 1
 	}
-	executor := tools.NewExecutor(registry, 30*time.Second)
-	c := conversation.NewConversation(p, conversation.ChatOptions{
-		MaxTokens: cfg.MaxTokens,
-		Thinking:  provider.ThinkingOptions{Enabled: cfg.Thinking.Enabled, BudgetTokens: cfg.Thinking.BudgetTokens},
-		Tools:     registry.Definitions(),
-		Executor:  executor,
+	executor := tools.NewExecutor(30 * time.Second)
+	session := conversation.NewSession()
+	runner := agent.NewRunner(p, session, registry, executor, agent.Options{
+		MaxIterations: cfg.Agent.MaxIterations,
+		MaxTokens:     cfg.MaxTokens,
+		Thinking:      provider.ThinkingOptions{Enabled: cfg.Thinking.Enabled, BudgetTokens: cfg.Thinking.BudgetTokens},
 	})
-	if err := runTUI(c); err != nil {
+	if err := runTUI(runner, session); err != nil {
 		fmt.Fprintln(stderr, "tui:", err)
 		return 1
 	}

@@ -26,6 +26,9 @@ func Validate(cfg Config) error {
 	if cfg.MaxTokens <= 0 {
 		return fmt.Errorf("config: field %q must be greater than zero", "max_tokens")
 	}
+	if cfg.Agent.MaxIterations < 0 {
+		return fmt.Errorf("config: field %q must not be negative", "agent.max_iterations")
+	}
 	if cfg.Protocol == ProtocolOpenAI && (cfg.Thinking.Enabled || cfg.Thinking.BudgetTokens != 0) {
 		return fmt.Errorf("config: field %q is only supported by anthropic", "thinking")
 	}

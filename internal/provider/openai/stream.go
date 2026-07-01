@@ -33,6 +33,10 @@ type streamEnvelope struct {
 		IncompleteDetails *struct {
 			Reason string `json:"reason"`
 		} `json:"incomplete_details"`
+		Usage *struct {
+			InputTokens  int `json:"input_tokens"`
+			OutputTokens int `json:"output_tokens"`
+		} `json:"usage"`
 	} `json:"response"`
 }
 
@@ -45,7 +49,7 @@ func parseEvent(data []byte) (provider.StreamEvent, bool, error) {
 	case "response.created":
 		return provider.StreamEvent{Type: provider.EventStarted}, true, nil
 	case "response.output_text.delta":
-		return provider.StreamEvent{Type: provider.EventTextDelta, Delta: e.Delta}, true, nil
+		return provider.StreamEvent{Type: provider.EventTextDelta, BlockIndex: e.OutputIndex, Delta: e.Delta}, true, nil
 	case "response.output_item.added":
 		if e.Item.Type == "function_call" {
 			id := e.Item.CallID
@@ -98,7 +102,11 @@ func parseEvent(data []byte) (provider.StreamEvent, bool, error) {
 		}
 		return provider.StreamEvent{Type: provider.EventToolCallDone, BlockIndex: e.OutputIndex, ToolCall: &provider.ToolCallDelta{ID: id, Name: name, Arguments: args}}, true, nil
 	case "response.completed":
-		return provider.StreamEvent{Type: provider.EventCompleted}, true, nil
+		event := provider.StreamEvent{Type: provider.EventCompleted}
+		if e.Response.Usage != nil {
+			event.Usage = &provider.Usage{InputTokens: e.Response.Usage.InputTokens, OutputTokens: e.Response.Usage.OutputTokens}
+		}
+		return event, true, nil
 	case "response.failed", "response.incomplete", "error":
 		msg := e.Error.Message
 		if e.Response.Error != nil {

@@ -1,36 +1,19 @@
 package tui
 
 import (
-	"context"
-
 	tea "charm.land/bubbletea/v2"
-	"github.com/GitHub-freshman-X/mewcode01/internal/provider"
+	"github.com/GitHub-freshman-X/mewcode01/internal/agent"
 )
 
-type streamEventMsg struct{ Event provider.StreamEvent }
-type streamErrorMsg struct{ Err error }
+type agentEventMsg struct{ Event agent.Event }
+type agentClosedMsg struct{}
 
-func waitForStream(events <-chan provider.StreamEvent, done <-chan error) tea.Cmd {
+func waitForAgent(events <-chan agent.Event) tea.Cmd {
 	return func() tea.Msg {
-		select {
-		case event, ok := <-events:
-			if ok {
-				return streamEventMsg{Event: event}
-			}
-			events = nil
-		case err, ok := <-done:
-			if !ok {
-				return streamErrorMsg{}
-			}
-			return streamErrorMsg{Err: err}
+		event, ok := <-events
+		if !ok {
+			return agentClosedMsg{}
 		}
-		if events == nil {
-			err, ok := <-done
-			if !ok {
-				return streamErrorMsg{}
-			}
-			return streamErrorMsg{Err: err}
-		}
-		return streamErrorMsg{Err: context.Canceled}
+		return agentEventMsg{Event: event}
 	}
 }

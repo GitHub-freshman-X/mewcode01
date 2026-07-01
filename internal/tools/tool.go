@@ -14,6 +14,21 @@ type Metadata struct {
 	Name        string
 	Description string
 	Schema      Schema
+	Safety      Safety
+}
+
+type Safety string
+
+const (
+	SafetyReadOnly   Safety = "read_only"
+	SafetySideEffect Safety = "side_effect"
+)
+
+func NormalizeSafety(safety Safety) Safety {
+	if safety == SafetyReadOnly {
+		return SafetyReadOnly
+	}
+	return SafetySideEffect
 }
 
 type Schema map[string]any

@@ -54,6 +54,31 @@ func TestDefaultRegistryAndCoreTools(t *testing.T) {
 	runTool(t, registry, "run_command", map[string]any{"command": command, "args": args}, true)
 }
 
+func TestSafetyAndFilterBySafety(t *testing.T) {
+	registry, err := NewDefaultRegistry(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	readOnly := registry.FilterBySafety(SafetyReadOnly)
+	if len(readOnly.List()) != 3 || len(registry.List()) != 6 {
+		t.Fatalf("read=%d all=%d", len(readOnly.List()), len(registry.List()))
+	}
+	for _, name := range []string{"read_file", "find_files", "search_code"} {
+		tool, ok := readOnly.Get(name)
+		if !ok || NormalizeSafety(tool.Metadata().Safety) != SafetyReadOnly {
+			t.Fatalf("missing read-only %s", name)
+		}
+	}
+	for _, name := range []string{"write_file", "edit_file", "run_command"} {
+		if _, ok := readOnly.Get(name); ok {
+			t.Fatalf("side effect leaked: %s", name)
+		}
+	}
+	if NormalizeSafety("") != SafetySideEffect || NormalizeSafety("other") != SafetySideEffect {
+		t.Fatal("unknown safety is not conservative")
+	}
+}
+
 func TestToolValidationAndWorkspaceBoundaries(t *testing.T) {
 	root := t.TempDir()
 	registry, err := NewDefaultRegistry(root)
@@ -92,8 +117,8 @@ func TestEditFileRequiresUniqueMatch(t *testing.T) {
 
 func TestExecutorUnknownAndTimeout(t *testing.T) {
 	registry := NewRegistry()
-	executor := NewExecutor(registry, 10*time.Millisecond)
-	result := executor.Execute(context.Background(), provider.ToolCall{ID: "call-1", Name: "missing", Arguments: []byte("{}")})
+	executor := NewExecutor(10 * time.Millisecond)
+	result := executor.Execute(context.Background(), registry, provider.ToolCall{ID: "call-1", Name: "missing", Arguments: []byte("{}")})
 	if !result.IsError || !strings.Contains(result.Content, string(ErrorNotFound)) {
 		t.Fatalf("result=%+v", result)
 	}
@@ -103,10 +128,28 @@ func TestExecutorUnknownAndTimeout(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	executor = NewExecutor(defaultRegistry, 20*time.Millisecond)
+	executor = NewExecutor(20 * time.Millisecond)
 	command, args := commandForSleep()
-	result = executor.Execute(context.Background(), provider.ToolCall{ID: "call-2", Name: "run_command", Arguments: mustJSON(map[string]any{"command": command, "args": args, "timeout_ms": 10})})
+	result = executor.Execute(context.Background(), defaultRegistry, provider.ToolCall{ID: "call-2", Name: "run_command", Arguments: mustJSON(map[string]any{"command": command, "args": args, "timeout_ms": 10})})
 	if !strings.Contains(result.Content, `"timed_out":true`) {
+		t.Fatalf("result=%+v", result)
+	}
+}
+
+type panicTool struct{}
+
+func (panicTool) Metadata() Metadata {
+	return Metadata{Name: "panic", Description: "panic test", Schema: Schema{"type": "object"}}
+}
+func (panicTool) Execute(context.Context, json.RawMessage) Result { panic("boom") }
+
+func TestExecutorPanic(t *testing.T) {
+	registry := NewRegistry()
+	if err := registry.Register(panicTool{}); err != nil {
+		t.Fatal(err)
+	}
+	result := NewExecutor(time.Second).Execute(context.Background(), registry, provider.ToolCall{ID: "1", Name: "panic", Arguments: []byte(`{}`)})
+	if !result.IsError || !strings.Contains(result.Content, string(ErrorInternal)) {
 		t.Fatalf("result=%+v", result)
 	}
 }

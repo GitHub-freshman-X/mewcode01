@@ -13,6 +13,7 @@ func (t *ReadFileTool) Metadata() Metadata {
 	return Metadata{
 		Name:        "read_file",
 		Description: "Read a UTF-8 text file from the current workspace.",
+		Safety:      SafetyReadOnly,
 		Schema: Schema{"type": "object", "required": []any{"path"}, "properties": map[string]any{
 			"path": map[string]any{"type": "string"},
 		}},

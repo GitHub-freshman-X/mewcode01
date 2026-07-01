@@ -22,7 +22,7 @@ func TestRequestStream(t *testing.T) {
 			t.Error(err)
 		}
 		w.Header().Set("Content-Type", "text/event-stream")
-		for _, frame := range []string{`{"type":"response.created"}`, `{"type":"response.output_text.delta","delta":"你"}`, `{"type":"response.output_text.delta","delta":"好"}`, `{"type":"response.completed"}`} {
+		for _, frame := range []string{`{"type":"response.created"}`, `{"type":"response.output_text.delta","delta":"你"}`, `{"type":"response.output_text.delta","delta":"好"}`, `{"type":"response.completed","response":{"usage":{"input_tokens":9,"output_tokens":2}}}`} {
 			_, _ = w.Write([]byte("data: " + frame + "\n\n"))
 			w.(http.Flusher).Flush()
 		}
@@ -33,15 +33,19 @@ func TestRequestStream(t *testing.T) {
 	messages := []provider.Message{{Role: provider.RoleUser, Blocks: []provider.ContentBlock{{Type: provider.BlockText, Text: "hi"}}}, {Role: provider.RoleAssistant, Blocks: []provider.ContentBlock{{Type: provider.BlockThinking, Text: "hidden", Signature: "sig"}, {Type: provider.BlockText, Text: "ok"}}}}
 	events, done := p.Stream(context.Background(), provider.ChatRequest{Messages: messages, MaxTokens: 42})
 	var text string
+	var usage *provider.Usage
 	for e := range events {
 		if e.Type == provider.EventTextDelta {
 			text += e.Delta
+		}
+		if e.Type == provider.EventUsage {
+			usage = e.Usage
 		}
 	}
 	if err := <-done; err != nil {
 		t.Fatal(err)
 	}
-	if text != "你好" || got.MaxOutputTokens != 42 || len(got.Input[1].Content) != 1 {
+	if text != "你好" || usage == nil || usage.InputTokens != 9 || usage.OutputTokens != 2 || got.MaxOutputTokens != 42 || len(got.Input[1].Content) != 1 {
 		t.Fatalf("text=%q body=%+v", text, got)
 	}
 }

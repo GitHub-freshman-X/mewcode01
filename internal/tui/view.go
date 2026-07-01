@@ -5,7 +5,7 @@ import (
 	"strings"
 
 	tea "charm.land/bubbletea/v2"
-	"github.com/GitHub-freshman-X/mewcode01/internal/conversation"
+	"github.com/GitHub-freshman-X/mewcode01/internal/agent"
 	"github.com/GitHub-freshman-X/mewcode01/internal/provider"
 )
 
@@ -20,15 +20,34 @@ func (m *Model) View() tea.View {
 func (m *Model) refreshContent() {
 	wasBottom := m.viewport.AtBottom()
 	var b strings.Builder
-	for _, message := range m.conversation.History() {
-		renderMessage(&b, message, false, m.thinkingExpanded)
+	if m.session != nil {
+		for _, message := range m.session.Snapshot() {
+			renderMessage(&b, message, false, m.thinkingExpanded)
+		}
 	}
-	turn := m.conversation.ActiveTurn()
-	if turn != nil && turn.State != conversation.TurnCompleted {
-		renderMessage(&b, turn.UserMessage, false, false)
-		renderMessage(&b, turn.AssistantMessage, turn.State == conversation.TurnThinking || turn.State == conversation.TurnGenerating || turn.State == conversation.TurnConnecting, m.thinkingExpanded)
-		if turn.Err != nil {
-			fmt.Fprintf(&b, "%s\n\n", errorStyle.Render("错误: "+provider.UserError(turn.Err)))
+	if m.task != nil || m.current.terminalTy == agent.EventCancelled || m.current.terminalTy == agent.EventFailed {
+		if m.current.prompt != "" {
+			renderMessage(&b, provider.Message{Role: provider.RoleUser, Blocks: []provider.ContentBlock{{Type: provider.BlockText, Text: m.current.prompt}}}, false, false)
+		}
+		if m.current.text != "" {
+			text := m.current.text
+			if m.current.terminal != nil && m.current.terminal.Partial {
+				text += "\n（部分输出）"
+			}
+			renderMessage(&b, provider.Message{Role: provider.RoleAssistant, Blocks: []provider.ContentBlock{{Type: provider.BlockText, Text: text}}}, m.task != nil, false)
+		}
+		for _, call := range m.current.toolCalls {
+			fmt.Fprintf(&b, "工具调用: %s\n", call.Name)
+		}
+		for _, result := range m.current.toolResult {
+			status := "成功"
+			if result.IsError {
+				status = "失败"
+			}
+			fmt.Fprintf(&b, "工具结果: %s %s\n", result.Name, status)
+		}
+		if m.current.err != nil {
+			fmt.Fprintf(&b, "%s\n\n", errorStyle.Render("错误: "+provider.UserError(m.current.err)))
 		}
 	}
 	m.viewport.SetContent(strings.TrimRight(b.String(), "\n"))
@@ -84,44 +103,24 @@ func renderMessage(b *strings.Builder, message provider.Message, active, expande
 }
 
 func (m *Model) statusText() string {
-	turn := m.conversation.ActiveTurn()
-	if turn == nil {
-		return "idle · Enter 发送 · Ctrl+C 退出"
+	if m.task != nil {
+		return fmt.Sprintf("iteration %d · %s · tokens in:%d out:%d · Ctrl+C 取消", m.current.iteration, m.current.phase, m.current.usage.InputTokens, m.current.usage.OutputTokens)
 	}
-	switch turn.State {
-	case conversation.TurnConnecting:
-		return "connecting · Ctrl+C 取消"
-	case conversation.TurnThinking:
-		return "thinking · Ctrl+C 取消"
-	case conversation.TurnGenerating:
-		return "generating · Ctrl+C 取消"
-	case conversation.TurnToolRequested:
-		return "tool requested · Ctrl+C 取消"
-	case conversation.TurnToolRunning:
-		return "tool running · Ctrl+C 取消"
-	case conversation.TurnToolCompleted:
-		return "tool completed · 可继续输入"
-	case conversation.TurnCompleted:
-		return "completed · Ctrl+T 展开思考"
-	case conversation.TurnCancelled:
-		return "cancelled · 可继续输入"
-	case conversation.TurnFailed:
-		return "failed · 可继续输入"
-	default:
-		return string(turn.State)
+	if m.current.terminal != nil {
+		return fmt.Sprintf("%s · %s · %d iterations · tokens in:%d out:%d · 可继续输入", m.current.terminalTy, m.current.terminal.Reason, m.current.terminal.Iterations, m.current.terminal.Usage.InputTokens, m.current.terminal.Usage.OutputTokens)
 	}
+	if m.current.err != nil {
+		return "failed · " + provider.UserError(m.current.err) + " · 可继续输入"
+	}
+	return "idle · Enter 发送 · Ctrl+C 退出"
 }
 
 func (m *Model) hasThinking() bool {
-	for _, message := range m.conversation.History() {
-		for _, block := range message.Blocks {
-			if block.Type == provider.BlockThinking && block.Text != "" {
-				return true
-			}
-		}
+	if m.session == nil {
+		return false
 	}
-	if turn := m.conversation.ActiveTurn(); turn != nil {
-		for _, block := range turn.AssistantMessage.Blocks {
+	for _, message := range m.session.Snapshot() {
+		for _, block := range message.Blocks {
 			if block.Type == provider.BlockThinking && block.Text != "" {
 				return true
 			}

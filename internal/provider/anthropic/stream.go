@@ -27,6 +27,16 @@ type streamEnvelope struct {
 		Type    string `json:"type"`
 		Message string `json:"message"`
 	} `json:"error"`
+	Message struct {
+		Usage struct {
+			InputTokens  int `json:"input_tokens"`
+			OutputTokens int `json:"output_tokens"`
+		} `json:"usage"`
+	} `json:"message"`
+	Usage struct {
+		InputTokens  int `json:"input_tokens"`
+		OutputTokens int `json:"output_tokens"`
+	} `json:"usage"`
 }
 
 func parseEvent(data []byte) (provider.StreamEvent, bool, error) {
@@ -36,7 +46,7 @@ func parseEvent(data []byte) (provider.StreamEvent, bool, error) {
 	}
 	switch e.Type {
 	case "message_start":
-		return provider.StreamEvent{Type: provider.EventStarted}, true, nil
+		return provider.StreamEvent{Type: provider.EventStarted, Usage: usageOrNil(e.Message.Usage.InputTokens, e.Message.Usage.OutputTokens)}, true, nil
 	case "message_stop":
 		return provider.StreamEvent{Type: provider.EventCompleted}, true, nil
 	case "content_block_delta":
@@ -70,7 +80,12 @@ func parseEvent(data []byte) (provider.StreamEvent, bool, error) {
 			msg = "Anthropic stream error"
 		}
 		return provider.StreamEvent{}, false, &provider.AppError{Stage: provider.StageStream, Message: msg}
-	case "ping", "content_block_stop", "message_delta":
+	case "message_delta":
+		if usage := usageOrNil(e.Usage.InputTokens, e.Usage.OutputTokens); usage != nil {
+			return provider.StreamEvent{Type: provider.EventUsage, Usage: usage}, true, nil
+		}
+		return provider.StreamEvent{}, false, nil
+	case "ping", "content_block_stop":
 		return provider.StreamEvent{}, false, nil
 	default:
 		if e.Type == "" {
@@ -78,4 +93,11 @@ func parseEvent(data []byte) (provider.StreamEvent, bool, error) {
 		}
 		return provider.StreamEvent{}, false, nil
 	}
+}
+
+func usageOrNil(input, output int) *provider.Usage {
+	if input == 0 && output == 0 {
+		return nil
+	}
+	return &provider.Usage{InputTokens: input, OutputTokens: output}
 }

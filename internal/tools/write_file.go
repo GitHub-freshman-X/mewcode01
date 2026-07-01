@@ -15,6 +15,7 @@ func (t *WriteFileTool) Metadata() Metadata {
 	return Metadata{
 		Name:        "write_file",
 		Description: "Write UTF-8 text content to a file inside the current workspace, creating parent directories when needed.",
+		Safety:      SafetySideEffect,
 		Schema: Schema{"type": "object", "required": []any{"path", "content"}, "properties": map[string]any{
 			"path":    map[string]any{"type": "string"},
 			"content": map[string]any{"type": "string"},

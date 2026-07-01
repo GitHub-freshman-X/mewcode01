@@ -76,6 +76,8 @@ func (c *Client) Stream(ctx context.Context, input provider.ChatRequest) (<-chan
 			return
 		}
 		decoder, completed := sse.NewDecoder(resp.Body, sse.DefaultMaxEventBytes), false
+		var usage provider.Usage
+		hasUsage := false
 		for {
 			frame, err := decoder.Next()
 			if err != nil {
@@ -96,6 +98,22 @@ func (c *Client) Stream(ctx context.Context, input provider.ChatRequest) (<-chan
 				return
 			}
 			if emit {
+				if event.Usage != nil {
+					usage.Add(*event.Usage)
+					hasUsage = true
+					event.Usage = nil
+				}
+				if event.Type == provider.EventUsage {
+					continue
+				}
+				if event.Type == provider.EventCompleted && hasUsage {
+					select {
+					case events <- provider.StreamEvent{Type: provider.EventUsage, Usage: &usage}:
+					case <-ctx.Done():
+						done <- context.Canceled
+						return
+					}
+				}
 				select {
 				case events <- event:
 				case <-ctx.Done():

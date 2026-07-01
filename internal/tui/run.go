@@ -2,14 +2,15 @@ package tui
 
 import (
 	tea "charm.land/bubbletea/v2"
+	"github.com/GitHub-freshman-X/mewcode01/internal/agent"
 	"github.com/GitHub-freshman-X/mewcode01/internal/conversation"
 )
 
-func Run(c *conversation.Conversation) error {
-	m := NewModel(c)
+func Run(runner *agent.Runner, session *conversation.Session) error {
+	m := NewModel(runner, session)
 	_, err := tea.NewProgram(m).Run()
-	if c.IsBusy() {
-		c.Cancel()
+	if m.task != nil {
+		m.task.Cancel()
 	}
 	return err
 }

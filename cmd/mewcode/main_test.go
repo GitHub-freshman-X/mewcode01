@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"testing"
 
+	"github.com/GitHub-freshman-X/mewcode01/internal/agent"
 	"github.com/GitHub-freshman-X/mewcode01/internal/config"
 	"github.com/GitHub-freshman-X/mewcode01/internal/conversation"
 	"github.com/GitHub-freshman-X/mewcode01/internal/provider"
@@ -28,7 +29,7 @@ func TestRunConfigOverride(t *testing.T) {
 		return config.Config{Protocol: config.ProtocolOpenAI, Model: "x", BaseURL: "http://localhost", APIKey: "fake", MaxTokens: 1}, nil
 	}
 	newProvider = func(config.Config, *http.Client) (provider.Provider, error) { return stubProvider{}, nil }
-	runTUI = func(*conversation.Conversation) error { return nil }
+	runTUI = func(*agent.Runner, *conversation.Session) error { return nil }
 	if code := run([]string{"--config", "custom.yaml"}, &bytes.Buffer{}); code != 0 || loaded != "custom.yaml" {
 		t.Fatalf("code=%d loaded=%s", code, loaded)
 	}

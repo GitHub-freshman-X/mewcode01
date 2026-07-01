@@ -19,6 +19,7 @@ func (t *FindFilesTool) Metadata() Metadata {
 	return Metadata{
 		Name:        "find_files",
 		Description: "Find workspace files matching a glob pattern.",
+		Safety:      SafetyReadOnly,
 		Schema: Schema{"type": "object", "required": []any{"pattern"}, "properties": map[string]any{
 			"pattern": map[string]any{"type": "string"},
 			"limit":   map[string]any{"type": "integer", "minimum": 1.0, "maximum": 1000.0},

@@ -23,6 +23,7 @@ func (t *RunCommandTool) Metadata() Metadata {
 	return Metadata{
 		Name:        "run_command",
 		Description: "Run a local command in the workspace using command and args without shell expansion.",
+		Safety:      SafetySideEffect,
 		Schema: Schema{"type": "object", "required": []any{"command"}, "properties": map[string]any{
 			"command":    map[string]any{"type": "string"},
 			"args":       map[string]any{"type": "array"},

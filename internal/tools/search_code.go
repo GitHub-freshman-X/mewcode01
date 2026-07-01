@@ -22,6 +22,7 @@ func (t *SearchCodeTool) Metadata() Metadata {
 	return Metadata{
 		Name:        "search_code",
 		Description: "Search text files in the workspace by literal text or regular expression.",
+		Safety:      SafetyReadOnly,
 		Schema: Schema{"type": "object", "required": []any{"pattern"}, "properties": map[string]any{
 			"pattern": map[string]any{"type": "string"},
 			"regex":   map[string]any{"type": "boolean"},
