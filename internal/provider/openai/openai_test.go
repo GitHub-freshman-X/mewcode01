@@ -81,3 +81,52 @@ func TestFunctionOutputItemDoneEmitsToolDone(t *testing.T) {
 		t.Fatalf("event=%+v emit=%v", event, emit)
 	}
 }
+
+func TestBuildRequestPromptSystemOrder(t *testing.T) {
+	body, err := buildRequest("gpt", provider.ChatRequest{
+		Prompt: provider.PromptBundle{
+			StableSystem: "stable system",
+			DynamicSystem: []provider.SystemMessage{
+				{Tag: "mew.environment", Content: "Workspace: /tmp/project"},
+				{Tag: "mew.mode.plan", Content: "Plan mode"},
+			},
+			CachePolicy: provider.CachePolicy{Enable: true, StableSystem: true, StableTools: true},
+		},
+		Messages: []provider.Message{{Role: provider.RoleUser, Blocks: []provider.ContentBlock{{Type: provider.BlockText, Text: "user task"}}}},
+		Tools:    []provider.ToolDefinition{{Name: "read_file", Description: "Read", Schema: map[string]any{"type": "object"}, Cacheable: true}},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(body.Input) != 4 {
+		t.Fatalf("input count=%d body=%+v", len(body.Input), body)
+	}
+	if body.Input[0].Role != "system" || body.Input[0].Content[0].Text != "stable system" {
+		t.Fatalf("stable system not first: %+v", body.Input)
+	}
+	if body.Input[1].Role != "system" || !strings.Contains(body.Input[1].Content[0].Text, `tag="mew.environment"`) {
+		t.Fatalf("environment system not second: %+v", body.Input)
+	}
+	if body.Input[2].Role != "system" || !strings.Contains(body.Input[2].Content[0].Text, `tag="mew.mode.plan"`) {
+		t.Fatalf("mode system not third: %+v", body.Input)
+	}
+	if body.Input[3].Role != provider.RoleUser || body.Input[3].Content[0].Text != "user task" {
+		t.Fatalf("user task not after system messages: %+v", body.Input)
+	}
+	if len(body.Tools) != 1 || body.Tools[0].Name != "read_file" {
+		t.Fatalf("tools not stable: %+v", body.Tools)
+	}
+}
+
+func TestParseCachedTokensUsage(t *testing.T) {
+	event, emit, err := parseEvent([]byte(`{"type":"response.completed","response":{"usage":{"input_tokens":9,"output_tokens":2,"input_tokens_details":{"cached_tokens":6}}}}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !emit || event.Type != provider.EventCompleted || event.Usage == nil {
+		t.Fatalf("event=%+v emit=%v", event, emit)
+	}
+	if event.Usage.InputTokens != 9 || event.Usage.OutputTokens != 2 || event.Usage.CacheReadInputTokens != 6 {
+		t.Fatalf("usage=%+v", event.Usage)
+	}
+}

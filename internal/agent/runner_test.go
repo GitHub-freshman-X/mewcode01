@@ -313,14 +313,17 @@ func testRunnerToolCancel(t *testing.T, safety tools.Safety, prefix string) {
 
 func TestRunnerUsageTotal(t *testing.T) {
 	round := toolRound(provider.ToolCall{ID: "1", Name: "read_file", Arguments: []byte(`{"path":"missing"}`)})
-	round.events = append(round.events[:len(round.events)-1], provider.StreamEvent{Type: provider.EventUsage, Usage: &provider.Usage{InputTokens: 10, OutputTokens: 4}}, provider.StreamEvent{Type: provider.EventCompleted})
-	p := &scriptedProvider{rounds: []scriptedRound{round, textRound("done", provider.Usage{InputTokens: 20, OutputTokens: 6})}}
+	round.events = append(round.events[:len(round.events)-1], provider.StreamEvent{Type: provider.EventUsage, Usage: &provider.Usage{InputTokens: 10, OutputTokens: 4, CacheCreationInputTokens: 2}}, provider.StreamEvent{Type: provider.EventCompleted})
+	p := &scriptedProvider{rounds: []scriptedRound{round, textRound("done", provider.Usage{InputTokens: 20, OutputTokens: 6, CacheReadInputTokens: 5})}}
 	runner, _ := testRunner(t, p, Options{})
 	task, _ := runner.Start(context.Background(), Request{Mode: ModeAct, Prompt: "x"})
 	events := drainTask(t, task)
 	usage := events[len(events)-1].Summary.Usage
 	if usage.InputTokens != 30 || usage.OutputTokens != 10 {
 		t.Fatalf("usage=%+v", usage)
+	}
+	if usage.CacheCreationInputTokens != 2 || usage.CacheReadInputTokens != 5 {
+		t.Fatalf("cache usage=%+v", usage)
 	}
 }
 
@@ -375,6 +378,13 @@ func TestPlanAppendsInOrderAndDoConsumesPlansOnSuccess(t *testing.T) {
 	if len(p.requests[0].Tools) != 3 {
 		t.Fatalf("plan tools=%d", len(p.requests[0].Tools))
 	}
+	planMessage := p.requests[0].Messages[len(p.requests[0].Messages)-1].Blocks[0].Text
+	if planMessage != "first task" || strings.Contains(planMessage, "read-only") || strings.Contains(planMessage, "只读") {
+		t.Fatalf("plan user prompt should be pure task, got %q", planMessage)
+	}
+	if !strings.Contains(systemContent(p.requests[0], "mew.mode.plan"), "只读") {
+		t.Fatalf("plan mode system injection missing: %+v", p.requests[0].Prompt.DynamicSystem)
+	}
 	do, err := runner.Start(context.Background(), Request{Mode: ModeDo})
 	if err != nil {
 		t.Fatal(err)
@@ -382,6 +392,9 @@ func TestPlanAppendsInOrderAndDoConsumesPlansOnSuccess(t *testing.T) {
 	drainTask(t, do)
 	if len(p.requests[2].Tools) != 6 {
 		t.Fatalf("do tools=%d", len(p.requests[2].Tools))
+	}
+	if strings.Contains(systemContent(p.requests[2], "mew.mode.do"), "只读") {
+		t.Fatalf("do mode system injection contains plan readonly rule: %q", systemContent(p.requests[2], "mew.mode.do"))
 	}
 	message := p.requests[2].Messages[len(p.requests[2].Messages)-1].Blocks[0].Text
 	firstAt, secondAt := strings.Index(message, "first plan"), strings.Index(message, "second plan")
@@ -395,6 +408,53 @@ func TestPlanAppendsInOrderAndDoConsumesPlansOnSuccess(t *testing.T) {
 	if task, err := runner.Start(context.Background(), Request{Mode: ModeDo}); err == nil || task != nil || len(p.requests) != before {
 		t.Fatalf("second do: task=%v err=%v requests=%d", task, err, len(p.requests))
 	}
+}
+
+func TestRunnerBuildsPromptBundleAndEnhancedTools(t *testing.T) {
+	p := &scriptedProvider{rounds: []scriptedRound{textRound("done", provider.Usage{})}}
+	runner, session := testRunner(t, p, Options{})
+	task, err := runner.Start(context.Background(), Request{Mode: ModeAct, Prompt: "inspect workspace"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	drainTask(t, task)
+	if len(p.requests) != 1 {
+		t.Fatalf("requests=%d", len(p.requests))
+	}
+	req := p.requests[0]
+	if !strings.Contains(req.Prompt.StableSystem, "## 身份") || !strings.Contains(req.Prompt.StableSystem, "## 工具使用") {
+		t.Fatalf("stable prompt missing fixed modules:\n%s", req.Prompt.StableSystem)
+	}
+	if !strings.Contains(systemContent(req, "mew.environment"), "Workspace:") ||
+		!strings.Contains(systemContent(req, "mew.environment"), "Mode: act") {
+		t.Fatalf("environment injection missing: %+v", req.Prompt.DynamicSystem)
+	}
+	if !req.Prompt.CachePolicy.Enable || !req.Prompt.CachePolicy.StableSystem || !req.Prompt.CachePolicy.StableTools {
+		t.Fatalf("cache policy not enabled: %+v", req.Prompt.CachePolicy)
+	}
+	for _, tool := range req.Tools {
+		if !tool.Cacheable {
+			t.Fatalf("tool %s is not cacheable", tool.Name)
+		}
+		if !strings.Contains(tool.Description, "编辑前") {
+			t.Fatalf("tool %s missing enhanced rules: %q", tool.Name, tool.Description)
+		}
+	}
+	for _, message := range session.Snapshot() {
+		text := messageText(message)
+		if strings.Contains(text, "mew.environment") || strings.Contains(text, "mew.mode") {
+			t.Fatalf("system injection leaked into history: %q", text)
+		}
+	}
+}
+
+func systemContent(req provider.ChatRequest, tag string) string {
+	for _, message := range req.Prompt.DynamicSystem {
+		if message.Tag == tag {
+			return message.Content
+		}
+	}
+	return ""
 }
 
 func TestDoPromptContainsAllPlans(t *testing.T) {

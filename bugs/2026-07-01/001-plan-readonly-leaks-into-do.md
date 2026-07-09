@@ -98,3 +98,21 @@ Spec 自检已完成：无 TBD/TODO；F6、F13、F15 分别定义共享历史边
 - `TestPlanIsolationHelloChanganEndToEnd`：规划阶段不写文件，执行阶段调用 `write_file`/`edit_file`，最终内容为 `hello changan`。
 - `TestDisplayHistoryShowsPlanWithoutModelHistory`：最终计划在 TUI 可见，同时模型历史为空。
 - `go test -race ./...`、`go vet ./...`、`go build ./...` 全部通过。
+
+## 2026-07-09 补充硬化
+
+状态：已修复并验证。
+
+本章 System Prompt 改造继续收敛同一类风险：`/plan` 的只读探索、禁止修改和最终输出计划等约束不再拼接到用户任务消息中，而是通过 `provider.PromptBundle.DynamicSystem` 的 `mew.mode.plan` 系统级补充注入。`/do` 的动态系统补充改为执行计划模式说明，不包含 Plan Mode 的只读关键词；用户消息仍只携带待执行计划列表。
+
+修复方案：
+
+- `prepareRequest` 在 Plan Mode 下只保留用户原始任务文本，展示历史仍使用 `/plan <任务>`。
+- Runner 每轮收集环境并构建 `PromptBundle`，把模式约束放入系统级动态补充。
+- 工具定义发送前追加稳定规则强化，并在 Plan Mode 下强调不得请求副作用工具。
+- 新增回归测试确认 `/plan` 用户消息纯净、`/do` 系统补充不含只读规划约束、系统补充不进入共享历史或 TUI 展示。
+
+验证方式：
+
+- `go test ./internal/agent -run 'PromptBundle|Plan|Do|Usage|Token'`
+- `go test ./internal/tui ./internal/agent -run 'Display|SystemPrompt|Plan'`

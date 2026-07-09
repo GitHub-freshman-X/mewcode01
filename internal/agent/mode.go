@@ -6,6 +6,7 @@ import (
 	"strings"
 
 	"github.com/GitHub-freshman-X/mewcode01/internal/conversation"
+	"github.com/GitHub-freshman-X/mewcode01/internal/prompt"
 	"github.com/GitHub-freshman-X/mewcode01/internal/tools"
 )
 
@@ -32,7 +33,7 @@ func prepareRequest(req Request, session *conversation.Session, registry *tools.
 			return preparedRequest{}, errors.New("plan task is empty")
 		}
 		return preparedRequest{
-			prompt:        "Explore the workspace using read-only tools only. Produce a concrete implementation plan; do not modify files or run commands.\n\nTask:\n" + prompt,
+			prompt:        prompt,
 			displayPrompt: "/plan " + prompt,
 			registry:      registry.FilterBySafety(tools.SafetyReadOnly),
 		}, nil
@@ -52,5 +53,16 @@ func prepareRequest(req Request, session *conversation.Session, registry *tools.
 		return preparedRequest{prompt: strings.TrimSpace(body.String()), registry: registry, plans: plans}, nil
 	default:
 		return preparedRequest{}, fmt.Errorf("invalid agent mode %q", req.Mode)
+	}
+}
+
+func toPromptMode(mode Mode) prompt.Mode {
+	switch mode {
+	case ModePlan:
+		return prompt.ModePlan
+	case ModeDo:
+		return prompt.ModeDo
+	default:
+		return prompt.ModeAct
 	}
 }

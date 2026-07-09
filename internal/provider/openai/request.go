@@ -1,6 +1,11 @@
 package openai
 
-import "github.com/GitHub-freshman-X/mewcode01/internal/provider"
+import (
+	"fmt"
+	"strings"
+
+	"github.com/GitHub-freshman-X/mewcode01/internal/provider"
+)
 
 type requestBody struct {
 	Model           string       `json:"model"`
@@ -33,6 +38,15 @@ func buildRequest(model string, req provider.ChatRequest) (requestBody, error) {
 	body := requestBody{Model: model, MaxOutputTokens: req.MaxTokens, Stream: true}
 	for _, tool := range req.Tools {
 		body.Tools = append(body.Tools, toolObject{Type: "function", Name: tool.Name, Description: tool.Description, Parameters: tool.Schema})
+	}
+	if strings.TrimSpace(req.Prompt.StableSystem) != "" {
+		body.Input = append(body.Input, inputItem{Role: "system", Content: []inputBlock{{Type: "input_text", Text: req.Prompt.StableSystem}}})
+	}
+	for _, message := range req.Prompt.DynamicSystem {
+		if strings.TrimSpace(message.Content) == "" {
+			continue
+		}
+		body.Input = append(body.Input, inputItem{Role: "system", Content: []inputBlock{{Type: "input_text", Text: taggedSystemText(message)}}})
 	}
 	for _, message := range req.Messages {
 		if message.Role != provider.RoleUser && message.Role != provider.RoleAssistant {
@@ -82,6 +96,14 @@ func buildRequest(model string, req provider.ChatRequest) (requestBody, error) {
 		body.Input = append(body.Input, out)
 	}
 	return body, nil
+}
+
+func taggedSystemText(message provider.SystemMessage) string {
+	tag := strings.TrimSpace(message.Tag)
+	if tag == "" {
+		return message.Content
+	}
+	return fmt.Sprintf("<mew.system tag=\"%s\">\n%s\n</mew.system>", tag, message.Content)
 }
 
 func requestErr(message string, cause error) error {

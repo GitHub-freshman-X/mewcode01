@@ -8,6 +8,7 @@ type ThinkingOptions struct {
 }
 
 type ChatRequest struct {
+	Prompt    PromptBundle
 	Messages  []Message
 	MaxTokens int
 	Thinking  ThinkingOptions
@@ -22,4 +23,5 @@ type ToolDefinition struct {
 	Name        string
 	Description string
 	Schema      map[string]any
+	Cacheable   bool
 }

@@ -22,6 +22,10 @@ const (
 type Usage struct {
 	InputTokens  int
 	OutputTokens int
+
+	CacheReadInputTokens     int
+	CacheCreationInputTokens int
+	CacheUnavailable         bool
 }
 
 func (u *Usage) Add(other Usage) {
@@ -30,6 +34,9 @@ func (u *Usage) Add(other Usage) {
 	}
 	u.InputTokens += other.InputTokens
 	u.OutputTokens += other.OutputTokens
+	u.CacheReadInputTokens += other.CacheReadInputTokens
+	u.CacheCreationInputTokens += other.CacheCreationInputTokens
+	u.CacheUnavailable = u.CacheUnavailable || other.CacheUnavailable
 }
 
 type StreamEvent struct {

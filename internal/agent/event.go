@@ -2,7 +2,9 @@ package agent
 
 import (
 	"context"
+	"os"
 
+	"github.com/GitHub-freshman-X/mewcode01/internal/prompt"
 	"github.com/GitHub-freshman-X/mewcode01/internal/provider"
 )
 
@@ -28,6 +30,9 @@ type Options struct {
 	MaxIterations int
 	MaxTokens     int
 	Thinking      provider.ThinkingOptions
+	Workspace     string
+	Clock         prompt.Clock
+	Injection     prompt.InjectionPolicy
 }
 
 func (o Options) normalized() Options {
@@ -37,6 +42,15 @@ func (o Options) normalized() Options {
 	if o.MaxTokens <= 0 {
 		o.MaxTokens = 4096
 	}
+	if o.Workspace == "" {
+		if cwd, err := os.Getwd(); err == nil {
+			o.Workspace = cwd
+		}
+	}
+	if o.Clock == nil {
+		o.Clock = prompt.SystemClock{}
+	}
+	o.Injection = prompt.NormalizeInjectionPolicy(o.Injection)
 	return o
 }
 

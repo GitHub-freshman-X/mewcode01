@@ -28,15 +28,20 @@ type streamEnvelope struct {
 		Message string `json:"message"`
 	} `json:"error"`
 	Message struct {
-		Usage struct {
-			InputTokens  int `json:"input_tokens"`
-			OutputTokens int `json:"output_tokens"`
-		} `json:"usage"`
+		Usage rawUsage `json:"usage"`
 	} `json:"message"`
-	Usage struct {
-		InputTokens  int `json:"input_tokens"`
-		OutputTokens int `json:"output_tokens"`
-	} `json:"usage"`
+	Usage rawUsage `json:"usage"`
+}
+
+type rawUsage struct {
+	InputTokens              int `json:"input_tokens"`
+	OutputTokens             int `json:"output_tokens"`
+	CacheCreationInputTokens int `json:"cache_creation_input_tokens"`
+	CacheReadInputTokens     int `json:"cache_read_input_tokens"`
+	CacheCreation            struct {
+		Ephemeral5mInputTokens int `json:"ephemeral_5m_input_tokens"`
+		Ephemeral1hInputTokens int `json:"ephemeral_1h_input_tokens"`
+	} `json:"cache_creation"`
 }
 
 func parseEvent(data []byte) (provider.StreamEvent, bool, error) {
@@ -46,7 +51,7 @@ func parseEvent(data []byte) (provider.StreamEvent, bool, error) {
 	}
 	switch e.Type {
 	case "message_start":
-		return provider.StreamEvent{Type: provider.EventStarted, Usage: usageOrNil(e.Message.Usage.InputTokens, e.Message.Usage.OutputTokens)}, true, nil
+		return provider.StreamEvent{Type: provider.EventStarted, Usage: usageOrNil(e.Message.Usage)}, true, nil
 	case "message_stop":
 		return provider.StreamEvent{Type: provider.EventCompleted}, true, nil
 	case "content_block_delta":
@@ -81,7 +86,7 @@ func parseEvent(data []byte) (provider.StreamEvent, bool, error) {
 		}
 		return provider.StreamEvent{}, false, &provider.AppError{Stage: provider.StageStream, Message: msg}
 	case "message_delta":
-		if usage := usageOrNil(e.Usage.InputTokens, e.Usage.OutputTokens); usage != nil {
+		if usage := usageOrNil(e.Usage); usage != nil {
 			return provider.StreamEvent{Type: provider.EventUsage, Usage: usage}, true, nil
 		}
 		return provider.StreamEvent{}, false, nil
@@ -95,9 +100,15 @@ func parseEvent(data []byte) (provider.StreamEvent, bool, error) {
 	}
 }
 
-func usageOrNil(input, output int) *provider.Usage {
-	if input == 0 && output == 0 {
+func usageOrNil(raw rawUsage) *provider.Usage {
+	cacheCreation := raw.CacheCreationInputTokens + raw.CacheCreation.Ephemeral5mInputTokens + raw.CacheCreation.Ephemeral1hInputTokens
+	if raw.InputTokens == 0 && raw.OutputTokens == 0 && raw.CacheReadInputTokens == 0 && cacheCreation == 0 {
 		return nil
 	}
-	return &provider.Usage{InputTokens: input, OutputTokens: output}
+	return &provider.Usage{
+		InputTokens:              raw.InputTokens,
+		OutputTokens:             raw.OutputTokens,
+		CacheReadInputTokens:     raw.CacheReadInputTokens,
+		CacheCreationInputTokens: cacheCreation,
+	}
 }
