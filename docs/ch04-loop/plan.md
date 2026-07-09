@@ -23,18 +23,19 @@ Agent Runner ───────────────→ 规范化 Agent Ev
  │
  ▼
 Conversation Session
- ├── 已提交消息历史
- └── 当前会话最近有效计划
+ ├── 模型上下文历史
+ ├── 界面展示记录
+ └── 当前会话有序待执行计划列表
 ```
 
 - **`agent` 层**：新增独立编排层，拥有 Agent Loop、停止策略、事件流、流式收集器和工具调度器。它直接依赖统一 Provider、工具注册中心和会话状态，不依赖 TUI。
-- **`conversation` 层**：从“单轮模型与工具编排器”收敛为会话状态容器，只负责完整轮次历史、快照复制和最近有效计划。半轮响应不会提交。
+- **`conversation` 层**：从“单轮模型与工具编排器”收敛为会话状态容器，分别保存模型上下文历史、界面展示记录和有序待执行计划列表。普通执行的完整轮次同时进入模型历史与展示记录；Plan Mode 仅把最终计划写入展示记录与待执行列表。半轮响应不会提交，计划追加与消费均为原子操作。
 - **`provider` 层**：继续屏蔽供应商差异，并补充规范化 Token 用量事件。Agent 不接触 Anthropic/OpenAI 原始流格式。
 - **`tools` 层**：工具元信息增加安全分类。调度器使用分类生成有序批次，实际超时、panic 捕获及结构化结果仍由现有执行器负责。
 - **`tui` 层**：识别普通输入、`/plan <任务>` 和 `/do`，提交 Agent 请求后只消费事件并更新视图；不再调用会话层推进模型或执行工具。
 - **`config` 与启动层**：增加 Agent 最大迭代数配置，默认 20；启动时组装 Session、Agent、Provider、Registry 与 Executor。
 
-需求归属：F1–F6 由 Runner 与 Session 覆盖，F7–F8/F12 由事件流和 Collector 覆盖，F9–F11 由 Scheduler 与 tools 覆盖，F13–F15 由模式请求和 Session 计划状态覆盖，F16 由 TUI 单向消费覆盖。
+需求归属：F1–F6 由 Runner 与 Session 覆盖，F7–F8/F12 由事件流和 Collector 覆盖，F9–F11 由 Scheduler 与 tools 覆盖，F13–F16 由模式请求、Runner 和 Session 计划状态覆盖，F17 由 TUI 单向消费覆盖。
 
 ## 核心数据结构
 
@@ -57,7 +58,19 @@ type Request struct {
 
 - 普通输入使用 `ModeAct`。
 - `/plan <任务>` 使用 `ModePlan`，`Prompt` 为任务内容。
-- `/do` 使用 `ModeDo`，由 Runner 从 Session 读取最近计划；此时 `Prompt` 必须为空。
+- `/do` 使用 `ModeDo`，由 Runner 从 Session 读取全部待执行计划；此时 `Prompt` 必须为空。
+
+内部准备结果保留 `/do` 启动时取得的计划快照：
+
+```go
+type preparedRequest struct {
+    prompt   string
+    registry *tools.Registry
+    plans    []string
+}
+```
+
+`plans` 仅在 `ModeDo` 使用。Runner 在正常完成后以该快照为依据消费计划，避免清除未包含在本次请求中的新计划。
 
 ### `agent.Options`
 
@@ -172,7 +185,7 @@ type Summary struct {
 - 用户取消：`EventCancelled`
 - 流读取或解析错误：`EventFailed + StopStreamError`
 
-只有 `StopFinalAnswer` 可将 Plan Mode 输出保存为有效计划。
+只有 `StopFinalAnswer` 可将 Plan Mode 输出追加为有效计划；只有 `ModeDo + StopFinalAnswer` 可消费本次执行的计划快照。
 
 ### `provider.Usage`
 
@@ -227,25 +240,59 @@ func collectRound(
 
 ```go
 type Session struct {
-    history    []provider.Message
-    latestPlan string
+    history      []provider.Message // 仅供 Provider 请求
+    display      []provider.Message // 仅供 TUI 展示
+    pendingPlans []string
 }
 
 func NewSession() *Session
 func (s *Session) Snapshot() []provider.Message
+func (s *Session) DisplaySnapshot() []provider.Message
+func BuildRound(
+    user *provider.Message,
+    assistant provider.Message,
+    results []provider.ToolResult,
+) ([]provider.Message, error)
 func (s *Session) CommitRound(
     user *provider.Message,
     assistant provider.Message,
     results []provider.ToolResult,
 ) error
-func (s *Session) LatestPlan() (string, bool)
-func (s *Session) SavePlan(plan string) error
+func (s *Session) CommitPlan(
+    user provider.Message,
+    assistant provider.Message,
+    plan string,
+) error
+func (s *Session) PendingPlans() []string
+func (s *Session) ConsumePlans(plans []string) error
 ```
 
-- `Snapshot` 返回深拷贝。
-- `CommitRound` 在同一临界区追加可选 user 消息、完整 assistant 消息和全部工具结果，保证原子提交。
+- `Snapshot` 返回模型上下文历史的深拷贝；`DisplaySnapshot` 返回展示记录的深拷贝。
+- `BuildRound` 是纯函数，校验 user、assistant 与全部 tool result 的对应关系并返回克隆后的完整轮次消息；Runner 用它构建 Plan Mode 临时历史。
+- `CommitRound` 调用 `BuildRound`，在同一临界区把普通执行轮次同时追加到模型历史和展示记录。
 - 第一轮传入 user 消息，后续自动循环轮次传入 `nil`。
-- `SavePlan` 只接受非空、正常完成的最终文本。
+- `CommitPlan` 仅把用户可见的原始 `/plan` 请求与最终 assistant 计划写入展示记录，并原子追加非空计划；不得修改模型上下文历史。
+- `PendingPlans` 返回按追加顺序排列的独立切片副本。
+- `ConsumePlans` 校验参数与当前列表前缀完全一致后，仅移除该前缀；若执行期间出现新的尾部计划，它们不会被清除。
+- 空消费、顺序不一致或计划内容不一致均返回错误且不改变列表。
+
+### Plan Mode 任务临时历史
+
+```go
+type taskHistory struct {
+    messages []provider.Message
+}
+
+func newTaskHistory(base []provider.Message) *taskHistory
+func (h *taskHistory) Snapshot() []provider.Message
+func (h *taskHistory) CommitRound(
+    user *provider.Message,
+    assistant provider.Message,
+    results []provider.ToolResult,
+) error
+```
+
+`taskHistory` 仅存在于单次 Runner goroutine 内，无需互斥锁。它以 `Session.Snapshot()` 的普通模型历史为初始上下文，通过 `conversation.BuildRound` 追加规划轮次；任务结束后整体释放。
 
 ### 工具安全分类
 
@@ -323,6 +370,8 @@ Scheduler 按原始顺序构造最大连续只读批次；每个副作用或未�
 - 驱动模型调用、收集、工具执行、历史提交和下一轮循环。
 - 维护迭代数、累计 Token 和连续未知工具数。
 - 保证只产生一个终态事件并释放活动任务状态。
+- Plan Mode 每轮从 `taskHistory` 构造请求并只提交到该临时历史；普通 Act/Do 仍从 Session 模型历史构造请求并调用 `CommitRound`。
+- 在 Plan Mode 正常完成时调用 `CommitPlan`，仅记录用户可见结果并追加计划；在 Do Mode 正常完成时消费本次执行的计划快照，其他终态不改变计划列表。
 
 **核心循环：**
 
@@ -367,8 +416,9 @@ Scheduler 按原始顺序构造最大连续只读批次；每个副作用或未�
 
 - 将普通输入直接构造为执行任务。
 - 为 `/plan` 构造“只读探索并输出可执行计划”的任务说明。
-- 为 `/do` 读取最近有效计划，并构造“执行以下计划”的任务说明。
-- 从正常完成的 Plan Mode 最终响应中拼接非空文本并保存计划。
+- 为 `/do` 读取全部待执行计划，按顺序编号并构造“综合执行以下全部计划”的任务说明。
+- 将 `/do` 使用的计划快照交给 Runner，在正常完成后精确消费。
+- 从正常完成的 Plan Mode 最终响应中拼接非空文本并追加计划。
 
 Plan Mode 同时通过提示约束和只读 Registry 限制副作用；即使模型猜出写工具名称，也只能得到未知工具结果，不能实际执行。
 
@@ -376,12 +426,13 @@ Plan Mode 同时通过提示约束和只读 Registry 限制副作用；即使模
 
 **职责：**
 
-- 线程安全地保存已提交历史和最近有效计划。
-- 为每次 Provider 请求提供深拷贝快照。
-- 原子提交一个完整模型轮次。
-- 保存与读取进程内计划。
+- 线程安全地分离模型上下文历史、界面展示记录和有序待执行计划列表。
+- 为 Provider 请求与 TUI 分别提供深拷贝快照。
+- 原子提交普通完整轮次，或原子提交仅供展示的最终计划与待执行项。
+- 提供纯轮次构造能力，供 Plan Mode 临时历史复用校验逻辑。
+- 快照读取与按前缀消费进程内计划。
 
-已完成的规划探索轮次进入会话历史；失败或取消轮次不提交。失败规划不会覆盖此前计划。
+规划探索轮次永不进入 Session；成功规划仅把原始用户请求与最终计划放入展示记录，并追加待执行计划。失败或取消规划不提交任何 Session 状态。成功 `/do` 仅消费本次提交的计划快照；其他终态保留计划。
 
 ### `internal/provider`
 
@@ -421,6 +472,7 @@ Plan Mode 同时通过提示约束和只读 Registry 限制副作用；即使模
 - 解析普通输入、`/plan <任务>` 和精确匹配的 `/do`。
 - 保存当前 Task 句柄，持续等待 Agent 事件。
 - 根据事件维护当前任务的临时展示状态。
+- 从 `DisplaySnapshot` 渲染已完成内容，不使用 Provider 的模型上下文快照。
 - 收到终态后恢复输入焦点并清除 Task 句柄。
 - Ctrl+C 在任务运行时调用 `Task.Cancel`，随后继续消费直到终态和通道关闭。
 - 完整历史从 Session 展示；取消或失败的部分输出仅保留在 TUI 临时记录中并标注状态。
@@ -538,28 +590,33 @@ Runner 按模型原始调用顺序检查名称：
   │
   ├─ mode.go 构造规划指令
   ├─ Registry.FilterBySafety(read_only)
-  ├─ 使用只读范围运行完整 Agent Loop
+  ├─ taskHistory ← Session.Snapshot()
+  ├─ 使用只读范围和 taskHistory 运行完整 Agent Loop
+  ├─ 每轮只提交到 taskHistory
   └─ 最终文本正常完成
-       ├─ 提交最终轮次
-       ├─ Session.SavePlan()
+       ├─ Session.CommitPlan(原始请求, 最终响应, 计划文本)
+       ├─ 仅更新展示记录与待执行列表
+       ├─ 模型上下文历史保持不变
        └─ EventCompleted
 ```
 
-只有正常最终回答保存计划。迭代上限、未知工具阈值、取消和流错误均不覆盖最近有效计划。
+只有正常最终回答追加计划并记录可见结果。迭代上限、未知工具阈值、取消和流错误均不改变 Session；Plan Mode 临时历史随任务退出释放。
 
 ### `/do` 数据流
 
 ```text
 /do
   │
-  ├─ Session.LatestPlan()
+  ├─ Session.PendingPlans()
   ├─ 无计划：同步返回验证错误，不创建 Task
-  └─ 有计划：构造执行指令
+  └─ 有计划：按原序编号并构造包含全部计划的执行指令
        ├─ 使用完整 Registry
-       └─ 运行普通 Agent Loop
+       ├─ 运行普通 Agent Loop
+       ├─ 正常完成：Session.ConsumePlans(本次快照)
+       └─ 其他终态：不改变待执行列表
 ```
 
-规划历史仍保留在 Session 中；执行指令同时明确携带最近计划，避免依赖模型从较早上下文中猜测目标。
+`/do` 的 Session 模型历史只包含普通 Act/Do 轮次；规划内部只读提示、探索响应和工具结果不会出现。执行指令明确携带每个待执行计划的原文和顺序，系统不预处理冲突，由模型结合完整计划集与当前工作区决定执行方式。
 
 ### 取消与错误
 
@@ -580,12 +637,14 @@ internal/
 │   ├── collector.go          — Provider 流双路收集
 │   ├── scheduler.go          — 工具安全分批与有序结果
 │   ├── mode.go               — Act、Plan、Do 请求构造
+│   ├── history.go            — Plan Mode 任务临时历史
 │   ├── runner_test.go        — 循环、停止条件和历史提交测试
 │   ├── collector_test.go     — 分片、错误、Usage 和部分输出测试
 │   ├── scheduler_test.go     — 并发、串行、顺序和取消测试
-│   └── mode_test.go          — Plan/Do 行为与计划保存测试
+│   ├── mode_test.go          — Plan/Do 行为与计划保存测试
+│   └── history_test.go       — 临时历史多轮提交与隔离测试
 ├── conversation/
-│   ├── session.go            — 历史与最近计划
+│   ├── session.go            — 模型历史、展示记录与待执行计划列表
 │   └── session_test.go       — 原子提交、深拷贝和计划状态测试
 ├── provider/
 │   ├── event.go              — 增加规范化 Usage 事件
@@ -618,7 +677,7 @@ cmd/mewcode/
 
 docs/
 ├── README.md                 — 增加第 4 章索引
-└── ch04/
+└── ch04-loop/
     ├── spec.md
     ├── plan.md
     ├── task.md
@@ -635,7 +694,7 @@ README.md                     — 说明 Agent Loop、/plan 与 /do
 | 决策点 | 选择 | 理由 |
 |---|---|---|
 | 编排位置 | 独立 `agent` 包 | 让循环可脱离 TUI 测试与复用 |
-| 会话职责 | 只保存完整历史和最近计划 | 避免状态存储与执行控制再次耦合 |
+| 会话职责 | 分离模型历史、展示记录和待执行计划列表 | 防止界面需求与模型上下文隔离互相冲突 |
 | 事件模型 | Runner 拥有单向异步事件通道 | 消费者只能观察，不会反向驱动循环 |
 | 任务取消 | `Task.Cancel` 与统一 context | 同时覆盖 Provider、Collector 和工具执行 |
 | 流式收集 | 同一 Collector 实时转发并完整累积 | 保证界面低延迟，同时保留可靠判断依据 |
@@ -644,10 +703,12 @@ README.md                     — 说明 Agent Loop、/plan 与 /do
 | 结果顺序 | 完成可乱序，发出和写回必须原序 | 让 UI、测试和模型上下文确定一致 |
 | 未分类工具 | 默认副作用 | 新工具遗漏声明时采用保守行为 |
 | Plan Mode 隔离 | 过滤后的 Registry 同时用于声明和执行 | 防止模型通过猜测隐藏工具名称绕过只读边界 |
+| Plan 历史隔离 | 任务内临时历史；最终计划仅进展示记录与待执行列表 | 从上下文结构上消除只读指令污染，同时保留多轮规划和用户可见结果 |
 | Usage 语义 | 每次 Provider 请求最多一个汇总事件 | 避免把供应商累计快照重复相加 |
 | 迭代限制 | 默认 20，可配置；一次请求算一轮 | 含义明确，且在请求前即可判断边界 |
 | 未知工具限制 | 固定连续 3 次，触发后处理完当前响应再停 | 保证工具调用与结果成对提交 |
-| Plan 保存 | 仅正常完成时覆盖，进程内保存 | 满足两阶段工作流且不引入持久化范围 |
+| Plan 保存 | 成功规划追加，成功执行按快照消费，进程内保存 | 不丢弃早期计划，同时避免成功任务被重复执行 |
+| 多计划冲突 | 原样、按序交给 `/do` 的模型判断 | 保留全部用户意图，不在系统层静默取舍 |
 | 并发实现 | Go context、channel、goroutine、WaitGroup | 无需新增依赖，符合现有并发模型 |
 | 工具失败 | 写回模型，不由 Runner 自动重试 | 保留 ReAct 自我调整能力，避免隐藏重试策略 |
 | 迁移策略 | 删除旧 Conversation 编排入口 | 防止新旧流程并存造成行为分叉 |

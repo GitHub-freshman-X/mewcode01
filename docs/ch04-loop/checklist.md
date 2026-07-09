@@ -26,6 +26,7 @@
 ## 异步事件与双路收集
 
 - [x] **AC8 部分文本可见但不提交**：取消或流错误前的文本增量可以被消费者看到，并被标记为部分输出，但 Session 不含该响应。（验证：运行 `go test ./internal/agent -run PartialOutputNotCommitted`，期望事件含文本、历史不含文本）
+- [x] **AC8 Plan 内部历史不提交**：成功、取消、失败或安全停止的 Plan Mode 结束后，Session 模型历史与规划前完全一致。（验证：运行 `go test ./internal/agent -run 'PlanAppendsInOrder|PlanPreservedOnNonSuccess|PlanTaskHistoryMultiRound'`，期望所有终态的模型历史快照不变）
 - [x] **AC9 事件类型完整**：完整工具任务可观察到进度、文本、工具调用、工具结果、Usage 和唯一终态。（验证：运行 `go test ./internal/agent -run CompleteEventSequence`，期望所需事件集合全部出现）
 - [x] **AC9 终态唯一且最后**：完成、停止、取消和失败场景都恰有一个终态，终态后通道关闭且无普通事件。（验证：运行 `go test ./internal/agent -run TerminalEventInvariant`，期望四种场景通过）
 - [x] **AC10 文本实时转发**：模型流尚未结束时，消费者已经收到首个文本增量。（验证：运行 `go test ./internal/agent -run CollectorStreamsImmediately`，期望测试在释放结束信号前收到文本）
@@ -51,12 +52,14 @@
 ## Plan Mode
 
 - [x] **AC15 `/plan` 只开放读工具**：规划请求的工具声明恰好包含读文件、找文件和搜代码。（验证：运行 `go test ./internal/agent -run PlanToolDefinitions`，期望工具集合精确匹配）
-- [x] **AC15 规划可多轮探索**：模型可连续使用只读工具并最终输出计划，期间工作区内容不变。（验证：运行 `go test ./internal/agent -run PlanReadOnlyLoop`，期望多次模型请求后正常完成并比较工作区快照一致）
-- [x] **AC16 成功计划保存**：正常完成的非空计划成为当前会话最近计划。（验证：运行 `go test ./internal/agent -run PlanSavedOnSuccess`，期望 LatestPlan 返回最终文本）
-- [x] **AC16 失败计划不覆盖**：已有有效计划后，再执行取消、流失败、迭代停止或未知工具停止的规划，旧计划保持不变。（验证：运行 `go test ./internal/agent -run PlanPreservedOnNonSuccess`，期望四种场景均保留旧值）
-- [x] **AC17 `/do` 恢复全工具**：执行最近计划时请求包含全部六个工具，并能修改工作区直到最终回答。（验证：运行 `go test ./internal/agent -run DoUsesFullRegistry`，期望工具集合和写入结果正确）
-- [x] **AC17 `/do` 明确携带计划**：执行首轮 user 消息包含最近计划，而不是只依赖较早历史。（验证：运行 `go test ./internal/agent -run DoPromptContainsPlan`，期望请求正文包含保存的计划）
+- [x] **AC15 规划临时历史可多轮探索**：第二轮规划请求能看到第一轮 assistant 工具调用和工具结果，但共享模型历史始终不包含这些内容。（验证：运行 `go test ./internal/agent -run PlanTaskHistoryMultiRound`，期望临时上下文完整且 Session 模型快照不变）
+- [x] **AC16 成功计划按序追加**：连续三个成功 `/plan` 后，待执行列表包含三个非空计划，顺序与完成顺序一致，返回的列表副本不可修改内部状态。（验证：运行 `go test ./internal/conversation ./internal/agent -run 'Session.*Plan|PlanAppendsInOrder'`，期望顺序和隔离断言通过）
+- [x] **AC16 非成功规划不追加**：已有多个计划后，取消、流失败、迭代停止或未知工具停止的规划均不追加、删除或重排已有计划。（验证：运行 `go test ./internal/agent -run PlanPreservedOnNonSuccess`，期望四种终态后的计划列表完全一致）
+- [x] **AC17 `/do` 恢复全工具且无只读历史污染**：请求包含全部六个工具，首轮 user 消息按追加顺序编号包含每个计划的完整原文，全部消息中均不存在 Plan Mode 内部只读提示、探索响应或规划工具结果。（验证：运行 `go test ./internal/agent -run 'DoUsesFullRegistry|DoExcludesPlanInternalHistory'`，期望工具集合完整且历史污染扫描无匹配）
+- [x] **AC17 冲突计划不丢失**：两个内容冲突的计划均原样进入 `/do` 请求，系统不覆盖、过滤或静默合并。（验证：运行 `go test ./internal/agent -run DoPreservesConflictingPlans`，期望两个冲突文本都可观察）
 - [x] **AC18 无计划 `/do`**：当前会话没有计划时立即返回清晰错误，不创建 Task、不调用模型和工具。（验证：运行 `go test ./internal/agent -run DoWithoutPlan`，期望 Provider 请求数和工具调用数均为 0）
+- [x] **AC19 成功 `/do` 消费计划**：携带多个计划的 `/do` 正常完成后，待执行列表为空，再次 `/do` 不调用模型。（验证：运行 `go test ./internal/agent -run DoConsumesPlansOnSuccess`，期望列表为空且 Provider 调用数不增加）
+- [x] **AC19 非成功 `/do` 保留计划**：取消、流失败、迭代上限或未知工具停止后，原计划列表及顺序保持不变。（验证：运行 `go test ./internal/agent -run DoPreservesPlansOnNonSuccess`，期望四种终态均保留完整列表）
 
 ## 集成与架构边界
 
@@ -64,17 +67,19 @@
 - [x] **Provider 中立**：Agent 包不导入 Anthropic 或 OpenAI adapter，也不解析供应商原始事件名称。（验证：运行 `rg -n 'provider/(anthropic|openai)|response\.|message_start' internal/agent`，期望无匹配）
 - [x] **旧编排入口已移除**：项目中不存在旧 Conversation 单轮推进调用。（验证：运行 `rg -n 'NewConversation|\.Apply\(|\.Complete\(' internal cmd`，期望无匹配）
 - [x] **Session 深拷贝**：修改 Snapshot 返回值不会改变内部历史，工具参数字节也不会共享。（验证：运行 `go test ./internal/conversation -run SessionSnapshotIsolation`，期望通过）
+- [x] **Session 模型/展示历史隔离**：普通轮次同时进入两个历史；成功 Plan 只进入展示记录与待执行列表；修改任一快照都不会影响内部状态或另一份快照。（验证：运行 `go test ./internal/conversation -run 'SessionHistoryIsolation|SessionCommitPlan'`，期望所有隔离断言通过）
+- [x] **Session 精确消费**：消费计划快照时只移除匹配的列表前缀并保留后来追加的尾部；空快照、乱序或内容不一致均失败且不改变列表。（验证：运行 `go test ./internal/conversation -run SessionPlanConsumption`，期望所有原子性断言通过）
 - [x] **配置默认与覆盖**：旧配置自动获得 20 轮默认值，合法正数生效，负数返回明确错误。（验证：运行 `go test ./internal/config -run Agent`，期望三类配置场景通过）
 - [x] **TUI 命令映射**：普通输入、`/plan <任务>`、精确 `/do` 映射到正确模式，空 `/plan` 不启动任务。（验证：运行 `go test ./internal/tui -run 'ActCommand|PlanCommand|DoCommand'`，期望全部通过）
-- [x] **TUI 用户可见状态**：界面可观察轮次、阶段、工具状态、累计 Token、正常完成、停止、取消、失败和部分输出标记。（验证：运行 `go test ./internal/tui -run 'View|Partial|Usage'`，期望关键文本断言通过）
-- [x] **用户文档一致**：README、示例配置和章节索引包含正确命令、默认值与边界。（验证：运行 `rg -n 'Agent Loop|/plan|/do|max_iterations|ch04' README.md config.example.yaml docs/README.md`，期望所有条目均可找到）
+- [x] **TUI 用户可见状态与 Plan 展示**：界面从展示记录渲染历史；Plan 完成后最终计划持续可见，但该内容不进入模型上下文。（验证：运行 `go test ./internal/tui -run 'View|Partial|Usage|DisplayHistory'`，期望关键状态和 Plan 展示断言通过）
+- [x] **用户文档一致**：README 和章节文档明确说明 `/plan` 追加、`/do` 执行全部计划、冲突交给模型，以及成功消费/失败保留边界。（验证：运行 `rg -n '追加|全部.*计划|冲突|成功.*清空|失败.*保留' README.md docs/ch04-loop`，期望各语义均可找到）
 
 ## 稳定性与质量
 
-- [x] **AC19 工具异常不崩溃**：工具 panic、超时和结构化失败不会产生未处理 panic。（验证：运行 `go test ./internal/agent ./internal/tools -run 'Panic|Timeout|Failure'`，期望全部通过）
-- [x] **AC19 无半轮历史**：取消、流错误及调度取消场景均不留下只有 tool call 没有 tool result 的历史。（验证：运行 `go test ./internal/agent -run IncompleteRoundNeverCommitted`，期望全部场景通过）
-- [x] **AC19 并发无竞态**：Agent、Session、Scheduler 和 TUI 并发测试无数据竞争。（验证：运行 `go test -race ./...`，期望退出码为 0）
-- [x] **AC20 无真实 API 依赖**：完整测试套件不需要模型凭据或网络访问。（验证：清除模型相关环境变量后运行 `go test ./...`，期望退出码为 0）
+- [x] **AC20 工具异常不崩溃**：工具 panic、超时和结构化失败不会产生未处理 panic。（验证：运行 `go test ./internal/agent ./internal/tools -run 'Panic|Timeout|Failure'`，期望全部通过）
+- [x] **AC20 无半轮历史**：取消、流错误及调度取消场景均不留下只有 tool call 没有 tool result 的历史。（验证：运行 `go test ./internal/agent -run IncompleteRoundNeverCommitted`，期望全部场景通过）
+- [x] **AC20/AC21 并发无竞态**：Agent、Session、Scheduler 和 TUI 并发测试无数据竞争。（验证：运行 `go test -race ./...`，期望退出码为 0）
+- [x] **AC21 无真实 API 依赖**：完整测试套件不需要模型凭据或网络访问。（验证：清除模型相关环境变量后运行 `go test ./...`，期望退出码为 0）
 - [x] **项目编译通过**：所有生产包和命令可编译。（验证：运行 `go build ./...`，期望退出码为 0）
 - [x] **全部测试通过**：单元与集成测试全部通过。（验证：运行 `go test ./...`，期望退出码为 0）
 - [x] **静态检查通过**：没有 Go 静态检查错误。（验证：运行 `go vet ./...`，期望退出码为 0）
@@ -83,6 +88,6 @@
 ## 端到端场景
 
 - [ ] **E2E 1：自主完成代码任务**：在临时工作区要求 MewCode“读取目标文件、修改指定内容并运行测试”；观察它自动经历多轮工具调用，文件修改正确、测试完成并给出最终回答。（验证：使用本地脚本化 Provider 启动完整 TUI/Runner 组装，期望无需第二次用户输入且终态为 `final_answer`）
-- [ ] **E2E 2：先规划再执行**：输入 `/plan <修改任务>`，确认规划期间工作区不变；随后输入 `/do`，确认执行使用保存计划、可调用全部工具并完成修改。（验证：比较规划前后及执行后的工作区快照，期望仅 `/do` 阶段发生目标变更）
+- [x] **AC22/E2E 2：隔离规划后执行多个写计划**：先规划创建 `hello.txt` 并写入 `hello world`，再规划把 `world` 改为 `changan`；执行 `/do`，确认请求无只读内部提示且包含写/改工具，最终文件内容为 `hello changan`，成功后再次 `/do` 提示无计划。（验证：运行脚本化 Provider 端到端测试并检查请求历史、工具声明和文件内容）
 - [ ] **E2E 3：中途取消**：在长时间模型流或工具执行期间按 Ctrl+C，观察部分输出标记为取消、没有后续副作用，随后可立即提交新任务。（验证：运行 TUI 端到端取消场景，期望进程不退出且第二个任务正常完成）
 - [ ] **E2E 4：安全网停止**：使用持续请求工具的脚本化 Provider，把最大迭代数配置为 2；观察两轮完成后明确显示达到上限，且没有第 3 次请求。（验证：检查 Provider 调用计数和 TUI 终态文本）

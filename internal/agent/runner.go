@@ -60,6 +60,22 @@ func (r *Runner) run(ctx context.Context, mode Mode, prepared preparedRequest, e
 	}
 	terminal := func(event Event) { events <- event }
 	user := provider.Message{Role: provider.RoleUser, Blocks: []provider.ContentBlock{{Type: provider.BlockText, Text: prepared.prompt}}}
+	var planHistory *taskHistory
+	if mode == ModePlan {
+		planHistory = newTaskHistory(r.session.Snapshot())
+	}
+	modelSnapshot := func() []provider.Message {
+		if planHistory != nil {
+			return planHistory.Snapshot()
+		}
+		return r.session.Snapshot()
+	}
+	commitRound := func(user *provider.Message, assistant provider.Message, results []provider.ToolResult) error {
+		if planHistory != nil {
+			return planHistory.CommitRound(user, assistant, results)
+		}
+		return r.session.CommitRound(user, assistant, results)
+	}
 	var total provider.Usage
 	unknownCount := 0
 	hasPartial := false
@@ -71,7 +87,7 @@ func (r *Runner) run(ctx context.Context, mode Mode, prepared preparedRequest, e
 			terminal(cancelledEvent(iterations-1, total, hasPartial))
 			return
 		}
-		messages := r.session.Snapshot()
+		messages := modelSnapshot()
 		var roundUser *provider.Message
 		if iterations == 1 {
 			messages = append(messages, provider.CloneMessage(user))
@@ -111,13 +127,21 @@ func (r *Runner) run(ctx context.Context, mode Mode, prepared preparedRequest, e
 				terminal(Event{Type: EventFailed, Iteration: iterations, Phase: PhaseFinishing, Summary: summary, Err: errors.New("completed plan is empty")})
 				return
 			}
-			if err := r.session.CommitRound(roundUser, round.Assistant, nil); err != nil {
+			if err := commitRound(roundUser, round.Assistant, nil); err != nil {
 				summary := &Summary{Reason: StopStreamError, Iterations: iterations, Usage: total}
 				terminal(Event{Type: EventFailed, Iteration: iterations, Phase: PhaseFinishing, Summary: summary, Err: err})
 				return
 			}
 			if mode == ModePlan {
-				if err := r.session.SavePlan(text); err != nil {
+				displayUser := provider.Message{Role: provider.RoleUser, Blocks: []provider.ContentBlock{{Type: provider.BlockText, Text: prepared.displayPrompt}}}
+				if err := r.session.CommitPlan(displayUser, round.Assistant, text); err != nil {
+					summary := &Summary{Reason: StopStreamError, Iterations: iterations, Usage: total}
+					terminal(Event{Type: EventFailed, Iteration: iterations, Phase: PhaseFinishing, Summary: summary, Err: err})
+					return
+				}
+			}
+			if mode == ModeDo {
+				if err := r.session.ConsumePlans(prepared.plans); err != nil {
 					summary := &Summary{Reason: StopStreamError, Iterations: iterations, Usage: total}
 					terminal(Event{Type: EventFailed, Iteration: iterations, Phase: PhaseFinishing, Summary: summary, Err: err})
 					return
@@ -146,7 +170,7 @@ func (r *Runner) run(ctx context.Context, mode Mode, prepared preparedRequest, e
 			}
 			return
 		}
-		if err := r.session.CommitRound(roundUser, round.Assistant, results); err != nil {
+		if err := commitRound(roundUser, round.Assistant, results); err != nil {
 			summary := &Summary{Reason: StopStreamError, Iterations: iterations - 1, Usage: total}
 			terminal(Event{Type: EventFailed, Iteration: iterations, Phase: PhaseFinishing, Summary: summary, Err: err})
 			return

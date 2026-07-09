@@ -10,8 +10,10 @@ import (
 )
 
 type preparedRequest struct {
-	prompt   string
-	registry *tools.Registry
+	prompt        string
+	displayPrompt string
+	registry      *tools.Registry
+	plans         []string
 }
 
 func prepareRequest(req Request, session *conversation.Session, registry *tools.Registry) (preparedRequest, error) {
@@ -30,18 +32,24 @@ func prepareRequest(req Request, session *conversation.Session, registry *tools.
 			return preparedRequest{}, errors.New("plan task is empty")
 		}
 		return preparedRequest{
-			prompt:   "Explore the workspace using read-only tools only. Produce a concrete implementation plan; do not modify files or run commands.\n\nTask:\n" + prompt,
-			registry: registry.FilterBySafety(tools.SafetyReadOnly),
+			prompt:        "Explore the workspace using read-only tools only. Produce a concrete implementation plan; do not modify files or run commands.\n\nTask:\n" + prompt,
+			displayPrompt: "/plan " + prompt,
+			registry:      registry.FilterBySafety(tools.SafetyReadOnly),
 		}, nil
 	case ModeDo:
 		if prompt != "" {
 			return preparedRequest{}, errors.New("/do does not accept a prompt")
 		}
-		plan, ok := session.LatestPlan()
-		if !ok {
+		plans := session.PendingPlans()
+		if len(plans) == 0 {
 			return preparedRequest{}, errors.New("no valid plan is available; run /plan first")
 		}
-		return preparedRequest{prompt: fmt.Sprintf("Execute the following saved plan using the available tools.\n\nPlan:\n%s", plan), registry: registry}, nil
+		var body strings.Builder
+		body.WriteString("Execute all pending plans below using the available tools. Preserve every plan's intent. If plans overlap or conflict, inspect the current workspace and use your judgment to choose a coherent implementation; do not silently omit a plan.\n")
+		for i, plan := range plans {
+			fmt.Fprintf(&body, "\nPlan %d:\n%s\n", i+1, plan)
+		}
+		return preparedRequest{prompt: strings.TrimSpace(body.String()), registry: registry, plans: plans}, nil
 	default:
 		return preparedRequest{}, fmt.Errorf("invalid agent mode %q", req.Mode)
 	}

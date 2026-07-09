@@ -48,3 +48,20 @@ func TestViewAgentEventPartialUsage(t *testing.T) {
 		t.Fatalf("view=%q", view)
 	}
 }
+
+func TestDisplayHistoryShowsPlanWithoutModelHistory(t *testing.T) {
+	session := conversation.NewSession()
+	user := provider.Message{Role: provider.RoleUser, Blocks: []provider.ContentBlock{{Type: provider.BlockText, Text: "/plan create hello.txt"}}}
+	assistant := provider.Message{Role: provider.RoleAssistant, Blocks: []provider.ContentBlock{{Type: provider.BlockText, Text: "Create hello.txt with hello world"}}}
+	if err := session.CommitPlan(user, assistant, "Create hello.txt with hello world"); err != nil {
+		t.Fatal(err)
+	}
+	if len(session.Snapshot()) != 0 {
+		t.Fatal("plan leaked into model history")
+	}
+	m := NewModel(nil, session)
+	view := m.View().Content
+	if !strings.Contains(view, "/plan create hello.txt") || !strings.Contains(view, "Create hello.txt with hello world") {
+		t.Fatalf("view=%q", view)
+	}
+}

@@ -21,7 +21,7 @@ func (m *Model) refreshContent() {
 	wasBottom := m.viewport.AtBottom()
 	var b strings.Builder
 	if m.session != nil {
-		for _, message := range m.session.Snapshot() {
+		for _, message := range m.session.DisplaySnapshot() {
 			renderMessage(&b, message, false, m.thinkingExpanded)
 		}
 	}
@@ -119,7 +119,7 @@ func (m *Model) hasThinking() bool {
 	if m.session == nil {
 		return false
 	}
-	for _, message := range m.session.Snapshot() {
+	for _, message := range m.session.DisplaySnapshot() {
 		for _, block := range message.Blocks {
 			if block.Type == provider.BlockThinking && block.Text != "" {
 				return true

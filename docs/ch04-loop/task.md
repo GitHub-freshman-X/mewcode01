@@ -8,13 +8,15 @@
 | 新建 | `internal/agent/runner.go` | ReAct 循环、任务生命周期和停止策略 |
 | 新建 | `internal/agent/collector.go` | Provider 流双路收集 |
 | 新建 | `internal/agent/scheduler.go` | 工具安全分批和执行调度 |
-| 新建 | `internal/agent/mode.go` | Act、Plan、Do 请求构造 |
+| 新建 | `internal/agent/mode.go` | Act、Plan、Do 请求构造与多计划快照 |
+| 新建 | `internal/agent/history.go` | Plan Mode 单任务临时历史 |
 | 新建 | `internal/agent/runner_test.go` | 循环、停止条件和提交边界测试 |
 | 新建 | `internal/agent/collector_test.go` | 流分片、Usage、错误和取消测试 |
 | 新建 | `internal/agent/scheduler_test.go` | 并发、串行、顺序和取消测试 |
-| 新建 | `internal/agent/mode_test.go` | Plan/Do 模式测试 |
-| 新建 | `internal/conversation/session.go` | 线程安全历史和最近计划 |
-| 新建 | `internal/conversation/session_test.go` | Session 深拷贝、原子提交和计划测试 |
+| 新建 | `internal/agent/mode_test.go` | Plan/Do 模式与多计划提示测试 |
+| 新建 | `internal/agent/history_test.go` | 临时历史多轮提交与共享隔离测试 |
+| 新建 | `internal/conversation/session.go` | 模型历史、展示记录、轮次构造和有序待执行计划列表 |
+| 新建 | `internal/conversation/session_test.go` | 双历史隔离、原子提交、计划追加与消费测试 |
 | 修改 | `internal/provider/event.go` | 增加规范化 Token Usage |
 | 修改 | `internal/provider/anthropic/stream.go` | 合并 Anthropic 请求用量 |
 | 修改 | `internal/provider/anthropic/anthropic_test.go` | 增加 Anthropic Usage 测试 |
@@ -141,12 +143,14 @@
 
 **步骤：**
 
-1. 实现线程安全的历史快照和深拷贝。
-2. 实现 user、assistant、全部 tool result 的原子轮次提交，并校验调用标识对应关系。
-3. 实现非空计划保存与读取，确认失败保存不覆盖已有计划。
-4. 增加并发快照、外部修改隔离和完整轮次顺序测试。
+1. 将模型上下文历史与 TUI 展示记录拆成两个线程安全、可深拷贝的快照。
+2. 抽取 `BuildRound` 纯函数，校验 user、assistant、全部 tool result 的调用标识对应关系并返回克隆消息。
+3. 让普通 `CommitRound` 原子地把完整轮次写入模型历史和展示记录。
+4. 实现 `CommitPlan`：只把用户可见的原始规划请求与最终计划写入展示记录，并原子追加非空计划，模型历史保持不变。
+5. 保留按计划快照消费逻辑：只移除匹配前缀并保留并发追加的尾部计划。
+6. 增加双历史隔离、返回切片隔离、Plan 提交、计划消费和完整轮次顺序测试。
 
-**验证：** 运行 `go test ./internal/conversation -run Session`，期望 Session 测试通过且旧 Conversation 测试仍通过。
+**验证：** 运行 `go test ./internal/conversation -run 'BuildRound|Session.*History|Session.*Plan|SessionSnapshotIsolation'`，期望模型/展示历史隔离、轮次校验和计划原子提交通过。
 
 ## T8：定义 Agent 公共事件与请求类型
 
@@ -173,10 +177,11 @@
 
 1. 普通模式保留用户任务原文并使用完整 Registry。
 2. Plan Mode 包装只读探索和最终计划指令，并使用只读 Registry。
-3. Do Mode 从 Session 读取最近计划并构造执行指令；无计划或额外 Prompt 时返回验证错误。
-4. 测试三种模式的消息内容和工具声明范围。
+3. Do Mode 从 Session 读取全部待执行计划，保存本次快照，并按追加顺序编号构造包含全部计划原文的执行指令。
+4. 无计划或额外 Prompt 时返回验证错误；计划之间存在重复或冲突时不得在系统层过滤、覆盖或合并。
+5. 测试三种模式的消息内容、工具声明范围、多计划顺序与冲突计划完整保留。
 
-**验证：** 运行 `go test ./internal/agent -run Mode`，期望 Act/Plan/Do 请求与工具范围符合设计。
+**验证：** 运行 `go test ./internal/agent -run 'Mode|DoPromptContainsAllPlans'`，期望 Act/Plan/Do 请求、工具范围和多计划提示符合设计。
 
 ## T10：实现文本与 Usage 双路收集
 
@@ -328,18 +333,21 @@
 
 ## T20：完成 Plan/Do 两阶段循环
 
-**文件：** `internal/agent/mode.go`、`internal/agent/runner.go`、`internal/agent/mode_test.go`、`internal/agent/runner_test.go`
+**文件：** `internal/agent/history.go`、`internal/agent/history_test.go`、`internal/agent/mode.go`、`internal/agent/runner.go`、`internal/agent/mode_test.go`、`internal/agent/runner_test.go`
 
 **依赖：** T18、T19
 
 **步骤：**
 
-1. Plan Mode 同时使用只读 Definitions、只读 Scheduler Registry 和规划指令。
-2. 仅在 `StopFinalAnswer` 时拼接最终文本并 SavePlan。
-3. Do Mode 携带最近计划并恢复完整 Registry。
-4. 测试隐藏写工具不能执行、失败规划不覆盖旧计划、无计划 `/do` 不调用 Provider。
+1. 实现 `taskHistory`，以 Session 模型历史快照为基线，通过 `BuildRound` 在单次 Plan 任务内追加完整多轮上下文。
+2. Plan Mode 同时使用只读 Definitions、只读 Scheduler Registry、规划指令和 `taskHistory`；所有规划轮次禁止调用 Session `CommitRound`。
+3. 仅在 `StopFinalAnswer` 时拼接最终文本并调用 `CommitPlan`，连续成功规划按完成顺序累积；其他终态不改变 Session。
+4. Do Mode 携带全部待执行计划快照并恢复完整 Registry；计划冲突原样交给模型判断，Provider 请求不得包含规划内部历史。
+5. 仅在 Do Mode 以 `StopFinalAnswer` 正常完成后调用 ConsumePlans；取消、流失败、迭代上限或未知工具停止均保留原列表。
+6. 测试 Plan 多轮临时历史连续、共享模型历史不变、最终计划可展示、`/do` 无只读提示、完整工具恢复及原有计划生命周期。
+7. 使用脚本化 Provider 回归“规划创建 `hello.txt` → 规划把 world 改为 changan → `/do` 调用写入与编辑工具”，断言最终文件为 `hello changan`。
 
-**验证：** 运行 `go test ./internal/agent -run 'Plan|Do'`，期望只读隔离、计划保存和执行恢复全部通过。
+**验证：** 运行 `go test ./internal/agent -run 'Plan|Do|TaskHistory'`，期望临时历史、共享隔离、计划追加、完整提交、成功消费和失败保留全部通过。
 
 ## T21：增加 Agent 配置
 
@@ -364,7 +372,7 @@
 
 **步骤：**
 
-1. 用 Runner、Session 和当前 Task 替换旧 Conversation 与 Provider 流字段。
+1. 用 Runner、Session 和当前 Task 替换旧 Conversation 与 Provider 流字段，并从 Session `DisplaySnapshot` 读取已完成展示记录。
 2. 定义 TUI 当前任务的临时文本、工具状态、Usage、进度和终态记录。
 3. 将 wait command 改为读取 `agent.Event`，通道关闭后返回明确消息。
 4. 更新构造函数与基础模型测试。
@@ -409,12 +417,12 @@
 
 **步骤：**
 
-1. 从 Session 渲染完整历史，从临时状态渲染当前或失败任务。
+1. 从 Session `DisplaySnapshot` 渲染完整可见记录，从临时状态渲染当前或失败任务；不得使用模型上下文 `Snapshot`。
 2. 展示轮次、阶段、工具执行中/成功/失败和累计输入/输出 Token。
 3. 对取消或失败文本标记“部分输出”，但不把它伪装为已提交历史。
 4. 保持 Thinking 折叠、自动滚动和现有状态文本行为。
 
-**验证：** 运行 `go test ./internal/tui -run 'View|Partial|Usage'`，期望关键状态文本和回归快照通过。
+**验证：** 运行 `go test ./internal/tui -run 'View|Partial|Usage|DisplayHistory'`，期望 Plan 最终结果持续可见且模型历史隔离不影响界面。
 
 ## T26：更新启动组装
 
@@ -455,9 +463,9 @@
 **步骤：**
 
 1. 在 README 说明普通输入会自动循环及各停止条件。
-2. 说明 `/plan <任务>`、`/do` 的用法、只读边界和进程内计划限制。
+2. 说明 `/plan <任务>` 采用追加语义，`/do` 执行全部待执行计划，冲突交由模型判断，且仅成功执行后消费计划。
 3. 在 `docs/README.md` 增加 `ch04` 的 Spec、Plan、Tasks、Checklist 链接。
-4. 核对文档命令、默认值和最终实现一致。
+4. 说明 Plan 内部只读历史与 `/do` 执行历史隔离，核对命令、默认值、多计划生命周期和最终实现一致。
 
 **验证：** 运行 `rg -n 'Agent Loop|/plan|/do|max_iterations|ch04' README.md docs/README.md config.example.yaml`，期望所有用户入口和章节链接均可找到。
 
