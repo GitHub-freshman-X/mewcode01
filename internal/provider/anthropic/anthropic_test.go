@@ -60,3 +60,48 @@ func TestErrorsSafeAndTruncated(t *testing.T) {
 		}
 	}
 }
+
+func TestBuildRequestPromptSystemAndCache(t *testing.T) {
+	body, err := buildRequest("claude", provider.ChatRequest{
+		Prompt: provider.PromptBundle{
+			StableSystem: "stable system",
+			DynamicSystem: []provider.SystemMessage{
+				{Tag: "mew.environment", Content: "Workspace: /tmp/project"},
+			},
+			CachePolicy: provider.CachePolicy{Enable: true, StableSystem: true, StableTools: true},
+		},
+		Messages: []provider.Message{{Role: provider.RoleUser, Blocks: []provider.ContentBlock{{Type: provider.BlockText, Text: "user task"}}}},
+		Tools:    []provider.ToolDefinition{{Name: "read_file", Description: "Read", Schema: map[string]any{"type": "object"}, Cacheable: true}},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(body.System) != 2 {
+		t.Fatalf("system count=%d body=%+v", len(body.System), body)
+	}
+	if body.System[0].Text != "stable system" || body.System[0].CacheControl == nil {
+		t.Fatalf("stable system missing cache control: %+v", body.System)
+	}
+	if body.System[1].CacheControl != nil || !strings.Contains(body.System[1].Text, `tag="mew.environment"`) {
+		t.Fatalf("dynamic system should not be cacheable: %+v", body.System[1])
+	}
+	if len(body.Tools) != 1 || body.Tools[0].CacheControl == nil {
+		t.Fatalf("stable tool missing cache control: %+v", body.Tools)
+	}
+	if len(body.Messages) != 1 || body.Messages[0].Content[0].Text != "user task" {
+		t.Fatalf("messages wrong: %+v", body.Messages)
+	}
+}
+
+func TestParseAnthropicCacheUsage(t *testing.T) {
+	event, emit, err := parseEvent([]byte(`{"type":"message_start","message":{"usage":{"input_tokens":7,"cache_creation_input_tokens":3,"cache_read_input_tokens":5,"cache_creation":{"ephemeral_5m_input_tokens":11,"ephemeral_1h_input_tokens":13}}}}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !emit || event.Usage == nil {
+		t.Fatalf("event=%+v emit=%v", event, emit)
+	}
+	if event.Usage.InputTokens != 7 || event.Usage.CacheReadInputTokens != 5 || event.Usage.CacheCreationInputTokens != 27 {
+		t.Fatalf("usage=%+v", event.Usage)
+	}
+}

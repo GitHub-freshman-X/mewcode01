@@ -7,6 +7,7 @@ import (
 	"sync"
 
 	"github.com/GitHub-freshman-X/mewcode01/internal/conversation"
+	"github.com/GitHub-freshman-X/mewcode01/internal/prompt"
 	"github.com/GitHub-freshman-X/mewcode01/internal/provider"
 	"github.com/GitHub-freshman-X/mewcode01/internal/tools"
 )
@@ -93,10 +94,30 @@ func (r *Runner) run(ctx context.Context, mode Mode, prepared preparedRequest, e
 			messages = append(messages, provider.CloneMessage(user))
 			roundUser = &user
 		}
+		promptMode := toPromptMode(mode)
+		environment, err := prompt.CollectEnvironment(promptMode, prepared.registry, r.options.Workspace, r.options.Clock)
+		if err != nil {
+			summary := &Summary{Reason: StopStreamError, Iterations: iterations - 1, Usage: total, Partial: hasPartial}
+			terminal(Event{Type: EventFailed, Iteration: iterations, Phase: PhaseFinishing, Summary: summary, Err: err})
+			return
+		}
+		bundle, _, err := prompt.BuildBundle(prompt.BuildContext{
+			Environment:     environment,
+			Mode:            promptMode,
+			Iteration:       iterations,
+			InjectionPolicy: r.options.Injection,
+		})
+		if err != nil {
+			summary := &Summary{Reason: StopStreamError, Iterations: iterations - 1, Usage: total, Partial: hasPartial}
+			terminal(Event{Type: EventFailed, Iteration: iterations, Phase: PhaseFinishing, Summary: summary, Err: err})
+			return
+		}
+		definitions := prompt.EnhanceDefinitions(prepared.registry.Definitions(), promptMode)
 		roundCtx, cancelRound := context.WithCancel(ctx)
 		stream, done := r.provider.Stream(roundCtx, provider.ChatRequest{
+			Prompt:   bundle,
 			Messages: messages, MaxTokens: r.options.MaxTokens, Thinking: r.options.Thinking,
-			Tools: prepared.registry.Definitions(),
+			Tools: definitions,
 		})
 		if !emit(Event{Type: EventProgress, Iteration: iterations, Phase: PhaseStreaming}) {
 			cancelRound()

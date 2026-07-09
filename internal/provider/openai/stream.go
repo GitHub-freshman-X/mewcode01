@@ -34,8 +34,11 @@ type streamEnvelope struct {
 			Reason string `json:"reason"`
 		} `json:"incomplete_details"`
 		Usage *struct {
-			InputTokens  int `json:"input_tokens"`
-			OutputTokens int `json:"output_tokens"`
+			InputTokens        int `json:"input_tokens"`
+			OutputTokens       int `json:"output_tokens"`
+			InputTokensDetails struct {
+				CachedTokens int `json:"cached_tokens"`
+			} `json:"input_tokens_details"`
 		} `json:"usage"`
 	} `json:"response"`
 }
@@ -104,7 +107,11 @@ func parseEvent(data []byte) (provider.StreamEvent, bool, error) {
 	case "response.completed":
 		event := provider.StreamEvent{Type: provider.EventCompleted}
 		if e.Response.Usage != nil {
-			event.Usage = &provider.Usage{InputTokens: e.Response.Usage.InputTokens, OutputTokens: e.Response.Usage.OutputTokens}
+			event.Usage = &provider.Usage{
+				InputTokens:          e.Response.Usage.InputTokens,
+				OutputTokens:         e.Response.Usage.OutputTokens,
+				CacheReadInputTokens: e.Response.Usage.InputTokensDetails.CachedTokens,
+			}
 		}
 		return event, true, nil
 	case "response.failed", "response.incomplete", "error":

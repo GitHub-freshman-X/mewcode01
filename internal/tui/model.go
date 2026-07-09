@@ -41,6 +41,7 @@ func NewModel(runner *agent.Runner, session *conversation.Session) *Model {
 	input.Placeholder = "输入消息，按 Enter 发送"
 	input.Prompt = "> "
 	input.ShowLineNumbers = false
+	input.SetStyles(inputStyles())
 	input.SetHeight(3)
 	input.SetWidth(80)
 	input.Focus()
