@@ -79,6 +79,39 @@ func TestSafetyAndFilterBySafety(t *testing.T) {
 	}
 }
 
+func TestCoreToolsDeclarePermissionMetadata(t *testing.T) {
+	registry, err := NewDefaultRegistry(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	tests := map[string]struct {
+		target PermissionTarget
+		paths  []string
+	}{
+		"read_file":   {target: PermissionTargetPath, paths: []string{"path"}},
+		"write_file":  {target: PermissionTargetPath, paths: []string{"path"}},
+		"edit_file":   {target: PermissionTargetPath, paths: []string{"path"}},
+		"run_command": {target: PermissionTargetCommand},
+		"find_files":  {target: PermissionTargetPattern},
+		"search_code": {target: PermissionTargetPattern},
+	}
+	for name, want := range tests {
+		t.Run(name, func(t *testing.T) {
+			tool, ok := registry.Get(name)
+			if !ok {
+				t.Fatalf("missing tool %s", name)
+			}
+			got := tool.Metadata().Permission
+			if got.Target != want.target {
+				t.Fatalf("target=%q want %q", got.Target, want.target)
+			}
+			if strings.Join(got.PathParams, ",") != strings.Join(want.paths, ",") {
+				t.Fatalf("path params=%v want %v", got.PathParams, want.paths)
+			}
+		})
+	}
+}
+
 func TestToolValidationAndWorkspaceBoundaries(t *testing.T) {
 	root := t.TempDir()
 	registry, err := NewDefaultRegistry(root)

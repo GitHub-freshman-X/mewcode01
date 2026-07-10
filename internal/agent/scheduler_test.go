@@ -7,6 +7,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/GitHub-freshman-X/mewcode01/internal/permissions"
 	"github.com/GitHub-freshman-X/mewcode01/internal/provider"
 	"github.com/GitHub-freshman-X/mewcode01/internal/tools"
 )
@@ -56,7 +57,7 @@ func TestSchedulerReadOnlyConcurrentAndResultOrder(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	s := NewScheduler(registry, tools.NewExecutor(time.Second))
+	s := NewScheduler(registry, tools.NewExecutor(time.Second), nil, nil)
 	done := make(chan []provider.ToolResult, 1)
 	go func() {
 		results, _ := s.Execute(context.Background(), []provider.ToolCall{{ID: "1", Name: "r1", Arguments: []byte(`{}`)}, {ID: "2", Name: "r2", Arguments: []byte(`{}`)}}, func(Event) bool { return true })
@@ -86,7 +87,7 @@ func TestSchedulerSideEffectsSerial(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	s := NewScheduler(registry, tools.NewExecutor(time.Second))
+	s := NewScheduler(registry, tools.NewExecutor(time.Second), nil, nil)
 	done := make(chan struct{})
 	go func() {
 		_, _ = s.Execute(context.Background(), []provider.ToolCall{{ID: "1", Name: "w1", Arguments: []byte(`{}`)}, {ID: "2", Name: "w2", Arguments: []byte(`{}`)}}, func(Event) bool { return true })
@@ -116,7 +117,7 @@ func TestSchedulerBatchBarriers(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	s := NewScheduler(registry, tools.NewExecutor(time.Second))
+	s := NewScheduler(registry, tools.NewExecutor(time.Second), nil, nil)
 	batches := s.batches([]provider.ToolCall{{Name: "r1"}, {Name: "r2"}, {Name: "w"}, {Name: "r3"}, {Name: "cmd"}})
 	if len(batches) != 4 || len(batches[0].calls) != 2 || batches[1].concurrent || !batches[2].concurrent || batches[3].concurrent {
 		t.Fatalf("batches=%+v", batches)
@@ -128,10 +129,170 @@ func TestSchedulerUnclassifiedTool(t *testing.T) {
 	if err := registry.Register(&blockingTool{name: "unknown_class", started: make(chan string, 1), release: closedSignal()}); err != nil {
 		t.Fatal(err)
 	}
-	batches := NewScheduler(registry, tools.NewExecutor(time.Second)).batches([]provider.ToolCall{{Name: "unknown_class"}})
+	batches := NewScheduler(registry, tools.NewExecutor(time.Second), nil, nil).batches([]provider.ToolCall{{Name: "unknown_class"}})
 	if len(batches) != 1 || batches[0].concurrent {
 		t.Fatalf("batches=%+v", batches)
 	}
+}
+
+func TestPermissionOptionsAndEventsCompile(t *testing.T) {
+	var bridge PermissionBridge = permissionBridgeFunc(func(context.Context, permissions.Decision) (permissions.Confirmation, error) {
+		return permissions.Confirmation{Choice: permissions.ChoiceDeny}, nil
+	})
+	opts := Options{Permissions: &permissions.Engine{}, Confirmer: bridge}
+	if opts.Permissions == nil || opts.Confirmer == nil {
+		t.Fatalf("permission options were not retained: %#v", opts)
+	}
+	decision := permissions.Decision{Action: permissions.ActionAsk, Stage: permissions.StageMode}
+	event := Event{Type: EventPermissionRequest, PermissionDecision: &decision}
+	if event.Type != EventPermissionRequest || event.PermissionDecision.Action != permissions.ActionAsk {
+		t.Fatalf("unexpected permission event: %#v", event)
+	}
+	scheduler := NewScheduler(tools.NewRegistry(), tools.NewExecutor(time.Second), nil, nil)
+	if scheduler == nil {
+		t.Fatal("nil permission scheduler was not created")
+	}
+}
+
+type countingTool struct {
+	name   string
+	safety tools.Safety
+	count  *atomic.Int32
+}
+
+func (t countingTool) Metadata() tools.Metadata {
+	return tools.Metadata{
+		Name:        t.name,
+		Description: "counting tool",
+		Safety:      t.safety,
+		Schema:      tools.Schema{"type": "object"},
+		Permission:  tools.PermissionMetadata{Target: tools.PermissionTargetNone},
+	}
+}
+
+func (t countingTool) Execute(context.Context, json.RawMessage) tools.Result {
+	t.count.Add(1)
+	return tools.Success(t.name, map[string]any{"ok": true})
+}
+
+func TestSchedulerPermissionDenyDoesNotExecute(t *testing.T) {
+	registry := tools.NewRegistry()
+	var executed atomic.Int32
+	if err := registry.Register(countingTool{name: "write", safety: tools.SafetySideEffect, count: &executed}); err != nil {
+		t.Fatal(err)
+	}
+	gate := &permissions.Engine{Mode: permissions.ModeRelaxed, Rules: permissions.NewRuleStore(permissions.RuleSet{
+		Session: []permissions.Rule{mustAgentRule(t, "write(*)", permissions.EffectDeny, permissions.ScopeSession)},
+	}), Sandbox: mustSandbox(t)}
+	s := NewScheduler(registry, tools.NewExecutor(time.Second), gate, nil)
+	results, err := s.Execute(context.Background(), []provider.ToolCall{{ID: "1", Name: "write", Arguments: []byte(`{}`)}}, func(Event) bool { return true })
+	if err != nil {
+		t.Fatalf("Execute returned error: %v", err)
+	}
+	if executed.Load() != 0 || len(results) != 1 || !results[0].IsError {
+		t.Fatalf("executed=%d results=%+v", executed.Load(), results)
+	}
+}
+
+func TestSchedulerPermissionAskChoices(t *testing.T) {
+	tests := []struct {
+		name       string
+		choice     permissions.Choice
+		wantExec   int32
+		wantErr    bool
+		wantCancel bool
+	}{
+		{name: "allow once", choice: permissions.ChoiceAllowOnce, wantExec: 1},
+		{name: "allow session", choice: permissions.ChoiceAllowSession, wantExec: 1},
+		{name: "deny", choice: permissions.ChoiceDeny, wantExec: 0, wantErr: true},
+		{name: "cancel", choice: permissions.ChoiceCancel, wantExec: 0, wantCancel: true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			registry := tools.NewRegistry()
+			var executed atomic.Int32
+			if err := registry.Register(countingTool{name: "write", safety: tools.SafetySideEffect, count: &executed}); err != nil {
+				t.Fatal(err)
+			}
+			gate := &permissions.Engine{Mode: permissions.ModeStrict, Rules: permissions.NewRuleStore(permissions.RuleSet{}), Sandbox: mustSandbox(t)}
+			confirmer := permissionBridgeFunc(func(context.Context, permissions.Decision) (permissions.Confirmation, error) {
+				return permissions.Confirmation{Choice: tt.choice}, nil
+			})
+			s := NewScheduler(registry, tools.NewExecutor(time.Second), gate, confirmer)
+			results, err := s.Execute(context.Background(), []provider.ToolCall{{ID: "1", Name: "write", Arguments: []byte(`{}`)}}, func(Event) bool { return true })
+			if tt.wantCancel {
+				if err == nil {
+					t.Fatal("expected cancel error")
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("Execute returned error: %v", err)
+			}
+			if executed.Load() != tt.wantExec {
+				t.Fatalf("executed=%d want %d", executed.Load(), tt.wantExec)
+			}
+			if len(results) != 1 || results[0].IsError != tt.wantErr {
+				t.Fatalf("results=%+v wantErr=%v", results, tt.wantErr)
+			}
+		})
+	}
+}
+
+func TestSchedulerPermissionMultiToolOrder(t *testing.T) {
+	registry := tools.NewRegistry()
+	var read1, write, read2 atomic.Int32
+	for _, tool := range []countingTool{
+		{name: "read1", safety: tools.SafetyReadOnly, count: &read1},
+		{name: "write", safety: tools.SafetySideEffect, count: &write},
+		{name: "read2", safety: tools.SafetyReadOnly, count: &read2},
+	} {
+		if err := registry.Register(tool); err != nil {
+			t.Fatal(err)
+		}
+	}
+	gate := &permissions.Engine{Mode: permissions.ModeRelaxed, Rules: permissions.NewRuleStore(permissions.RuleSet{
+		Session: []permissions.Rule{mustAgentRule(t, "write(*)", permissions.EffectDeny, permissions.ScopeSession)},
+	}), Sandbox: mustSandbox(t)}
+	s := NewScheduler(registry, tools.NewExecutor(time.Second), gate, nil)
+	results, err := s.Execute(context.Background(), []provider.ToolCall{
+		{ID: "1", Name: "read1", Arguments: []byte(`{}`)},
+		{ID: "2", Name: "write", Arguments: []byte(`{}`)},
+		{ID: "3", Name: "read2", Arguments: []byte(`{}`)},
+	}, func(Event) bool { return true })
+	if err != nil {
+		t.Fatalf("Execute returned error: %v", err)
+	}
+	if read1.Load() != 1 || write.Load() != 0 || read2.Load() != 1 {
+		t.Fatalf("executions read1=%d write=%d read2=%d", read1.Load(), write.Load(), read2.Load())
+	}
+	if len(results) != 3 || results[0].CallID != "1" || results[1].CallID != "2" || results[2].CallID != "3" || !results[1].IsError {
+		t.Fatalf("unexpected results order: %+v", results)
+	}
+}
+
+func mustAgentRule(t *testing.T, key string, effect permissions.Effect, scope permissions.Scope) permissions.Rule {
+	t.Helper()
+	rule, err := permissions.ParseRule(key, effect, scope, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return rule
+}
+
+func mustSandbox(t *testing.T) permissions.Sandbox {
+	t.Helper()
+	sandbox, err := permissions.NewSandbox(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	return sandbox
+}
+
+type permissionBridgeFunc func(context.Context, permissions.Decision) (permissions.Confirmation, error)
+
+func (f permissionBridgeFunc) Confirm(ctx context.Context, decision permissions.Decision) (permissions.Confirmation, error) {
+	return f(ctx, decision)
 }
 
 func closedSignal() <-chan struct{} { ch := make(chan struct{}); close(ch); return ch }

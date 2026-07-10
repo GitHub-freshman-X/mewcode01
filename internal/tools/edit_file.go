@@ -15,6 +15,7 @@ func (t *EditFileTool) Metadata() Metadata {
 		Name:        "edit_file",
 		Description: "Replace one exact text occurrence in a workspace file.",
 		Safety:      SafetySideEffect,
+		Permission:  PermissionMetadata{Target: PermissionTargetPath, PathParams: []string{"path"}},
 		Schema: Schema{"type": "object", "required": []any{"path", "old_text", "new_text"}, "properties": map[string]any{
 			"path":     map[string]any{"type": "string"},
 			"old_text": map[string]any{"type": "string"},

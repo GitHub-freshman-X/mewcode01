@@ -177,7 +177,7 @@ func (r *Runner) run(ctx context.Context, mode Mode, prepared preparedRequest, e
 			terminal(cancelledEvent(iterations-1, total, hasPartial))
 			return
 		}
-		scheduler := NewScheduler(prepared.registry, r.executor)
+		scheduler := NewScheduler(prepared.registry, r.executor, r.options.Permissions, r.options.Confirmer)
 		results, err := scheduler.Execute(ctx, round.ToolCalls, func(event Event) bool {
 			event.Iteration = iterations
 			return emit(event)

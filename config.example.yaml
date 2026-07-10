@@ -9,6 +9,8 @@ thinking:
   budget_tokens: 2048
 agent:
   max_iterations: 20
+permissions:
+  mode: default
 
 # For OpenAI Responses API, remove the thinking section and use values like:
 # protocol: openai

@@ -4,6 +4,7 @@ import (
 	"context"
 	"os"
 
+	"github.com/GitHub-freshman-X/mewcode01/internal/permissions"
 	"github.com/GitHub-freshman-X/mewcode01/internal/prompt"
 	"github.com/GitHub-freshman-X/mewcode01/internal/provider"
 )
@@ -33,6 +34,12 @@ type Options struct {
 	Workspace     string
 	Clock         prompt.Clock
 	Injection     prompt.InjectionPolicy
+	Permissions   *permissions.Engine
+	Confirmer     PermissionBridge
+}
+
+type PermissionBridge interface {
+	Confirm(context.Context, permissions.Decision) (permissions.Confirmation, error)
 }
 
 func (o Options) normalized() Options {
@@ -57,15 +64,18 @@ func (o Options) normalized() Options {
 type EventType string
 
 const (
-	EventProgress   EventType = "progress"
-	EventTextDelta  EventType = "text_delta"
-	EventToolCall   EventType = "tool_call"
-	EventToolResult EventType = "tool_result"
-	EventUsage      EventType = "usage"
-	EventCompleted  EventType = "completed"
-	EventStopped    EventType = "stopped"
-	EventCancelled  EventType = "cancelled"
-	EventFailed     EventType = "failed"
+	EventProgress           EventType = "progress"
+	EventTextDelta          EventType = "text_delta"
+	EventToolCall           EventType = "tool_call"
+	EventToolResult         EventType = "tool_result"
+	EventPermissionDecision EventType = "permission_decision"
+	EventPermissionRequest  EventType = "permission_request"
+	EventPermissionResponse EventType = "permission_response"
+	EventUsage              EventType = "usage"
+	EventCompleted          EventType = "completed"
+	EventStopped            EventType = "stopped"
+	EventCancelled          EventType = "cancelled"
+	EventFailed             EventType = "failed"
 )
 
 type Phase string
@@ -95,15 +105,17 @@ type Summary struct {
 }
 
 type Event struct {
-	Type       EventType
-	Iteration  int
-	Phase      Phase
-	Text       string
-	ToolCall   *provider.ToolCall
-	ToolResult *provider.ToolResult
-	Usage      *provider.Usage
-	Summary    *Summary
-	Err        error
+	Type                   EventType
+	Iteration              int
+	Phase                  Phase
+	Text                   string
+	ToolCall               *provider.ToolCall
+	ToolResult             *provider.ToolResult
+	PermissionDecision     *permissions.Decision
+	PermissionConfirmation *permissions.Confirmation
+	Usage                  *provider.Usage
+	Summary                *Summary
+	Err                    error
 }
 
 type Task struct {

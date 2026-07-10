@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/GitHub-freshman-X/mewcode01/internal/conversation"
+	"github.com/GitHub-freshman-X/mewcode01/internal/permissions"
 	"github.com/GitHub-freshman-X/mewcode01/internal/provider"
 	"github.com/GitHub-freshman-X/mewcode01/internal/tools"
 )
@@ -134,6 +135,55 @@ func TestRunnerToolLoop(t *testing.T) {
 	}
 	if got := len(p.requests[1].Messages); got != 3 {
 		t.Fatalf("second request messages=%d", got)
+	}
+}
+
+func TestRunnerPermissionDeniedContinues(t *testing.T) {
+	p := &scriptedProvider{rounds: []scriptedRound{
+		toolRound(provider.ToolCall{ID: "w1", Name: "write_file", Arguments: []byte(`{"path":"x.txt","content":"no"}`)}),
+		textRound("adjusted", provider.Usage{}),
+	}}
+	root := t.TempDir()
+	registry, err := tools.NewDefaultRegistry(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	sandbox, err := permissions.NewSandbox(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	rule, err := permissions.ParseRule("write_file(x.txt)", permissions.EffectDeny, permissions.ScopeSession, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	session := conversation.NewSession()
+	runner := NewRunner(p, session, registry, tools.NewExecutor(time.Second), Options{
+		Workspace:   root,
+		Permissions: &permissions.Engine{Mode: permissions.ModeRelaxed, Rules: permissions.NewRuleStore(permissions.RuleSet{Session: []permissions.Rule{rule}}), Sandbox: sandbox},
+	})
+	task, err := runner.Start(context.Background(), Request{Mode: ModeAct, Prompt: "work"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	events := drainTask(t, task)
+	if terminal := events[len(events)-1]; terminal.Type != EventCompleted {
+		t.Fatalf("terminal=%+v", terminal)
+	}
+	if len(p.requests) != 2 {
+		t.Fatalf("requests=%d", len(p.requests))
+	}
+	messages := p.requests[1].Messages
+	found := false
+	for _, block := range messages[len(messages)-1].Blocks {
+		if block.ToolResult != nil && block.ToolResult.IsError && strings.Contains(block.ToolResult.Content, string(tools.ErrorPermission)) {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatalf("permission failure not written back: %+v", messages[len(messages)-1])
+	}
+	if _, err := os.Stat(filepath.Join(root, "x.txt")); !os.IsNotExist(err) {
+		t.Fatalf("denied write touched file, stat err=%v", err)
 	}
 }
 

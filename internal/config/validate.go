@@ -29,6 +29,11 @@ func Validate(cfg Config) error {
 	if cfg.Agent.MaxIterations < 0 {
 		return fmt.Errorf("config: field %q must not be negative", "agent.max_iterations")
 	}
+	switch cfg.Permissions.Mode {
+	case "", PermissionModeStrict, PermissionModeDefault, PermissionModeRelaxed:
+	default:
+		return fmt.Errorf("config: field %q must be strict, default, or relaxed", "permissions.mode")
+	}
 	if cfg.Protocol == ProtocolOpenAI && (cfg.Thinking.Enabled || cfg.Thinking.BudgetTokens != 0) {
 		return fmt.Errorf("config: field %q is only supported by anthropic", "thinking")
 	}

@@ -15,6 +15,7 @@ type Metadata struct {
 	Description string
 	Schema      Schema
 	Safety      Safety
+	Permission  PermissionMetadata
 }
 
 type Safety string
@@ -32,6 +33,20 @@ func NormalizeSafety(safety Safety) Safety {
 }
 
 type Schema map[string]any
+
+type PermissionTarget string
+
+const (
+	PermissionTargetNone    PermissionTarget = "none"
+	PermissionTargetPath    PermissionTarget = "path"
+	PermissionTargetCommand PermissionTarget = "command"
+	PermissionTargetPattern PermissionTarget = "pattern"
+)
+
+type PermissionMetadata struct {
+	Target     PermissionTarget
+	PathParams []string
+}
 
 type Result struct {
 	ToolName string         `json:"tool_name"`

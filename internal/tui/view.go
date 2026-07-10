@@ -50,6 +50,17 @@ func (m *Model) refreshContent() {
 			fmt.Fprintf(&b, "%s\n\n", errorStyle.Render("错误: "+provider.UserError(m.current.err)))
 		}
 	}
+	if m.pendingPermission != nil {
+		decision := m.pendingPermission.decision
+		fmt.Fprintf(&b, "权限确认: %s\n", decision.Request.Tool)
+		if decision.Request.MatchTarget != "" {
+			fmt.Fprintf(&b, "对象: %s\n", decision.Request.MatchTarget)
+		}
+		if decision.Reason != "" {
+			fmt.Fprintf(&b, "原因: %s\n", decision.Reason)
+		}
+		fmt.Fprintln(&b, "操作: o 本次允许 · s 本会话允许 · p 永久允许 · d 拒绝 · Ctrl+C 取消")
+	}
 	m.viewport.SetContent(strings.TrimRight(b.String(), "\n"))
 	if m.autoFollow || wasBottom {
 		m.viewport.GotoBottom()
@@ -103,6 +114,9 @@ func renderMessage(b *strings.Builder, message provider.Message, active, expande
 }
 
 func (m *Model) statusText() string {
+	if m.pendingPermission != nil {
+		return "permission · 等待确认 · o/s/p 允许 · d 拒绝 · Ctrl+C 取消"
+	}
 	if m.task != nil {
 		return fmt.Sprintf("iteration %d · %s · tokens in:%d out:%d · Ctrl+C 取消", m.current.iteration, m.current.phase, m.current.usage.InputTokens, m.current.usage.OutputTokens)
 	}

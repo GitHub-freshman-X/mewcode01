@@ -5,10 +5,15 @@ import (
 
 	tea "charm.land/bubbletea/v2"
 	"github.com/GitHub-freshman-X/mewcode01/internal/agent"
+	"github.com/GitHub-freshman-X/mewcode01/internal/permissions"
 )
 
 func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
+	case permissionRequestMsg:
+		m.pendingPermission = &pendingPermission{decision: msg.decision, reply: msg.reply}
+		m.refreshContent()
+		return m, nil
 	case tea.WindowSizeMsg:
 		m.width, m.height = max(1, msg.Width), max(1, msg.Height)
 		m.textarea.SetWidth(m.width)
@@ -19,6 +24,9 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, nil
 	case tea.KeyPressMsg:
 		key := msg.String()
+		if m.pendingPermission != nil {
+			return m, m.handlePermissionKey(key)
+		}
 		if key == keyCancelOrQuit {
 			if m.task != nil {
 				m.task.Cancel()
@@ -81,6 +89,44 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	}
 	m.textarea, cmd = m.textarea.Update(msg)
 	return m, cmd
+}
+
+func (m *Model) handlePermissionKey(key string) tea.Cmd {
+	choice, ok := permissionChoiceForKey(key)
+	if !ok {
+		return nil
+	}
+	pending := m.pendingPermission
+	m.pendingPermission = nil
+	if pending != nil {
+		pending.reply <- choice
+	}
+	m.refreshContent()
+	if choice == permissions.ChoiceCancel && m.task != nil {
+		m.task.Cancel()
+		return waitForAgent(m.task.Events)
+	}
+	if m.permissionBridge != nil {
+		return waitForPermission(m.permissionBridge)
+	}
+	return nil
+}
+
+func permissionChoiceForKey(key string) (permissions.Choice, bool) {
+	switch key {
+	case "o":
+		return permissions.ChoiceAllowOnce, true
+	case "s":
+		return permissions.ChoiceAllowSession, true
+	case "p":
+		return permissions.ChoiceAllowPermanent, true
+	case "d":
+		return permissions.ChoiceDeny, true
+	case keyCancelOrQuit:
+		return permissions.ChoiceCancel, true
+	default:
+		return "", false
+	}
 }
 
 func parseRequest(input string) (agent.Request, error) {

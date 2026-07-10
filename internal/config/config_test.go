@@ -28,6 +28,23 @@ func TestLoadAndDefaults(t *testing.T) {
 			if cfg.Agent.MaxIterations != DefaultMaxIterations {
 				t.Fatalf("max_iterations=%d", cfg.Agent.MaxIterations)
 			}
+			if cfg.Permissions.Mode != PermissionModeDefault {
+				t.Fatalf("permissions.mode=%q", cfg.Permissions.Mode)
+			}
+		})
+	}
+}
+
+func TestPermissionModeConfig(t *testing.T) {
+	for _, mode := range []PermissionMode{PermissionModeStrict, PermissionModeDefault, PermissionModeRelaxed} {
+		t.Run(string(mode), func(t *testing.T) {
+			cfg, err := Load(writeConfig(t, "protocol: openai\nmodel: test\nbase_url: http://localhost\napi_key: fake\npermissions:\n  mode: "+string(mode)+"\n"))
+			if err != nil {
+				t.Fatal(err)
+			}
+			if cfg.Permissions.Mode != mode {
+				t.Fatalf("mode=%q want %q", cfg.Permissions.Mode, mode)
+			}
 		})
 	}
 }
@@ -42,6 +59,7 @@ func TestInvalidConfig(t *testing.T) {
 		"bad url":         "protocol: openai\nmodel: x\nbase_url: nope\napi_key: " + canary + "\n",
 		"zero tokens":     "protocol: openai\nmodel: x\nbase_url: http://localhost\napi_key: " + canary + "\nmax_tokens: 0\n",
 		"negative agent":  "protocol: openai\nmodel: x\nbase_url: http://localhost\napi_key: " + canary + "\nagent:\n  max_iterations: -1\n",
+		"bad permission":  "protocol: openai\nmodel: x\nbase_url: http://localhost\napi_key: " + canary + "\npermissions:\n  mode: wide-open\n",
 		"thinking budget": "protocol: anthropic\nmodel: x\nbase_url: http://localhost\napi_key: " + canary + "\nmax_tokens: 1024\nthinking:\n  enabled: true\n  budget_tokens: 1024\n",
 	}
 	for name, body := range cases {

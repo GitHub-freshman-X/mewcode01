@@ -2,15 +2,19 @@ package agent
 
 import (
 	"context"
+	"errors"
 	"sync"
 
+	"github.com/GitHub-freshman-X/mewcode01/internal/permissions"
 	"github.com/GitHub-freshman-X/mewcode01/internal/provider"
 	"github.com/GitHub-freshman-X/mewcode01/internal/tools"
 )
 
 type Scheduler struct {
-	registry *tools.Registry
-	executor *tools.Executor
+	registry  *tools.Registry
+	executor  *tools.Executor
+	gate      *permissions.Engine
+	confirmer PermissionBridge
 }
 
 type scheduledCall struct {
@@ -22,8 +26,8 @@ type toolBatch struct {
 	calls      []scheduledCall
 }
 
-func NewScheduler(registry *tools.Registry, executor *tools.Executor) *Scheduler {
-	return &Scheduler{registry: registry, executor: executor}
+func NewScheduler(registry *tools.Registry, executor *tools.Executor, gate *permissions.Engine, confirmer PermissionBridge) *Scheduler {
+	return &Scheduler{registry: registry, executor: executor, gate: gate, confirmer: confirmer}
 }
 
 func (s *Scheduler) batches(calls []provider.ToolCall) []toolBatch {
@@ -52,20 +56,39 @@ func (s *Scheduler) Execute(ctx context.Context, calls []provider.ToolCall, emit
 				return nil, context.Canceled
 			}
 		}
-		if batch.concurrent && len(batch.calls) > 1 {
+		if batch.concurrent && len(batch.calls) > 1 && s.gate == nil {
 			var wg sync.WaitGroup
+			var stop sync.Once
+			errCh := make(chan error, 1)
 			wg.Add(len(batch.calls))
 			for _, item := range batch.calls {
 				item := item
-				go func() { defer wg.Done(); results[item.index] = s.executor.Execute(ctx, s.registry, item.call) }()
+				go func() {
+					defer wg.Done()
+					result, err := s.executePermitted(ctx, item.call, emit)
+					if err != nil {
+						stop.Do(func() { errCh <- err })
+						return
+					}
+					results[item.index] = result
+				}()
 			}
 			wg.Wait()
+			select {
+			case err := <-errCh:
+				return nil, err
+			default:
+			}
 		} else {
 			for _, item := range batch.calls {
 				if err := ctx.Err(); err != nil {
 					return nil, err
 				}
-				results[item.index] = s.executor.Execute(ctx, s.registry, item.call)
+				result, err := s.executePermitted(ctx, item.call, emit)
+				if err != nil {
+					return nil, err
+				}
+				results[item.index] = result
 			}
 		}
 		if err := ctx.Err(); err != nil {
@@ -79,4 +102,63 @@ func (s *Scheduler) Execute(ctx context.Context, calls []provider.ToolCall, emit
 		}
 	}
 	return results, nil
+}
+
+func (s *Scheduler) executePermitted(ctx context.Context, call provider.ToolCall, emit func(Event) bool) (provider.ToolResult, error) {
+	if s.gate == nil {
+		return s.executor.Execute(ctx, s.registry, call), nil
+	}
+	tool, ok := s.registry.Get(call.Name)
+	if !ok {
+		return s.executor.Execute(ctx, s.registry, call), nil
+	}
+	decision, err := s.gate.Decide(ctx, call, tool)
+	if err != nil {
+		return provider.ToolResult{}, err
+	}
+	if !emit(Event{Type: EventPermissionDecision, Phase: PhaseRunningTools, PermissionDecision: &decision}) {
+		return provider.ToolResult{}, context.Canceled
+	}
+	switch decision.Action {
+	case permissions.ActionAllow:
+		return s.executor.Execute(ctx, s.registry, call), nil
+	case permissions.ActionDeny:
+		return permissions.DeniedToolResult(call, decision), nil
+	case permissions.ActionAsk:
+		if s.confirmer == nil {
+			return permissions.DeniedToolResult(call, decision), nil
+		}
+		if !emit(Event{Type: EventPermissionRequest, Phase: PhaseRunningTools, PermissionDecision: &decision}) {
+			return provider.ToolResult{}, context.Canceled
+		}
+		confirmation, err := s.confirmer.Confirm(ctx, decision)
+		if err != nil {
+			if errors.Is(err, context.Canceled) {
+				return provider.ToolResult{}, context.Canceled
+			}
+			return provider.ToolResult{}, err
+		}
+		if confirmation.Decision.SuggestedKey == "" {
+			confirmation.Decision = decision
+		}
+		if !emit(Event{Type: EventPermissionResponse, Phase: PhaseRunningTools, PermissionConfirmation: &confirmation}) {
+			return provider.ToolResult{}, context.Canceled
+		}
+		if confirmation.Choice == permissions.ChoiceCancel {
+			return provider.ToolResult{}, context.Canceled
+		}
+		if confirmation.Choice == permissions.ChoiceDeny {
+			denied := decision
+			denied.Action = permissions.ActionDeny
+			denied.Stage = permissions.StageConfirm
+			denied.Reason = "user denied permission"
+			return permissions.DeniedToolResult(call, denied), nil
+		}
+		if err := s.gate.ApplyConfirmation(confirmation); err != nil {
+			return provider.ToolResult{}, err
+		}
+		return s.executor.Execute(ctx, s.registry, call), nil
+	default:
+		return provider.ToolResult{}, errors.New("unknown permission decision")
+	}
 }

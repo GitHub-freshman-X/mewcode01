@@ -1,6 +1,7 @@
 package tui
 
 import (
+	"context"
 	"errors"
 	"reflect"
 	"strings"
@@ -10,6 +11,7 @@ import (
 	"charm.land/lipgloss/v2"
 	"github.com/GitHub-freshman-X/mewcode01/internal/agent"
 	"github.com/GitHub-freshman-X/mewcode01/internal/conversation"
+	"github.com/GitHub-freshman-X/mewcode01/internal/permissions"
 	"github.com/GitHub-freshman-X/mewcode01/internal/provider"
 )
 
@@ -68,6 +70,56 @@ func TestDisplayHistoryShowsPlanWithoutModelHistory(t *testing.T) {
 	}
 	if strings.Contains(view, "mew.environment") || strings.Contains(view, "mew.mode") {
 		t.Fatalf("system prompt tag leaked into view: %q", view)
+	}
+}
+
+func TestPermissionViewAndChoices(t *testing.T) {
+	m := NewModel(nil, conversation.NewSession())
+	decision := permissions.Decision{
+		Action:  permissions.ActionAsk,
+		Stage:   permissions.StageMode,
+		Reason:  "default mode requires confirmation",
+		Request: permissions.Request{Tool: "write_file", MatchTarget: "docs/out.md"},
+	}
+	reply := make(chan permissions.Choice, 1)
+	m.pendingPermission = &pendingPermission{decision: decision, reply: reply}
+	m.refreshContent()
+	view := m.View().Content
+	if !strings.Contains(view, "write_file") || !strings.Contains(view, "docs/out.md") || !strings.Contains(view, "default mode") {
+		t.Fatalf("view=%q", view)
+	}
+	m.Update(tea.KeyPressMsg{Text: "o"})
+	if got := <-reply; got != permissions.ChoiceAllowOnce {
+		t.Fatalf("choice=%q", got)
+	}
+}
+
+func TestPermissionDenyAndCancelChoices(t *testing.T) {
+	for key, want := range map[string]permissions.Choice{"d": permissions.ChoiceDeny, keyCancelOrQuit: permissions.ChoiceCancel} {
+		t.Run(key, func(t *testing.T) {
+			m := NewModel(nil, conversation.NewSession())
+			reply := make(chan permissions.Choice, 1)
+			m.pendingPermission = &pendingPermission{decision: permissions.Decision{Request: permissions.Request{Tool: "run_command", MatchTarget: "git status"}}, reply: reply}
+			m.Update(tea.KeyPressMsg{Text: key})
+			if got := <-reply; got != want {
+				t.Fatalf("choice=%q want %q", got, want)
+			}
+		})
+	}
+}
+
+func TestPermissionBridgeConfirmWaitsForModelChoice(t *testing.T) {
+	bridge := NewPermissionBridge()
+	done := make(chan permissions.Confirmation, 1)
+	go func() {
+		conf, _ := bridge.Confirm(context.Background(), permissions.Decision{Request: permissions.Request{Tool: "write_file", MatchTarget: "x.txt"}})
+		done <- conf
+	}()
+	msg := bridge.Wait()
+	msg.reply <- permissions.ChoiceAllowSession
+	conf := <-done
+	if conf.Choice != permissions.ChoiceAllowSession || conf.Decision.Request.Tool != "write_file" {
+		t.Fatalf("confirmation=%#v", conf)
 	}
 }
 
