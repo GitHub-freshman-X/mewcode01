@@ -13,6 +13,7 @@ import (
 	"github.com/GitHub-freshman-X/mewcode01/internal/agent"
 	"github.com/GitHub-freshman-X/mewcode01/internal/config"
 	"github.com/GitHub-freshman-X/mewcode01/internal/conversation"
+	"github.com/GitHub-freshman-X/mewcode01/internal/logging"
 	"github.com/GitHub-freshman-X/mewcode01/internal/permissions"
 	"github.com/GitHub-freshman-X/mewcode01/internal/provider"
 	"github.com/GitHub-freshman-X/mewcode01/internal/tui"
@@ -122,6 +123,35 @@ func TestRunSafeFailure(t *testing.T) {
 	var stderr bytes.Buffer
 	if code := run([]string{"--config", "x"}, &stderr); code == 0 || stderr.String() == "" {
 		t.Fatalf("code=%d stderr=%q", code, stderr.String())
+	}
+}
+
+func TestRunContinuesWhenLoggingInitializationFails(t *testing.T) {
+	origLoad, origNew, origTUI, origPaths, origLogger := loadConfig, newProvider, runTUI, permissionFilePaths, newLogger
+	defer func() {
+		loadConfig, newProvider, runTUI, permissionFilePaths, newLogger = origLoad, origNew, origTUI, origPaths, origLogger
+	}()
+	root := t.TempDir()
+	origWD, err := os.Getwd()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chdir(root); err != nil {
+		t.Fatal(err)
+	}
+	defer os.Chdir(origWD)
+	loadConfig = func(string) (config.Config, error) { return validTestConfig(), nil }
+	newProvider = func(config.Config, *http.Client) (provider.Provider, error) { return stubProvider{}, nil }
+	permissionFilePaths = func(string) (permissions.FilePaths, error) { return permissions.FilePaths{}, nil }
+	newLogger = func(string) (*logging.Logger, error) { return logging.Nop(), errors.New("test logger failure") }
+	called := false
+	runTUI = func(*agent.Runner, *conversation.Session, *tui.PermissionBridge) error { called = true; return nil }
+	var stderr bytes.Buffer
+	if code := run([]string{"--config", "x"}, &stderr); code != 0 || !called {
+		t.Fatalf("code=%d called=%v stderr=%q", code, called, stderr.String())
+	}
+	if !strings.Contains(stderr.String(), "logging:") {
+		t.Fatalf("stderr=%q", stderr.String())
 	}
 }
 

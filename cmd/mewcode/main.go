@@ -8,11 +8,14 @@ import (
 	"net"
 	"net/http"
 	"os"
+	"path/filepath"
 	"time"
 
 	"github.com/GitHub-freshman-X/mewcode01/internal/agent"
 	"github.com/GitHub-freshman-X/mewcode01/internal/config"
 	"github.com/GitHub-freshman-X/mewcode01/internal/conversation"
+	"github.com/GitHub-freshman-X/mewcode01/internal/envfile"
+	"github.com/GitHub-freshman-X/mewcode01/internal/logging"
 	"github.com/GitHub-freshman-X/mewcode01/internal/mcp"
 	"github.com/GitHub-freshman-X/mewcode01/internal/permissions"
 	"github.com/GitHub-freshman-X/mewcode01/internal/provider"
@@ -27,6 +30,7 @@ var (
 	newProvider         = factory.New
 	runTUI              = tui.RunWithPermissions
 	permissionFilePaths = permissions.DefaultFilePaths
+	newLogger           = func(root string) (*logging.Logger, error) { return logging.New(root, time.Now, os.Getpid()) }
 )
 
 func main() { os.Exit(run(os.Args[1:], os.Stderr)) }
@@ -41,6 +45,33 @@ func run(args []string, stderr io.Writer) int {
 	if flags.NArg() != 0 {
 		fmt.Fprintln(stderr, "unexpected positional arguments")
 		return 2
+	}
+	root, err := os.Getwd()
+	if err != nil {
+		fmt.Fprintln(stderr, err)
+		return 1
+	}
+	logger, err := newLogger(root)
+	if err != nil {
+		fmt.Fprintln(stderr, "logging:", err)
+		logger = logging.Nop()
+	}
+	defer func() {
+		if err := logger.Close(); err != nil {
+			fmt.Fprintln(stderr, "logging close:", err)
+		}
+	}()
+	result, envErr := envfile.Load(filepath.Join(root, ".env"), os.LookupEnv, os.Setenv)
+	if envErr != nil {
+		logger.Error("dotenv", "dotenv_load_failed", "dotenv load failed", logging.Fields{"status": "failed"})
+		fmt.Fprintln(stderr, "dotenv: load failed")
+	} else if !result.Found {
+		logger.Info("dotenv", "dotenv_not_found", "dotenv file not found", logging.Fields{"status": "not_found"})
+	} else {
+		logger.Info("dotenv", "dotenv_loaded", "dotenv file loaded", logging.Fields{"status": "loaded", "variable_count": len(result.Loaded)})
+		for _, key := range result.Skipped {
+			logger.Info("dotenv", "dotenv_variable_skipped", "dotenv variable skipped", logging.Fields{"status": "system_preferred", "variable": key})
+		}
 	}
 	path := *configPath
 	if path == "" {
@@ -61,11 +92,6 @@ func run(args []string, stderr io.Writer) int {
 		fmt.Fprintln(stderr, provider.UserError(err))
 		return 1
 	}
-	root, err := os.Getwd()
-	if err != nil {
-		fmt.Fprintln(stderr, err)
-		return 1
-	}
 	registry, err := tools.NewDefaultRegistry(root)
 	if err != nil {
 		fmt.Fprintln(stderr, err)
@@ -73,7 +99,7 @@ func run(args []string, stderr io.Writer) int {
 	}
 	manager := mcp.NewManager(newHTTPClient(), func(diagnostic mcp.Diagnostic) {
 		fmt.Fprintln(stderr, diagnostic)
-	})
+	}, logger)
 	defer func() {
 		if err := manager.Close(context.Background()); err != nil {
 			fmt.Fprintln(stderr, "mcp close:", err)

@@ -22,3 +22,11 @@ chNN-topic/
 | `ch07-mcp` | MCP Client：外部工具配置、发现、调用与生命周期管理 | [Spec](ch07-mcp/spec.md) · [Plan](ch07-mcp/plan.md) · [Tasks](ch07-mcp/task.md) · [Checklist](ch07-mcp/checklist.md) |
 
 新增章节时继续采用 `chNN-topic` 格式，并在本页追加索引。
+
+## 中途补充
+
+| 目录 | 主题 | 文档 |
+|---|---|---|
+| `ch00/01-logging` | Application Logging：可复用本地结构化日志与 MCP 全生命周期观测 | [Spec](ch00/01-logging/spec.md) |
+| `ch00/02-env-loading` | Environment Loading：项目 `.env` 自动加载与安全变量优先级 | [Spec](ch00/02-env-loading/spec.md) |
+| `ch00/03-log-source-location` | Log Source Location：日志调用点文件与行号 | [Spec](ch00/03-log-source-location/spec.md) |

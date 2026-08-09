@@ -8,6 +8,7 @@ import (
 	"sort"
 
 	"github.com/GitHub-freshman-X/mewcode01/internal/config"
+	"github.com/GitHub-freshman-X/mewcode01/internal/logging"
 	"github.com/GitHub-freshman-X/mewcode01/internal/tools"
 )
 
@@ -25,12 +26,13 @@ type Reporter func(Diagnostic)
 type Manager struct {
 	httpClient *http.Client
 	reporter   Reporter
+	logger     *logging.Logger
 	clients    map[string]*Client
 	order      []string
 }
 
-func NewManager(httpClient *http.Client, reporter Reporter) *Manager {
-	return &Manager{httpClient: httpClient, reporter: reporter, clients: map[string]*Client{}}
+func NewManager(httpClient *http.Client, reporter Reporter, loggers ...*logging.Logger) *Manager {
+	return &Manager{httpClient: httpClient, reporter: reporter, logger: normalizedLogger(loggers), clients: map[string]*Client{}}
 }
 func (m *Manager) ConnectAndRegister(ctx context.Context, registry *tools.Registry, servers map[string]config.MCPServerConfig) []Diagnostic {
 	names := make([]string, 0, len(servers))
@@ -40,28 +42,35 @@ func (m *Manager) ConnectAndRegister(ctx context.Context, registry *tools.Regist
 	sort.Strings(names)
 	var diagnostics []Diagnostic
 	for _, name := range names {
+		logger := m.logger.WithFields(logging.Fields{"server": name})
 		raw := servers[name]
+		logger.Info("mcp", "server_configuration_started", "MCP server configuration started", logging.Fields{"stage": "configuration", "status": "started"})
 		server, err := ExpandServer(name, raw, nil)
 		if err != nil {
+			logger.Error("mcp", "server_configuration_failed", "MCP server configuration failed", logging.Fields{"stage": "configuration", "status": "configuration_failed"})
 			diagnostics = m.report(diagnostics, Diagnostic{name, "configuration", err})
 			continue
 		}
 		var transport Transport
 		switch server.Type {
 		case config.MCPTransportStdio:
+			logger.Info("mcp", "server_connect_started", "MCP server connection started", logging.Fields{"stage": "connect", "status": "started", "transport": "stdio"})
 			st := NewStdioTransport(server.Command, server.Args, server.Env)
 			if err := st.Start(ctx); err != nil {
+				logger.Error("mcp", "server_connect_failed", "MCP server connection failed", logging.Fields{"stage": "connect", "status": "connect_failed", "transport": "stdio"})
 				diagnostics = m.report(diagnostics, Diagnostic{name, "connect", err})
 				continue
 			}
 			transport = st
 		case config.MCPTransportHTTP:
+			logger.Info("mcp", "server_connect_started", "MCP server connection started", logging.Fields{"stage": "connect", "status": "started", "transport": "http"})
 			transport = NewHTTPTransport(server.URL, server.Headers, m.httpClient)
 		default:
 			diagnostics = m.report(diagnostics, Diagnostic{name, "configuration", errors.New("unsupported transport")})
 			continue
 		}
-		client := NewClient(transport)
+		logger.Info("mcp", "server_connected", "MCP server connected", logging.Fields{"stage": "connect", "status": "connected"})
+		client := NewClient(transport, logger)
 		if err := client.Initialize(ctx); err != nil {
 			_ = client.Close(ctx)
 			diagnostics = m.report(diagnostics, Diagnostic{name, "initialize", err})
@@ -77,7 +86,7 @@ func (m *Manager) ConnectAndRegister(ctx context.Context, registry *tools.Regist
 		seen := map[string]bool{}
 		conflict := false
 		for _, remote := range remotes {
-			adapter := NewRemoteToolAdapter(name, remote, client)
+			adapter := NewRemoteToolAdapter(name, remote, client, logger)
 			toolName := adapter.Metadata().Name
 			if seen[toolName] {
 				conflict = true
@@ -100,6 +109,8 @@ func (m *Manager) ConnectAndRegister(ctx context.Context, registry *tools.Regist
 				conflict = true
 				break
 			}
+			meta := adapter.Metadata()
+			logger.Info("mcp", "tool_registered", "MCP tool registered", logging.Fields{"stage": "register", "status": "registered", "remote_tool": remoteName(meta.Name), "tool": meta.Name})
 		}
 		if conflict {
 			_ = client.Close(ctx)
@@ -120,9 +131,31 @@ func (m *Manager) report(all []Diagnostic, d Diagnostic) []Diagnostic {
 func (m *Manager) Close(ctx context.Context) error {
 	var errs []error
 	for i := len(m.order) - 1; i >= 0; i-- {
-		if err := m.clients[m.order[i]].Close(ctx); err != nil {
+		name := m.order[i]
+		logger := m.logger.WithFields(logging.Fields{"server": name})
+		logger.Info("mcp", "server_close_started", "MCP server close started", logging.Fields{"stage": "close", "status": "started"})
+		if err := m.clients[name].Close(ctx); err != nil {
+			logger.Error("mcp", "server_close_failed", "MCP server close failed", logging.Fields{"stage": "close", "status": "close_failed"})
 			errs = append(errs, err)
+		} else {
+			logger.Info("mcp", "server_closed", "MCP server closed", logging.Fields{"stage": "close", "status": "closed"})
 		}
 	}
 	return errors.Join(errs...)
+}
+
+func normalizedLogger(loggers []*logging.Logger) *logging.Logger {
+	if len(loggers) == 0 || loggers[0] == nil {
+		return logging.Nop()
+	}
+	return loggers[0]
+}
+
+func remoteName(tool string) string {
+	for i := len(tool) - 1; i > 0; i-- {
+		if tool[i-1:i+1] == "__" {
+			return tool[i+1:]
+		}
+	}
+	return tool
 }

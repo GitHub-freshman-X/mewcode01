@@ -5,9 +5,13 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/GitHub-freshman-X/mewcode01/internal/config"
+	"github.com/GitHub-freshman-X/mewcode01/internal/logging"
 	"github.com/GitHub-freshman-X/mewcode01/internal/tools"
 )
 
@@ -43,5 +47,52 @@ func TestManagerRegistersHealthyServerAndIsolatesBrokenServer(t *testing.T) {
 	}
 	if err := manager.Close(context.Background()); err != nil {
 		t.Fatal(err)
+	}
+}
+
+func TestManagerLogsSuccessfulRegistration(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var request struct {
+			ID     any    `json:"id"`
+			Method string `json:"method"`
+		}
+		_ = json.NewDecoder(r.Body).Decode(&request)
+		if request.ID == nil {
+			w.WriteHeader(http.StatusAccepted)
+			return
+		}
+		result := any(map[string]any{"protocolVersion": "2025-06-18"})
+		if request.Method == "tools/list" {
+			result = map[string]any{"tools": []any{map[string]any{"name": "search", "description": "Search", "inputSchema": map[string]any{"type": "object"}}}}
+		}
+		_ = json.NewEncoder(w).Encode(map[string]any{"jsonrpc": "2.0", "id": request.ID, "result": result})
+	}))
+	defer server.Close()
+	root := t.TempDir()
+	logger, err := logging.New(root, nil, 42)
+	if err != nil {
+		t.Fatal(err)
+	}
+	manager := NewManager(server.Client(), nil, logger)
+	manager.ConnectAndRegister(context.Background(), tools.NewRegistry(), map[string]config.MCPServerConfig{"healthy": {Type: config.MCPTransportHTTP, URL: server.URL + "?token=SECRET_URL_VALUE", Headers: map[string]string{"Authorization": "Bearer SECRET_HEADER_VALUE"}}})
+	if err := manager.Close(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if err := logger.Close(); err != nil {
+		t.Fatal(err)
+	}
+	files, err := filepath.Glob(filepath.Join(root, "logs", "*.jsonl"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	contents, err := os.ReadFile(files[0])
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(contents), `"event":"tool_registered"`) || !strings.Contains(string(contents), `"tool":"healthy__search"`) {
+		t.Fatalf("logs=%s", contents)
+	}
+	if strings.Contains(string(contents), "SECRET_URL_VALUE") || strings.Contains(string(contents), "SECRET_HEADER_VALUE") {
+		t.Fatalf("logs contain secret: %s", contents)
 	}
 }
