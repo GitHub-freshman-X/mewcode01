@@ -6,7 +6,7 @@ import (
 	"github.com/GitHub-freshman-X/mewcode01/internal/provider"
 )
 
-const globalToolRule = "规则强化：优先使用专用工具完成可执行操作；编辑前必须先读取目标文件；搜索优先使用搜索工具；写入或修改前确认工作区边界。"
+const globalToolRule = "规则强化：优先使用专用工具完成可执行操作；编辑前必须先读取目标文件；搜索优先使用搜索工具；写入或修改前确认工作区边界并使用绝对路径；破坏性操作前先获得用户确认；不要猜测或编造 URL。"
 
 func EnhanceDefinitions(defs []provider.ToolDefinition, mode Mode) []provider.ToolDefinition {
 	out := make([]provider.ToolDefinition, len(defs))
@@ -42,7 +42,7 @@ func ruleForTool(name string) string {
 	case "write_file", "edit_file":
 		return "写入规则：写入或修改前确认工作区边界，并确保目标文件内容已被读取或明确了解。"
 	case "run_command":
-		return "命令规则：执行命令前说明目的，避免与当前任务无关或会越过工作区边界的操作。"
+		return "命令规则：执行命令前说明目的，避免与当前任务无关、会越过工作区边界、跳过 Git hook、绕过签名检查或包含不安全输入处理的操作。"
 	case "find_files":
 		return "查找规则：需要定位文件时优先使用文件查找工具。"
 	case "search_code":

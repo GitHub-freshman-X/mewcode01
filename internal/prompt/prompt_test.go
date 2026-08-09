@@ -62,6 +62,34 @@ func TestModuleOrderAndRendering(t *testing.T) {
 	}
 }
 
+func TestFixedModulesCoverSystemPromptPolicy(t *testing.T) {
+	bundle, _, err := BuildBundle(BuildContext{
+		Environment: testEnvironment(ModeAct),
+		Mode:        ModeAct,
+		Iteration:   1,
+	})
+	if err != nil {
+		t.Fatalf("BuildBundle returned error: %v", err)
+	}
+
+	for _, want := range []string{
+		"终端环境中的 AI 编程助手",
+		"回复应简短",
+		"探索性问题",
+		"不确定时先询问",
+		"不要添加超出任务需求的功能、抽象或重构",
+		"OWASP Top 10",
+		"破坏性操作前先获得用户确认",
+		"不要猜测或编造 URL",
+		"不要跳过 Git hook 或绕过签名检查",
+		"file_path:line_number",
+	} {
+		if !strings.Contains(bundle.StableSystem, want) {
+			t.Fatalf("stable system missing policy %q:\n%s", want, bundle.StableSystem)
+		}
+	}
+}
+
 func TestOptionalModules(t *testing.T) {
 	env := testEnvironment(ModeAct)
 	empty, _, err := BuildBundle(BuildContext{Environment: env, Mode: ModeAct, Iteration: 1})
@@ -229,6 +257,17 @@ func TestEnhanceDefinitionsAndToolRulesStable(t *testing.T) {
 	}
 	if !strings.Contains(plan[1].Description, "规划模式不得请求副作用工具") {
 		t.Fatalf("plan mode side-effect rule missing: %q", plan[1].Description)
+	}
+	for _, want := range []string{
+		"优先使用专用工具",
+		"编辑前必须先读取",
+		"搜索优先使用搜索工具",
+		"破坏性操作前先获得用户确认",
+		"不要猜测或编造 URL",
+	} {
+		if !strings.Contains(act[0].Description, want) {
+			t.Fatalf("tool rule missing %q: %q", want, act[0].Description)
+		}
 	}
 
 	again := EnhanceDefinitions(defs, ModeAct)

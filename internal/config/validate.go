@@ -48,5 +48,30 @@ func Validate(cfg Config) error {
 			return fmt.Errorf("config: field %q must be less than max_tokens", "thinking.budget_tokens")
 		}
 	}
+	for name, server := range cfg.MCPServers {
+		if err := ValidateMCPServer(name, server); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func ValidateMCPServer(name string, server MCPServerConfig) error {
+	if strings.TrimSpace(name) == "" {
+		return fmt.Errorf("config: mcp server name must not be empty")
+	}
+	switch server.Type {
+	case MCPTransportStdio:
+		if strings.TrimSpace(server.Command) == "" {
+			return fmt.Errorf("config: mcp server %q requires command for stdio transport", name)
+		}
+	case MCPTransportHTTP:
+		u, err := url.Parse(server.URL)
+		if err != nil || (u.Scheme != "http" && u.Scheme != "https") || u.Host == "" {
+			return fmt.Errorf("config: mcp server %q requires an absolute HTTP(S) url", name)
+		}
+	default:
+		return fmt.Errorf("config: mcp server %q has unsupported transport %q", name, server.Type)
+	}
 	return nil
 }

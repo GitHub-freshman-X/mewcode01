@@ -6,4 +6,6 @@
 /coverage.out
 /*.test
 /tmp
-.mewcode/permissions.local.yaml
+.mewcode/config.yaml
+.mewcode/permissions.yaml
+.env

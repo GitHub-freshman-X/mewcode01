@@ -11,14 +11,31 @@ const (
 )
 
 type Config struct {
-	Protocol    Protocol         `yaml:"protocol"`
-	Model       string           `yaml:"model"`
-	BaseURL     string           `yaml:"base_url"`
-	APIKey      string           `yaml:"api_key"`
-	MaxTokens   int              `yaml:"max_tokens,omitempty"`
-	Thinking    ThinkingConfig   `yaml:"thinking,omitempty"`
-	Agent       AgentConfig      `yaml:"agent,omitempty"`
-	Permissions PermissionConfig `yaml:"permissions,omitempty"`
+	Protocol    Protocol                   `yaml:"protocol"`
+	Model       string                     `yaml:"model"`
+	BaseURL     string                     `yaml:"base_url"`
+	APIKey      string                     `yaml:"api_key"`
+	MaxTokens   int                        `yaml:"max_tokens,omitempty"`
+	Thinking    ThinkingConfig             `yaml:"thinking,omitempty"`
+	Agent       AgentConfig                `yaml:"agent,omitempty"`
+	Permissions PermissionConfig           `yaml:"permissions,omitempty"`
+	MCPServers  map[string]MCPServerConfig `yaml:"mcp_servers,omitempty"`
+}
+
+type MCPTransportType string
+
+const (
+	MCPTransportStdio MCPTransportType = "stdio"
+	MCPTransportHTTP  MCPTransportType = "http"
+)
+
+type MCPServerConfig struct {
+	Type    MCPTransportType  `yaml:"type"`
+	Command string            `yaml:"command,omitempty"`
+	Args    []string          `yaml:"args,omitempty"`
+	Env     map[string]string `yaml:"env,omitempty"`
+	URL     string            `yaml:"url,omitempty"`
+	Headers map[string]string `yaml:"headers,omitempty"`
 }
 
 type AgentConfig struct {

@@ -21,9 +21,11 @@ go build -o mewcode ./cmd/mewcode
 ./mewcode --config /path/to/config.yaml
 ```
 
-默认配置路径：macOS 为 `~/Library/Application Support/mewcode/config.yaml`，Linux 通常为 `~/.config/mewcode/config.yaml`，Windows 为 `%AppData%\mewcode\config.yaml`。实际位置遵循操作系统用户配置目录。
+未指定 `--config` 时，默认读取 `~/Library/Application Support/mewcode/config.yaml`。`--config` 指向的文件会完整替代默认主配置。
 
-复制 `config.example.yaml` 后设置 `protocol`、`model`、`base_url`、`api_key`。`max_tokens` 可省略，默认 4096；`agent.max_iterations` 可省略，默认 20。Anthropic 可启用 `thinking`；`budget_tokens` 至少为 1024，并且必须小于 `max_tokens`。OpenAI 不支持该配置。
+复制 `config.example.yaml` 后设置 `protocol`、`model`、`base_url`、`api_key`。`mcp_servers` 也在同一个 `config.yaml` 顶层配置。`max_tokens` 可省略，默认 4096；`agent.max_iterations` 可省略，默认 20。Anthropic 可启用 `thinking`；`budget_tokens` 至少为 1024，并且必须小于 `max_tokens`。OpenAI 不支持该配置。
+
+权限规则独立保存，并在每次启动时合并三层：`~/Library/Application Support/mewcode/permissions.yaml`、`<项目根>/.mewcode/permissions.yaml` 与 `<项目根>/.mewcode/permissions.local.yaml`。优先级从高到低为本地级、项目级、用户级；缺失任一文件视为空规则。
 
 ## 操作
 

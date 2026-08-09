@@ -76,7 +76,7 @@
 
 **步骤：**
 
-1. 使用系统用户配置目录拼接 `mewcode/config.yaml`。
+1. 未指定 `--config` 时使用 `~/Library/Application Support/mewcode/config.yaml`；指定时只读取参数给出的完整主配置文件。
 2. 实现 `Load(path)`，文件读取失败时附带路径和 config 阶段信息。
 3. 使用 YAML v4 的 known-fields 与 single-document 选项解码。
 4. 解码后应用默认值并调用 `Validate`。
@@ -105,7 +105,7 @@
 
 **步骤：**
 
-1. 测试默认路径末尾为 `mewcode/config.yaml`。
+1. 测试默认路径为 `~/Library/Application Support/mewcode/config.yaml`，并测试 `--config` 可替代该路径。
 2. 测试最小有效 Anthropic/OpenAI YAML 和默认 token 值。
 3. 测试未知字段、多文档、非法 YAML、缺失核心字段、非法协议和 URL。
 4. 测试 thinking 的协议限制、最小预算和总预算关系。
@@ -579,7 +579,7 @@
 **步骤：**
 
 1. 说明 Go 1.25 要求、源码构建和运行方式。
-2. 说明各平台默认配置目录及 `--config` 覆盖。
+2. 说明默认路径 `~/Library/Application Support/mewcode/config.yaml` 及 `--config` 覆盖。
 3. 解释四个核心字段、max_tokens、Anthropic thinking 约束和两种 base URL 示例。
 4. 列出 Enter、滚动、`Ctrl+T`、`Ctrl+C` 的行为。
 5. 明确 API Key 为明文，要求限制文件权限并禁止提交版本库。

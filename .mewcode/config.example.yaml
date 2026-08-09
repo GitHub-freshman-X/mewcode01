@@ -12,6 +12,19 @@ agent:
 permissions:
   mode: default
 
+# MCP Server 可配置在此用户级文件，项目级 .mewcode/config.yaml 的同名条目会完整覆盖它。
+# 发现后的远端工具名固定为 <server>__<tool>，并默认需要权限确认。
+mcp_servers:
+  filesystem:
+    type: stdio
+    command: npx
+    args: ["-y", "@modelcontextprotocol/server-filesystem", "${MCP_WORKSPACE}"]
+  issues:
+    type: http
+    url: ${MCP_ISSUES_URL}
+    headers:
+      Authorization: Bearer ${MCP_ISSUES_TOKEN}
+
 # For OpenAI Responses API, remove the thinking section and use values like:
 # protocol: openai
 # model: gpt-4.1-mini

@@ -49,6 +49,51 @@ func TestPermissionModeConfig(t *testing.T) {
 	}
 }
 
+func TestMCPServerConfig(t *testing.T) {
+	cfg, err := Load(writeConfig(t, `protocol: openai
+model: test
+base_url: http://localhost
+api_key: fake
+mcp_servers:
+  filesystem:
+    type: stdio
+    command: npx
+    args: ["-y", "filesystem-server"]
+    env:
+      ACCESS_TOKEN: ${FILESYSTEM_TOKEN}
+  issues:
+    type: http
+    url: https://mcp.example.test/mcp
+    headers:
+      Authorization: Bearer ${ISSUES_TOKEN}
+`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := cfg.MCPServers["filesystem"]; got.Type != MCPTransportStdio || got.Command != "npx" || len(got.Args) != 2 || got.Env["ACCESS_TOKEN"] != "${FILESYSTEM_TOKEN}" {
+		t.Fatalf("stdio server=%+v", got)
+	}
+	if got := cfg.MCPServers["issues"]; got.Type != MCPTransportHTTP || got.URL != "https://mcp.example.test/mcp" || got.Headers["Authorization"] != "Bearer ${ISSUES_TOKEN}" {
+		t.Fatalf("http server=%+v", got)
+	}
+}
+
+func TestInvalidMCPServerConfig(t *testing.T) {
+	base := "protocol: openai\nmodel: test\nbase_url: http://localhost\napi_key: fake\nmcp_servers:\n  server:\n"
+	for name, suffix := range map[string]string{
+		"unknown transport":     "    type: websocket\n",
+		"stdio without command": "    type: stdio\n",
+		"http without url":      "    type: http\n",
+		"http bad url":          "    type: http\n    url: relative/path\n",
+	} {
+		t.Run(name, func(t *testing.T) {
+			if _, err := Load(writeConfig(t, base+suffix)); err == nil {
+				t.Fatal("expected error")
+			}
+		})
+	}
+}
+
 func TestInvalidConfig(t *testing.T) {
 	canary := "canary-super-secret-key"
 	cases := map[string]string{

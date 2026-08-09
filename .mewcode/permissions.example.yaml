@@ -1,0 +1,10 @@
+rules:
+  "read_file(config.yaml)": deny
+  "write_file(config.yaml)": deny
+  "edit_file(config.yaml)": deny
+  "read_file(.env)": deny
+  "write_file(.env)": deny
+  "edit_file(.env)": deny
+
+  "run_command(go test ./...)": allow
+  "run_command(go fmt ./...)": allow

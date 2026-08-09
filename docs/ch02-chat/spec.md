@@ -19,7 +19,7 @@ MewCode 是一个从零构建的命令行 AI 助手。本章建立最小可用�
 
 ## 功能需求
 
-- **F1 启动与配置加载**：用户启动 MewCode 后，程序读取系统用户配置目录中的默认 YAML；用户可通过 `--config` 指定其他文件。配置文件包含单套当前后端配置，四个必填核心字段为 `protocol`、`model`、`base_url`、`api_key`，并支持可选的 `max_tokens` 与 thinking 配置。
+- **F1 启动与配置加载**：用户启动 MewCode 后，程序读取 `~/Library/Application Support/mewcode/config.yaml`；用户可通过 `--config` 指定其他完整主配置文件。配置文件包含单套当前后端配置，四个必填核心字段为 `protocol`、`model`、`base_url`、`api_key`，并支持可选的 `max_tokens`、thinking、`agent`、`permissions` 与顶层 `mcp_servers` 配置。
 - **F2 配置校验**：程序在进入对话前校验配置是否存在、YAML 是否有效、必填字段是否完整、协议是否受支持、URL 是否合法，以及 token 参数是否满足约束。校验失败时给出可定位问题的错误信息，不发起模型请求。
 - **F3 全屏 TUI**：启动成功后进入全屏终端界面，至少包含可滚动的消息区域、输入区域和当前状态提示。用户可以编辑文本并提交问题。
 - **F4 流式回复**：提交问题后，程序立即发起流式请求，并随着 SSE 事件到达持续更新界面，不等待整段回复完成后才显示。

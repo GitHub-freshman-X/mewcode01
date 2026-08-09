@@ -484,7 +484,7 @@ mew01/
 | 权限系统位置 | 新增 `internal/permissions` 包，Scheduler 执行前调用 | 权限逻辑集中、可测试，不污染每个工具实现，也能覆盖所有 Agent 工具调用入口 |
 | 规则文件格式 | `rules` 映射，键为 `工具名(模式)`，值为 `allow` 或 `deny` | 符合需求里的规则表达，简单可审阅，严格校验容易 |
 | 权限模式位置 | 主配置 `permissions.mode` | 模式是整体运行策略，不和三层规则混在一起；旧配置可默认 `default` |
-| 三层规则路径 | 用户级 `~/.config/mewcode/permissions.yaml`，项目级 `.mewcode/permissions.yaml`，本地级 `.mewcode/permissions.local.yaml` | 用户默认、项目共享、本机私有三类用途清晰；本地级适合永久允许 |
+| 三层规则路径 | 用户级 `~/Library/Application Support/mewcode/permissions.yaml`，项目级 `.mewcode/permissions.yaml`，本地级 `.mewcode/permissions.local.yaml` | 用户默认、项目共享、本机私有三类用途清晰；本地级适合永久允许 |
 | 规则优先级 | 黑名单、沙箱、会话、本地、项目、用户、模式、确认 | 严格满足 spec；显式 deny 不被放行模式覆盖 |
 | 命令匹配对象 | `command` 与 `args` 以 shell-like quoting 规范化成一行文本 | 用户可写 `run_command(git *)`；同时不启用 shell 展开，保留现有执行模型 |
 | 路径沙箱 | 对项目根和输入路径解析真实路径后做边界判断 | 防止符号链接逃逸；写新文件时解析已存在父目录即可覆盖关键风险 |
@@ -510,4 +510,3 @@ mew01/
 | F16 | `agent/scheduler.go` 权限集成 |
 | F17, F18 | `permissions/config.go` 与 config 默认值 |
 | F21 | `prepareRequest` 继续 Plan Mode 只读过滤，Runner/Scheduler 统一权限处理 |
-

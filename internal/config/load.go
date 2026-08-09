@@ -28,20 +28,21 @@ func Load(path string) (Config, error) {
 		return Config{}, fmt.Errorf("config: initialize YAML loader: %w", err)
 	}
 	type rawConfig struct {
-		Protocol    Protocol         `yaml:"protocol"`
-		Model       string           `yaml:"model"`
-		BaseURL     string           `yaml:"base_url"`
-		APIKey      string           `yaml:"api_key"`
-		MaxTokens   *int             `yaml:"max_tokens,omitempty"`
-		Thinking    ThinkingConfig   `yaml:"thinking,omitempty"`
-		Agent       AgentConfig      `yaml:"agent,omitempty"`
-		Permissions PermissionConfig `yaml:"permissions,omitempty"`
+		Protocol    Protocol                   `yaml:"protocol"`
+		Model       string                     `yaml:"model"`
+		BaseURL     string                     `yaml:"base_url"`
+		APIKey      string                     `yaml:"api_key"`
+		MaxTokens   *int                       `yaml:"max_tokens,omitempty"`
+		Thinking    ThinkingConfig             `yaml:"thinking,omitempty"`
+		Agent       AgentConfig                `yaml:"agent,omitempty"`
+		Permissions PermissionConfig           `yaml:"permissions,omitempty"`
+		MCPServers  map[string]MCPServerConfig `yaml:"mcp_servers,omitempty"`
 	}
 	var raw rawConfig
 	if err := loader.Load(&raw); err != nil {
 		return Config{}, fmt.Errorf("config: parse YAML: %w", err)
 	}
-	cfg := Config{Protocol: raw.Protocol, Model: raw.Model, BaseURL: raw.BaseURL, APIKey: raw.APIKey, Thinking: raw.Thinking, Agent: raw.Agent, Permissions: raw.Permissions, MaxTokens: DefaultMaxTokens}
+	cfg := Config{Protocol: raw.Protocol, Model: raw.Model, BaseURL: raw.BaseURL, APIKey: raw.APIKey, Thinking: raw.Thinking, Agent: raw.Agent, Permissions: raw.Permissions, MCPServers: raw.MCPServers, MaxTokens: DefaultMaxTokens}
 	cfg.applyDefaults()
 	if raw.MaxTokens != nil {
 		cfg.MaxTokens = *raw.MaxTokens

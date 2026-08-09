@@ -63,6 +63,36 @@ func TestRunPermissionRulesMissingAllowed(t *testing.T) {
 	}
 }
 
+func TestRunIgnoresProjectMCPConfig(t *testing.T) {
+	origLoad, origNew, origTUI, origPaths := loadConfig, newProvider, runTUI, permissionFilePaths
+	defer func() { loadConfig, newProvider, runTUI, permissionFilePaths = origLoad, origNew, origTUI, origPaths }()
+	root := t.TempDir()
+	projectConfig := filepath.Join(root, ".mewcode", "config.yaml")
+	if err := os.MkdirAll(filepath.Dir(projectConfig), 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(projectConfig, []byte("protocol: openai\nmodel: project\nbase_url: http://localhost\napi_key: fake\n"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	origWD, err := os.Getwd()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chdir(root); err != nil {
+		t.Fatal(err)
+	}
+	defer os.Chdir(origWD)
+	permissionFilePaths = func(string) (permissions.FilePaths, error) { return permissions.FilePaths{}, nil }
+	loadConfig = func(string) (config.Config, error) { return validTestConfig(), nil }
+	newProvider = func(config.Config, *http.Client) (provider.Provider, error) { return stubProvider{}, nil }
+	called := false
+	runTUI = func(*agent.Runner, *conversation.Session, *tui.PermissionBridge) error { called = true; return nil }
+
+	if code := run([]string{"--config", "main.yaml"}, &bytes.Buffer{}); code != 0 || !called {
+		t.Fatalf("code=%d called=%v", code, called)
+	}
+}
+
 func TestRunPermissionInvalidRuleFails(t *testing.T) {
 	origLoad, origNew, origTUI, origPaths := loadConfig, newProvider, runTUI, permissionFilePaths
 	defer func() { loadConfig, newProvider, runTUI, permissionFilePaths = origLoad, origNew, origTUI, origPaths }()
