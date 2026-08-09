@@ -28,7 +28,7 @@
 **步骤：**
 
 1. 在测试中创建临时项目根目录，用固定时间和 PID 调用 `logging.New`；记录一条 Info 事件并关闭记录器。
-2. 断言只创建一个 `logs/mewcode-*.jsonl` 文件；逐行解码 JSON，断言存在 `time`、`level`、`component`、`event`、`message`，且自定义字段保持可解析。
+2. 断言只创建一个日志文件；逐行解码 JSON，断言存在 `time`、`level`、`source`、`message`，且自定义字段保持可解析。
 3. 添加并发测试：多个 goroutine 经同一记录器写入固定数量事件；关闭后逐行解码并断言记录数准确。
 4. 添加 no-op 测试：`logging.Nop()` 的记录和关闭不创建文件、不返回错误。
 5. 在 `logger.go` 定义 `Fields`、`Event` 与 `Logger`，实现 `New(root, now, pid)`、`Nop()`、`WithFields`、`Info`、`Error` 和 `Close`。
@@ -143,4 +143,3 @@
 ```text
 T1 → T2 → T3 → T4 → T5 → T6
 ```
-

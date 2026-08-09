@@ -12,7 +12,7 @@
 
 - 日志仅写到 `<项目根>/logs/`，不增加第三方依赖、不上传日志。
 - 每次运行创建独立 `.jsonl` 文件；单条事件是单行 JSON。
-- 事件字段必须包含 `time`、`level`、`component`、`event` 和 `message`。
+- 事件字段必须包含 `time`、`level`、`source` 和 `message`。
 - MCP 日志字段仅允许状态、阶段、Server 名、工具名、传输类型和数量；禁止记录密钥、headers、环境变量值、URL、工具参数、文件内容、工具结果与原始错误文本。
 - 日志失败必须退化，不得改变 MewCode、MCP 或退出路径的结果。
 - 本章只接入 MCP；后续模块复用 `internal/logging`，不在本章扩展 Agent、Provider、权限或内置工具的历史路径。
@@ -52,8 +52,7 @@ type Fields map[string]any
 type Event struct {
     Time      time.Time `json:"time"`
     Level     string    `json:"level"`
-    Component string    `json:"component"`
-    Event     string    `json:"event"`
+    Source    string    `json:"source,omitempty"`
     Message   string    `json:"message"`
     Fields    Fields    `json:"fields,omitempty"`
 }
@@ -63,8 +62,8 @@ type Logger struct { /* writer, mutex, base fields and close state */ }
 func New(root string, now func() time.Time, pid int) (*Logger, error)
 func Nop() *Logger
 func (l *Logger) WithFields(fields Fields) *Logger
-func (l *Logger) Info(component, event, message string, fields Fields)
-func (l *Logger) Error(component, event, message string, fields Fields)
+func (l *Logger) Info(message string, fields Fields)
+func (l *Logger) Error(message string, fields Fields)
 func (l *Logger) Close() error
 ```
 
@@ -132,4 +131,3 @@ Logger（mutex）→ JSON marshal → 单行追加到 logs/*.jsonl
 | F5 | `RemoteToolAdapter` 与 `Client` 的调用状态事件 |
 | F6 | 全部 MCP 调用点的白名单字段约定与脱敏回归测试 |
 | F7、N4、N5 | 独立内部包、MCP 显式注入和仅根目录输出 |
-

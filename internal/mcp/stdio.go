@@ -8,7 +8,11 @@ import (
 	"io"
 	"os"
 	"os/exec"
+	"regexp"
+	"strings"
 	"sync"
+
+	"github.com/GitHub-freshman-X/mewcode01/internal/logging"
 )
 
 type StdioTransport struct {
@@ -21,10 +25,13 @@ type StdioTransport struct {
 	stdin   io.WriteCloser
 	inbound chan Inbound
 	closed  bool
+	logger  *logging.Logger
 }
 
-func NewStdioTransport(command string, args []string, env map[string]string) *StdioTransport {
-	return &StdioTransport{command: command, args: append([]string(nil), args...), env: cloneStrings(env), inbound: make(chan Inbound, 16)}
+var stderrSecret = regexp.MustCompile(`(?i)(authorization\s*[:=]\s*bearer\s+|bearer\s+|authorization\s*[:=]\s*|token\s*[:=]\s*|api[_-]?key\s*[:=]\s*|password\s*[:=]\s*)\S+`)
+
+func NewStdioTransport(command string, args []string, env map[string]string, loggers ...*logging.Logger) *StdioTransport {
+	return &StdioTransport{command: command, args: append([]string(nil), args...), env: cloneStrings(env), inbound: make(chan Inbound, 16), logger: normalizedLogger(loggers)}
 }
 
 func (t *StdioTransport) Start(ctx context.Context) error {
@@ -60,9 +67,28 @@ func (t *StdioTransport) Start(ctx context.Context) error {
 	}
 	t.cmd, t.stdin = cmd, stdin
 	go t.read(stdout)
-	go func() { _, _ = io.Copy(io.Discard, io.LimitReader(stderr, 64<<10)) }()
+	go t.logStderr(stderr)
 	go func() { _ = cmd.Wait(); t.publish(Inbound{Err: ErrSessionClosed}) }()
 	return nil
+}
+
+func safeStderr(text string) string {
+	text = stderrSecret.ReplaceAllString(text, "$1[redacted]")
+	if len(text) > 4096 {
+		return text[:4096] + "…"
+	}
+	return text
+}
+
+func (t *StdioTransport) logStderr(stderr io.Reader) {
+	contents, err := io.ReadAll(io.LimitReader(stderr, 64<<10))
+	if err != nil {
+		t.logger.Error("MCP server stderr read failed", logging.Fields{"error": err.Error()})
+		return
+	}
+	if text := strings.TrimSpace(string(contents)); text != "" {
+		t.logger.Error("MCP server stderr", logging.Fields{"stderr": safeStderr(text)})
+	}
 }
 
 func (t *StdioTransport) Send(ctx context.Context, message []byte) error {

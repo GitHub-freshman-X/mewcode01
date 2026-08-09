@@ -36,32 +36,32 @@ func (c *Client) Initialize(ctx context.Context) error {
 	if c.initialized {
 		return nil
 	}
-	c.logger.Info("mcp", "initialize_started", "MCP initialization started", logging.Fields{"stage": "initialize", "status": "started"})
+	c.logger.Info("MCP initialization started", logging.Fields{"stage": "initialize", "status": "started"})
 	var result struct {
 		ProtocolVersion string `json:"protocolVersion"`
 	}
 	if err := c.session.Request(ctx, "initialize", map[string]any{"protocolVersion": protocolVersion, "capabilities": map[string]any{}, "clientInfo": map[string]string{"name": "mewcode", "version": "0.1"}}, &result); err != nil {
-		c.logger.Error("mcp", "initialize_failed", "MCP initialization failed", logging.Fields{"stage": "initialize", "status": "initialize_failed"})
+		c.logger.Error("MCP initialization failed", logging.Fields{"stage": "initialize", "status": "initialize_failed"})
 		return fmt.Errorf("initialize: %w", err)
 	}
 	if result.ProtocolVersion == "" {
-		c.logger.Error("mcp", "initialize_failed", "MCP initialization failed", logging.Fields{"stage": "initialize", "status": "initialize_failed"})
+		c.logger.Error("MCP initialization failed", logging.Fields{"stage": "initialize", "status": "initialize_failed"})
 		return fmt.Errorf("initialize: server did not select a protocol version")
 	}
 	if err := c.session.Notify(ctx, "notifications/initialized", map[string]any{}); err != nil {
-		c.logger.Error("mcp", "initialized_notification_failed", "MCP initialized notification failed", logging.Fields{"stage": "initialize", "status": "notification_failed"})
+		c.logger.Error("MCP initialized notification failed", logging.Fields{"stage": "initialize", "status": "notification_failed"})
 		return fmt.Errorf("initialized notification: %w", err)
 	}
 	c.initialized = true
-	c.logger.Info("mcp", "initialize_succeeded", "MCP initialization succeeded", logging.Fields{"stage": "initialize", "status": "initialized"})
-	c.logger.Info("mcp", "initialized_notification_sent", "MCP initialized notification sent", logging.Fields{"stage": "initialize", "status": "notification_sent"})
+	c.logger.Info("MCP initialization succeeded", logging.Fields{"stage": "initialize", "status": "initialized"})
+	c.logger.Info("MCP initialized notification sent", logging.Fields{"stage": "initialize", "status": "notification_sent"})
 	return nil
 }
 func (c *Client) ListTools(ctx context.Context) ([]RemoteTool, error) {
 	if !c.initialized {
 		return nil, fmt.Errorf("tools/list: client is not initialized")
 	}
-	c.logger.Info("mcp", "tool_discovery_started", "MCP tool discovery started", logging.Fields{"stage": "discover", "status": "started"})
+	c.logger.Info("MCP tool discovery started", logging.Fields{"stage": "discover", "status": "started"})
 	var result struct {
 		Tools []struct {
 			Name        string       `json:"name"`
@@ -70,7 +70,7 @@ func (c *Client) ListTools(ctx context.Context) ([]RemoteTool, error) {
 		} `json:"tools"`
 	}
 	if err := c.session.Request(ctx, "tools/list", map[string]any{}, &result); err != nil {
-		c.logger.Error("mcp", "tool_discovery_failed", "MCP tool discovery failed", logging.Fields{"stage": "discover", "status": "discover_failed"})
+		c.logger.Error("MCP tool discovery failed", logging.Fields{"stage": "discover", "status": "discover_failed"})
 		return nil, fmt.Errorf("tools/list: %w", err)
 	}
 	out := make([]RemoteTool, 0, len(result.Tools))
@@ -84,7 +84,7 @@ func (c *Client) ListTools(ctx context.Context) ([]RemoteTool, error) {
 		out = append(out, RemoteTool{Name: remote.Name, Description: remote.Description, InputSchema: remote.InputSchema})
 	}
 	sort.Slice(out, func(i, j int) bool { return out[i].Name < out[j].Name })
-	c.logger.Info("mcp", "tool_discovery_succeeded", "MCP tool discovery succeeded", logging.Fields{"stage": "discover", "status": "discovered", "tool_count": len(out)})
+	c.logger.Info("MCP tool discovery succeeded", logging.Fields{"stage": "discover", "status": "discovered", "tool_count": len(out)})
 	return out, nil
 }
 func (c *Client) CallTool(ctx context.Context, name string, args json.RawMessage) (CallResult, error) {
@@ -94,7 +94,7 @@ func (c *Client) CallTool(ctx context.Context, name string, args json.RawMessage
 	if len(args) == 0 {
 		args = json.RawMessage(`{}`)
 	}
-	c.logger.Info("mcp", "remote_tool_call_started", "MCP remote tool call started", logging.Fields{"stage": "call", "status": "started", "remote_tool": name})
+	c.logger.Info("MCP remote tool call started", logging.Fields{"stage": "call", "status": "started", "remote_tool": name})
 	var arguments any
 	if err := json.Unmarshal(args, &arguments); err != nil {
 		return CallResult{}, fmt.Errorf("tools/call: arguments: %w", err)
@@ -105,7 +105,7 @@ func (c *Client) CallTool(ctx context.Context, name string, args json.RawMessage
 		IsError           bool  `json:"isError"`
 	}
 	if err := c.session.Request(ctx, "tools/call", map[string]any{"name": name, "arguments": arguments}, &result); err != nil {
-		c.logger.Error("mcp", "remote_tool_call_failed", "MCP remote tool call failed", logging.Fields{"stage": "call", "status": "rpc_failed", "remote_tool": name})
+		c.logger.Error("MCP remote tool call failed", logging.Fields{"stage": "call", "status": "rpc_failed", "remote_tool": name})
 		return CallResult{}, fmt.Errorf("tools/call: %w", err)
 	}
 	text := ""
@@ -120,7 +120,7 @@ func (c *Client) CallTool(ctx context.Context, name string, args json.RawMessage
 	if result.IsError {
 		status = "tool_error"
 	}
-	c.logger.Info("mcp", "remote_tool_call_completed", "MCP remote tool call completed", logging.Fields{"stage": "call", "status": status, "remote_tool": name})
+	c.logger.Info("MCP remote tool call completed", logging.Fields{"stage": "call", "status": status, "remote_tool": name})
 	return CallResult{Text: text, Content: result.Content, StructuredContent: result.StructuredContent, IsError: result.IsError}, nil
 }
 func (c *Client) Close(ctx context.Context) error { return c.session.Close(ctx) }

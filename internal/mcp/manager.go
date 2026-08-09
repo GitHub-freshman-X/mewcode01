@@ -44,32 +44,32 @@ func (m *Manager) ConnectAndRegister(ctx context.Context, registry *tools.Regist
 	for _, name := range names {
 		logger := m.logger.WithFields(logging.Fields{"server": name})
 		raw := servers[name]
-		logger.Info("mcp", "server_configuration_started", "MCP server configuration started", logging.Fields{"stage": "configuration", "status": "started"})
+		logger.Info("MCP server configuration started", logging.Fields{"stage": "configuration", "status": "started"})
 		server, err := ExpandServer(name, raw, nil)
 		if err != nil {
-			logger.Error("mcp", "server_configuration_failed", "MCP server configuration failed", logging.Fields{"stage": "configuration", "status": "configuration_failed"})
+			logger.Error("MCP server configuration failed", logging.Fields{"stage": "configuration", "status": "configuration_failed"})
 			diagnostics = m.report(diagnostics, Diagnostic{name, "configuration", err})
 			continue
 		}
 		var transport Transport
 		switch server.Type {
 		case config.MCPTransportStdio:
-			logger.Info("mcp", "server_connect_started", "MCP server connection started", logging.Fields{"stage": "connect", "status": "started", "transport": "stdio"})
-			st := NewStdioTransport(server.Command, server.Args, server.Env)
+			logger.Info("MCP server connection started", logging.Fields{"stage": "connect", "status": "started", "transport": "stdio"})
+			st := NewStdioTransport(server.Command, server.Args, server.Env, logger)
 			if err := st.Start(ctx); err != nil {
-				logger.Error("mcp", "server_connect_failed", "MCP server connection failed", logging.Fields{"stage": "connect", "status": "connect_failed", "transport": "stdio"})
+				logger.Error("MCP server connection failed", logging.Fields{"stage": "connect", "status": "connect_failed", "transport": "stdio"})
 				diagnostics = m.report(diagnostics, Diagnostic{name, "connect", err})
 				continue
 			}
 			transport = st
 		case config.MCPTransportHTTP:
-			logger.Info("mcp", "server_connect_started", "MCP server connection started", logging.Fields{"stage": "connect", "status": "started", "transport": "http"})
+			logger.Info("MCP server connection started", logging.Fields{"stage": "connect", "status": "started", "transport": "http"})
 			transport = NewHTTPTransport(server.URL, server.Headers, m.httpClient)
 		default:
 			diagnostics = m.report(diagnostics, Diagnostic{name, "configuration", errors.New("unsupported transport")})
 			continue
 		}
-		logger.Info("mcp", "server_connected", "MCP server connected", logging.Fields{"stage": "connect", "status": "connected"})
+		logger.Info("MCP server connected", logging.Fields{"stage": "connect", "status": "connected"})
 		client := NewClient(transport, logger)
 		if err := client.Initialize(ctx); err != nil {
 			_ = client.Close(ctx)
@@ -110,7 +110,7 @@ func (m *Manager) ConnectAndRegister(ctx context.Context, registry *tools.Regist
 				break
 			}
 			meta := adapter.Metadata()
-			logger.Info("mcp", "tool_registered", "MCP tool registered", logging.Fields{"stage": "register", "status": "registered", "remote_tool": remoteName(meta.Name), "tool": meta.Name})
+			logger.Info("MCP tool registered", logging.Fields{"stage": "register", "status": "registered", "remote_tool": remoteName(meta.Name), "tool": meta.Name})
 		}
 		if conflict {
 			_ = client.Close(ctx)
@@ -133,12 +133,12 @@ func (m *Manager) Close(ctx context.Context) error {
 	for i := len(m.order) - 1; i >= 0; i-- {
 		name := m.order[i]
 		logger := m.logger.WithFields(logging.Fields{"server": name})
-		logger.Info("mcp", "server_close_started", "MCP server close started", logging.Fields{"stage": "close", "status": "started"})
+		logger.Info("MCP server close started", logging.Fields{"stage": "close", "status": "started"})
 		if err := m.clients[name].Close(ctx); err != nil {
-			logger.Error("mcp", "server_close_failed", "MCP server close failed", logging.Fields{"stage": "close", "status": "close_failed"})
+			logger.Error("MCP server close failed", logging.Fields{"stage": "close", "status": "close_failed"})
 			errs = append(errs, err)
 		} else {
-			logger.Info("mcp", "server_closed", "MCP server closed", logging.Fields{"stage": "close", "status": "closed"})
+			logger.Info("MCP server closed", logging.Fields{"stage": "close", "status": "closed"})
 		}
 	}
 	return errors.Join(errs...)

@@ -63,14 +63,14 @@ func run(args []string, stderr io.Writer) int {
 	}()
 	result, envErr := envfile.Load(filepath.Join(root, ".env"), os.LookupEnv, os.Setenv)
 	if envErr != nil {
-		logger.Error("dotenv", "dotenv_load_failed", "dotenv load failed", logging.Fields{"status": "failed"})
+		logger.Error("dotenv load failed", logging.Fields{"status": "failed"})
 		fmt.Fprintln(stderr, "dotenv: load failed")
 	} else if !result.Found {
-		logger.Info("dotenv", "dotenv_not_found", "dotenv file not found", logging.Fields{"status": "not_found"})
+		logger.Info("dotenv file not found", logging.Fields{"status": "not_found"})
 	} else {
-		logger.Info("dotenv", "dotenv_loaded", "dotenv file loaded", logging.Fields{"status": "loaded", "variable_count": len(result.Loaded)})
+		logger.Info("dotenv file loaded", logging.Fields{"status": "loaded", "variable_count": len(result.Loaded)})
 		for _, key := range result.Skipped {
-			logger.Info("dotenv", "dotenv_variable_skipped", "dotenv variable skipped", logging.Fields{"status": "system_preferred", "variable": key})
+			logger.Info("dotenv variable skipped", logging.Fields{"status": "system_preferred", "variable": key})
 		}
 	}
 	path := *configPath

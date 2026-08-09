@@ -81,7 +81,7 @@ func TestManagerLogsSuccessfulRegistration(t *testing.T) {
 	if err := logger.Close(); err != nil {
 		t.Fatal(err)
 	}
-	files, err := filepath.Glob(filepath.Join(root, "logs", "*.jsonl"))
+	files, err := filepath.Glob(filepath.Join(root, "logs", "*", "*", "*", "*.jsonl"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -89,7 +89,7 @@ func TestManagerLogsSuccessfulRegistration(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !strings.Contains(string(contents), `"event":"tool_registered"`) || !strings.Contains(string(contents), `"tool":"healthy__search"`) {
+	if !strings.Contains(string(contents), `"message":"MCP tool registered"`) || !strings.Contains(string(contents), `"tool":"healthy__search"`) {
 		t.Fatalf("logs=%s", contents)
 	}
 	if strings.Contains(string(contents), "SECRET_URL_VALUE") || strings.Contains(string(contents), "SECRET_HEADER_VALUE") {

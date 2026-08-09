@@ -16,11 +16,9 @@ type Fields map[string]any
 type Event struct {
 	Time      time.Time `json:"time"`
 	Level     string    `json:"level"`
-	Component string    `json:"component"`
-	Event     string    `json:"event"`
+	Source    string    `json:"source,omitempty"`
 	Message   string    `json:"message"`
 	Fields    Fields    `json:"fields,omitempty"`
-	Source    string    `json:"source,omitempty"`
 }
 
 type Logger struct {
@@ -69,12 +67,12 @@ func (l *Logger) WithFields(fields Fields) *Logger {
 	return &Logger{state: l.state, base: base, root: l.root}
 }
 
-func (l *Logger) Info(component, event, message string, fields Fields) {
-	l.log("info", component, event, message, fields)
+func (l *Logger) Info(message string, fields Fields) {
+	l.log("info", message, fields)
 }
 
-func (l *Logger) Error(component, event, message string, fields Fields) {
-	l.log("error", component, event, message, fields)
+func (l *Logger) Error(message string, fields Fields) {
+	l.log("error", message, fields)
 }
 
 func (l *Logger) Close() error {
@@ -90,7 +88,7 @@ func (l *Logger) Close() error {
 	return l.state.file.Close()
 }
 
-func (l *Logger) log(level, component, name, message string, fields Fields) {
+func (l *Logger) log(level, message string, fields Fields) {
 	if l == nil {
 		return
 	}
@@ -103,7 +101,7 @@ func (l *Logger) log(level, component, name, message string, fields Fields) {
 	for key, value := range fields {
 		merged[key] = value
 	}
-	entry := Event{Time: l.state.now(), Level: level, Component: component, Event: name, Message: message, Fields: merged, Source: l.source()}
+	entry := Event{Time: l.state.now(), Level: level, Message: message, Fields: merged, Source: l.source()}
 	encoded, err := json.Marshal(entry)
 	if err != nil {
 		return

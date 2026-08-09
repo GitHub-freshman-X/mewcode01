@@ -5,7 +5,7 @@
 ## 实现完整性
 
 - [ ] **独立日志文件**：在临时项目根目录创建记录器后，存在唯一的 `logs/mewcode-*.jsonl` 文件。（验证：运行 `go test ./internal/logging -run TestNewWritesJSONL`，期望测试解码到一条事件。）
-- [ ] **稳定事件结构**：每行日志可解码为 JSON，并包含 `time`、`level`、`component`、`event`、`message`；调用方字段置于 `fields`。（验证：运行 `go test ./internal/logging -run TestNewWritesJSONL`，期望字段断言通过。）
+- [ ] **稳定事件结构**：每行日志可解码为 JSON，并包含 `time`、`level`、`source`、`message`；调用方字段置于 `fields`。（验证：运行 `go test ./internal/logging -run TestNewWritesJSONL`，期望字段断言通过。）
 - [ ] **运行实例隔离**：相同项目根目录内以不同时间或 PID 创建两次记录器时，生成两个不同文件且不覆盖已有日志。（验证：运行 `go test ./internal/logging -run TestNewUsesDistinctRunFiles`，期望文件数为 2。）
 - [ ] **无操作降级**：no-op 记录器记录、派生字段和关闭均不创建文件且不返回错误。（验证：运行 `go test ./internal/logging -run TestNop`，期望通过。）
 - [ ] **并发完整性**：并发写入后，日志行数等于写入次数，所有行可独立解码。（验证：运行 `go test -race ./internal/logging -run TestLoggerConcurrentWrites`，期望通过且 race detector 无报告。）
