@@ -8,11 +8,11 @@ import (
 
 func TestNew(t *testing.T) {
 	for _, protocol := range []config.Protocol{config.ProtocolAnthropic, config.ProtocolOpenAI} {
-		if p, err := New(config.Config{Protocol: protocol, BaseURL: "http://localhost", APIKey: "x", Model: "x"}, &http.Client{}); err != nil || p == nil {
+		if p, err := New(config.Config{Protocol: protocol, BaseURL: "http://localhost", APIKey: "x", Model: "x"}, &http.Client{}, nil); err != nil || p == nil {
 			t.Fatalf("protocol=%s p=%v err=%v", protocol, p, err)
 		}
 	}
-	if _, err := New(config.Config{Protocol: "other", BaseURL: "http://localhost"}, nil); err == nil {
+	if _, err := New(config.Config{Protocol: "other", BaseURL: "http://localhost"}, nil, nil); err == nil {
 		t.Fatal("expected error")
 	}
 }

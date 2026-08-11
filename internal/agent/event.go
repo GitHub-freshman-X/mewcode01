@@ -4,6 +4,8 @@ import (
 	"context"
 	"os"
 
+	contextmanager "github.com/GitHub-freshman-X/mewcode01/internal/context"
+	"github.com/GitHub-freshman-X/mewcode01/internal/logging"
 	"github.com/GitHub-freshman-X/mewcode01/internal/permissions"
 	"github.com/GitHub-freshman-X/mewcode01/internal/prompt"
 	"github.com/GitHub-freshman-X/mewcode01/internal/provider"
@@ -12,9 +14,10 @@ import (
 type Mode string
 
 const (
-	ModeAct  Mode = "act"
-	ModePlan Mode = "plan"
-	ModeDo   Mode = "do"
+	ModeAct     Mode = "act"
+	ModePlan    Mode = "plan"
+	ModeDo      Mode = "do"
+	ModeCompact Mode = "compact"
 )
 
 type Request struct {
@@ -36,6 +39,8 @@ type Options struct {
 	Injection     prompt.InjectionPolicy
 	Permissions   *permissions.Engine
 	Confirmer     PermissionBridge
+	Context       contextmanager.Config
+	Logger        *logging.Logger
 }
 
 type PermissionBridge interface {
@@ -58,6 +63,12 @@ func (o Options) normalized() Options {
 		o.Clock = prompt.SystemClock{}
 	}
 	o.Injection = prompt.NormalizeInjectionPolicy(o.Injection)
+	if o.Context.WindowTokens == 0 {
+		o.Context = contextmanager.DefaultConfig()
+	}
+	if o.Logger == nil {
+		o.Logger = logging.Nop()
+	}
 	return o
 }
 
@@ -72,6 +83,7 @@ const (
 	EventPermissionRequest  EventType = "permission_request"
 	EventPermissionResponse EventType = "permission_response"
 	EventUsage              EventType = "usage"
+	EventContextCompaction  EventType = "context_compaction"
 	EventCompleted          EventType = "completed"
 	EventStopped            EventType = "stopped"
 	EventCancelled          EventType = "cancelled"
@@ -104,6 +116,14 @@ type Summary struct {
 	Partial    bool
 }
 
+type CompactionEvent struct {
+	Trigger      contextmanager.Trigger
+	BeforeTokens int
+	AfterTokens  int
+	Persisted    []contextmanager.Persistence
+	Error        string
+}
+
 type Event struct {
 	Type                   EventType
 	Iteration              int
@@ -114,6 +134,7 @@ type Event struct {
 	PermissionDecision     *permissions.Decision
 	PermissionConfirmation *permissions.Confirmation
 	Usage                  *provider.Usage
+	ContextCompaction      *CompactionEvent
 	Summary                *Summary
 	Err                    error
 }

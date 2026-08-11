@@ -25,7 +25,7 @@ func (m *Model) refreshContent() {
 			renderMessage(&b, message, false, m.thinkingExpanded)
 		}
 	}
-	if m.task != nil || m.current.terminalTy == agent.EventCancelled || m.current.terminalTy == agent.EventFailed {
+	if m.task != nil || m.current.terminalTy == agent.EventCancelled || m.current.terminalTy == agent.EventFailed || len(m.current.compactions) > 0 {
 		if m.current.prompt != "" {
 			renderMessage(&b, provider.Message{Role: provider.RoleUser, Blocks: []provider.ContentBlock{{Type: provider.BlockText, Text: m.current.prompt}}}, false, false)
 		}
@@ -45,6 +45,17 @@ func (m *Model) refreshContent() {
 				status = "失败"
 			}
 			fmt.Fprintf(&b, "工具结果: %s %s\n", result.Name, status)
+		}
+		for _, compaction := range m.current.compactions {
+			if compaction.Error != "" {
+				fmt.Fprintf(&b, "上下文压缩: %s 失败: %s\n", compaction.Trigger, compaction.Error)
+				continue
+			}
+			if compaction.BeforeTokens != 0 || compaction.AfterTokens != 0 {
+				fmt.Fprintf(&b, "上下文压缩: %s %d -> %d tokens\n", compaction.Trigger, compaction.BeforeTokens, compaction.AfterTokens)
+			} else if len(compaction.Persisted) > 0 {
+				fmt.Fprintf(&b, "上下文压缩: 工具结果已持久化 %d 项\n", len(compaction.Persisted))
+			}
 		}
 		if m.current.err != nil {
 			fmt.Fprintf(&b, "%s\n\n", errorStyle.Render("错误: "+provider.UserError(m.current.err)))

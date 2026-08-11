@@ -26,3 +26,24 @@ func TestTaskHistoryMultiRound(t *testing.T) {
 		t.Fatal("task history snapshot shares state")
 	}
 }
+
+func TestTaskHistoryReplaceIsIsolatedFromSessionHistory(t *testing.T) {
+	base := []provider.Message{{Role: provider.RoleUser, Blocks: []provider.ContentBlock{{Type: provider.BlockText, Text: "session"}}}}
+	history := newTaskHistory(base)
+	replacement := []provider.Message{{Role: provider.RoleUser, Blocks: []provider.ContentBlock{{Type: provider.BlockText, Text: "plan compressed"}}}}
+
+	history.Replace(replacement)
+	replacement[0].Blocks[0].Text = "mutated"
+
+	snapshot := history.Snapshot()
+	if len(snapshot) != 1 || snapshot[0].Blocks[0].Text != "plan compressed" {
+		t.Fatalf("snapshot=%+v", snapshot)
+	}
+	if base[0].Blocks[0].Text != "session" {
+		t.Fatalf("base history changed: %+v", base)
+	}
+	snapshot[0].Blocks[0].Text = "changed again"
+	if got := history.Snapshot()[0].Blocks[0].Text; got != "plan compressed" {
+		t.Fatalf("replace shares state: %q", got)
+	}
+}

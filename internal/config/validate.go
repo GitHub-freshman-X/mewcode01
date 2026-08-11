@@ -29,6 +29,9 @@ func Validate(cfg Config) error {
 	if cfg.Agent.MaxIterations < 0 {
 		return fmt.Errorf("config: field %q must not be negative", "agent.max_iterations")
 	}
+	if err := validateContextConfig(cfg.Agent.Context); err != nil {
+		return err
+	}
 	switch cfg.Permissions.Mode {
 	case "", PermissionModeStrict, PermissionModeDefault, PermissionModeRelaxed:
 	default:
@@ -52,6 +55,30 @@ func Validate(cfg Config) error {
 		if err := ValidateMCPServer(name, server); err != nil {
 			return err
 		}
+	}
+	return nil
+}
+
+func validateContextConfig(cfg ContextConfig) error {
+	for _, field := range []struct {
+		name  string
+		value int
+	}{
+		{"agent.context.window_tokens", cfg.WindowTokens}, {"agent.context.summary_output_tokens", cfg.SummaryOutputTokens},
+		{"agent.context.auto_safety_tokens", cfg.AutoSafetyTokens}, {"agent.context.manual_safety_tokens", cfg.ManualSafetyTokens},
+		{"agent.context.single_result_chars", cfg.SingleResultChars}, {"agent.context.message_result_chars", cfg.MessageResultChars},
+		{"agent.context.preview_chars", cfg.PreviewChars}, {"agent.context.recent_tokens", cfg.RecentTokens},
+		{"agent.context.recent_message_minimum", cfg.RecentMessageMinimum},
+	} {
+		if field.value < 0 {
+			return fmt.Errorf("config: field %q must not be negative", field.name)
+		}
+	}
+	if cfg.SingleResultChars == 0 || cfg.MessageResultChars == 0 || cfg.PreviewChars == 0 || cfg.RecentTokens == 0 || cfg.RecentMessageMinimum == 0 {
+		return fmt.Errorf("config: first-layer and recent context budgets must be greater than zero")
+	}
+	if cfg.WindowTokens <= cfg.SummaryOutputTokens+cfg.AutoSafetyTokens || cfg.WindowTokens <= cfg.SummaryOutputTokens+cfg.ManualSafetyTokens {
+		return fmt.Errorf("config: field %q must exceed summary output and safety budgets", "agent.context.window_tokens")
 	}
 	return nil
 }

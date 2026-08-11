@@ -20,6 +20,13 @@ func (h *taskHistory) Snapshot() []provider.Message {
 	return provider.CloneMessages(h.messages)
 }
 
+func (h *taskHistory) Replace(messages []provider.Message) {
+	if h == nil {
+		return
+	}
+	h.messages = provider.CloneMessages(messages)
+}
+
 func (h *taskHistory) CommitRound(user *provider.Message, assistant provider.Message, results []provider.ToolResult) error {
 	additions, err := conversation.BuildRound(user, assistant, results)
 	if err != nil {

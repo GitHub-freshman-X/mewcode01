@@ -28,6 +28,11 @@ func prepareRequest(req Request, session *conversation.Session, registry *tools.
 			return preparedRequest{}, errors.New("prompt is empty")
 		}
 		return preparedRequest{prompt: prompt, registry: registry}, nil
+	case ModeCompact:
+		if prompt != "" {
+			return preparedRequest{}, errors.New("/compact does not accept a prompt")
+		}
+		return preparedRequest{registry: registry}, nil
 	case ModePlan:
 		if prompt == "" {
 			return preparedRequest{}, errors.New("plan task is empty")

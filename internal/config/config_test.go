@@ -3,6 +3,7 @@ package config
 import (
 	"os"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
 )
@@ -32,6 +33,71 @@ func TestLoadAndDefaults(t *testing.T) {
 				t.Fatalf("permissions.mode=%q", cfg.Permissions.Mode)
 			}
 		})
+	}
+}
+
+func TestContextConfigDefaultsAndOverrides(t *testing.T) {
+	base := "protocol: openai\nmodel: test\nbase_url: http://localhost\napi_key: fake\n"
+	defaults, err := Load(writeConfig(t, base))
+	if err != nil {
+		t.Fatal(err)
+	}
+	assertContextConfig(t, defaults, map[string]int{
+		"WindowTokens": 200000, "SummaryOutputTokens": 20000,
+		"AutoSafetyTokens": 13000, "ManualSafetyTokens": 3000,
+		"SingleResultChars": 50000, "MessageResultChars": 200000,
+		"PreviewChars": 2000, "RecentTokens": 10000, "RecentMessageMinimum": 5,
+	})
+
+	overridden, err := Load(writeConfig(t, base+`agent:
+  context:
+    window_tokens: 300000
+    summary_output_tokens: 25000
+    auto_safety_tokens: 11000
+    manual_safety_tokens: 4000
+    single_result_chars: 60000
+    message_result_chars: 250000
+    preview_chars: 3000
+    recent_tokens: 12000
+    recent_message_minimum: 6
+`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	assertContextConfig(t, overridden, map[string]int{
+		"WindowTokens": 300000, "SummaryOutputTokens": 25000,
+		"AutoSafetyTokens": 11000, "ManualSafetyTokens": 4000,
+		"SingleResultChars": 60000, "MessageResultChars": 250000,
+		"PreviewChars": 3000, "RecentTokens": 12000, "RecentMessageMinimum": 6,
+	})
+}
+
+func TestInvalidContextConfig(t *testing.T) {
+	base := "protocol: openai\nmodel: test\nbase_url: http://localhost\napi_key: fake\nagent:\n  context:\n"
+	for name, body := range map[string]string{
+		"negative":         "    auto_safety_tokens: -1\n",
+		"zero first layer": "    single_result_chars: 0\n",
+		"window too small": "    window_tokens: 23000\n    summary_output_tokens: 20000\n    manual_safety_tokens: 3000\n",
+	} {
+		t.Run(name, func(t *testing.T) {
+			if _, err := Load(writeConfig(t, base+body)); err == nil {
+				t.Fatal("expected error")
+			}
+		})
+	}
+}
+
+func assertContextConfig(t *testing.T, cfg Config, want map[string]int) {
+	t.Helper()
+	contextValue := reflect.ValueOf(cfg.Agent).FieldByName("Context")
+	if !contextValue.IsValid() {
+		t.Fatal("agent context configuration is missing")
+	}
+	for field, expected := range want {
+		got := contextValue.FieldByName(field)
+		if !got.IsValid() || int(got.Int()) != expected {
+			t.Fatalf("context.%s=%v want %d", field, got, expected)
+		}
 	}
 }
 

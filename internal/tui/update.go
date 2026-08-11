@@ -133,6 +133,9 @@ func parseRequest(input string) (agent.Request, error) {
 	if input == "/do" {
 		return agent.Request{Mode: agent.ModeDo}, nil
 	}
+	if input == "/compact" {
+		return agent.Request{Mode: agent.ModeCompact}, nil
+	}
 	if input == "/plan" || strings.HasPrefix(input, "/plan ") {
 		prompt := strings.TrimSpace(strings.TrimPrefix(input, "/plan"))
 		if prompt == "" {
@@ -163,6 +166,10 @@ func (m *Model) applyAgentEvent(event agent.Event) {
 	case agent.EventUsage:
 		if event.Usage != nil {
 			m.current.usage.Add(*event.Usage)
+		}
+	case agent.EventContextCompaction:
+		if event.ContextCompaction != nil {
+			m.current.compactions = append(m.current.compactions, *event.ContextCompaction)
 		}
 	case agent.EventCompleted, agent.EventStopped, agent.EventCancelled, agent.EventFailed:
 		m.current.terminal, m.current.terminalTy, m.current.err = event.Summary, event.Type, event.Err

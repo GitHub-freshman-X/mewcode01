@@ -11,6 +11,7 @@ import (
 	"net/url"
 	"path"
 
+	"github.com/GitHub-freshman-X/mewcode01/internal/logging"
 	"github.com/GitHub-freshman-X/mewcode01/internal/provider"
 	"github.com/GitHub-freshman-X/mewcode01/internal/provider/sse"
 )
@@ -19,11 +20,13 @@ type Options struct {
 	BaseURL       *url.URL
 	APIKey, Model string
 	HTTPClient    *http.Client
+	Logger        *logging.Logger
 }
 type Client struct {
 	endpoint      string
 	apiKey, model string
 	httpClient    *http.Client
+	logger        *logging.Logger
 }
 
 func New(options Options) provider.Provider {
@@ -33,7 +36,11 @@ func New(options Options) provider.Provider {
 	if client == nil {
 		client = http.DefaultClient
 	}
-	return &Client{u.String(), options.APIKey, options.Model, client}
+	logger := options.Logger
+	if logger == nil {
+		logger = logging.Nop()
+	}
+	return &Client{u.String(), options.APIKey, options.Model, client, logger}
 }
 
 func (c *Client) Stream(ctx context.Context, input provider.ChatRequest) (<-chan provider.StreamEvent, <-chan error) {
@@ -51,6 +58,8 @@ func (c *Client) Stream(ctx context.Context, input provider.ChatRequest) (<-chan
 			done <- requestErr("encode OpenAI request", err)
 			return
 		}
+		// c.logger.Info("provider request", logging.Fields{"stage": "provider_request", "provider": "openai", "request": string(payload)})
+		c.logger.Info("provider request", logging.Fields{"stage": "provider_request", "provider": "openai"})
 		req, err := http.NewRequestWithContext(ctx, http.MethodPost, c.endpoint, bytes.NewReader(payload))
 		if err != nil {
 			done <- requestErr("create OpenAI request", err)

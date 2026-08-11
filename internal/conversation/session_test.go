@@ -66,6 +66,31 @@ func TestSessionCommitPlanAndHistoryIsolation(t *testing.T) {
 	}
 }
 
+func TestSessionReplaceHistoryDeepCopiesAndPreservesDisplayAndPlans(t *testing.T) {
+	s := NewSession()
+	if err := commitTestPlan(s, "keep plan"); err != nil {
+		t.Fatal(err)
+	}
+	replacement := []provider.Message{{Role: provider.RoleUser, Blocks: []provider.ContentBlock{{Type: provider.BlockText, Text: "compressed"}}}}
+	s.ReplaceHistory(replacement)
+	replacement[0].Blocks[0].Text = "mutated"
+
+	snapshot := s.Snapshot()
+	if len(snapshot) != 1 || snapshot[0].Blocks[0].Text != "compressed" {
+		t.Fatalf("snapshot=%+v", snapshot)
+	}
+	snapshot[0].Blocks[0].Text = "changed"
+	if got := s.Snapshot()[0].Blocks[0].Text; got != "compressed" {
+		t.Fatalf("history shares replacement or snapshot state: %q", got)
+	}
+	if got := len(s.DisplaySnapshot()); got != 2 {
+		t.Fatalf("display changed during replace: %d", got)
+	}
+	if plans := s.PendingPlans(); len(plans) != 1 || plans[0] != "keep plan" {
+		t.Fatalf("pending plans changed: %q", plans)
+	}
+}
+
 func TestSessionPlanConsumption(t *testing.T) {
 	s := NewSession()
 	for _, plan := range []string{"first", "second"} {

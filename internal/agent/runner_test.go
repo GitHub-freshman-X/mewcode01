@@ -2,6 +2,7 @@ package agent
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"os"
 	"path/filepath"
@@ -10,7 +11,9 @@ import (
 	"testing"
 	"time"
 
+	contextmanager "github.com/GitHub-freshman-X/mewcode01/internal/context"
 	"github.com/GitHub-freshman-X/mewcode01/internal/conversation"
+	"github.com/GitHub-freshman-X/mewcode01/internal/logging"
 	"github.com/GitHub-freshman-X/mewcode01/internal/permissions"
 	"github.com/GitHub-freshman-X/mewcode01/internal/provider"
 	"github.com/GitHub-freshman-X/mewcode01/internal/tools"
@@ -375,6 +378,497 @@ func TestRunnerUsageTotal(t *testing.T) {
 	if usage.CacheCreationInputTokens != 2 || usage.CacheReadInputTokens != 5 {
 		t.Fatalf("cache usage=%+v", usage)
 	}
+}
+
+func TestRunnerAutomaticCompactBeforeNormalRequest(t *testing.T) {
+	p := &scriptedProvider{rounds: []scriptedRound{
+		textRound("<summary>draft state</summary><summary>compressed state</summary>", provider.Usage{InputTokens: 30}),
+		textRound("done", provider.Usage{InputTokens: 12}),
+	}}
+	runner, session := testRunner(t, p, Options{Context: compactTestConfig()})
+	session.ReplaceHistory([]provider.Message{testTextMessage(provider.RoleUser, strings.Repeat("a", 144))})
+
+	task, err := runner.Start(context.Background(), Request{Mode: ModeAct, Prompt: "continue"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	events := drainTask(t, task)
+	if len(p.requests) != 2 {
+		t.Fatalf("requests=%d", len(p.requests))
+	}
+	if len(p.requests[0].Tools) != 0 || p.requests[0].MaxTokens != 10 {
+		t.Fatalf("summary request=%+v", p.requests[0])
+	}
+	if got := allMessageText(p.requests[1].Messages); !strings.Contains(got, "compressed state") || strings.Contains(got, "draft state") {
+		t.Fatalf("normal request messages:\n%s", got)
+	}
+	event := firstCompactionEvent(events)
+	if event == nil || event.Trigger != contextmanager.TriggerAutomatic || event.BeforeTokens == 0 || event.AfterTokens == 0 {
+		t.Fatalf("compaction event=%+v", event)
+	}
+}
+
+func TestRunnerManualCompactUsesNoToolsAndNoNormalRequest(t *testing.T) {
+	p := &scriptedProvider{rounds: []scriptedRound{textRound("<summary>manual state</summary>", provider.Usage{InputTokens: 8})}}
+	runner, session := testRunner(t, p, Options{Context: compactTestConfig()})
+	session.ReplaceHistory([]provider.Message{testTextMessage(provider.RoleUser, "small history")})
+
+	task, err := runner.Start(context.Background(), Request{Mode: ModeCompact})
+	if err != nil {
+		t.Fatal(err)
+	}
+	events := drainTask(t, task)
+	if len(p.requests) != 1 || len(p.requests[0].Tools) != 0 {
+		t.Fatalf("requests=%d first=%+v", len(p.requests), p.requests[0])
+	}
+	if got := allMessageText(session.Snapshot()); !strings.Contains(got, "manual state") {
+		t.Fatalf("history=%s", got)
+	}
+	event := firstCompactionEvent(events)
+	if event == nil || event.Trigger != contextmanager.TriggerManual {
+		t.Fatalf("compaction event=%+v", event)
+	}
+}
+
+func TestRunnerPersistsToolResultsBeforeCommit(t *testing.T) {
+	p := &scriptedProvider{rounds: []scriptedRound{
+		toolRound(provider.ToolCall{ID: "big", Name: "big_result", Arguments: []byte(`{}`)}),
+		textRound("done", provider.Usage{}),
+	}}
+	root := t.TempDir()
+	registry := tools.NewRegistry()
+	if err := registry.Register(bigResultTool{content: strings.Repeat("x", 80)}); err != nil {
+		t.Fatal(err)
+	}
+	session := conversation.NewSession()
+	cfg := compactTestConfig()
+	cfg.WindowTokens = 1000
+	cfg.SingleResultChars = 20
+	cfg.MessageResultChars = 100
+	cfg.PreviewChars = 8
+	runner := NewRunner(p, session, registry, tools.NewExecutor(time.Second), Options{Workspace: root, Context: cfg})
+
+	task, err := runner.Start(context.Background(), Request{Mode: ModeAct, Prompt: "call tool"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	drainTask(t, task)
+	if len(p.requests) != 2 {
+		t.Fatalf("requests=%d", len(p.requests))
+	}
+	history := allMessageText(p.requests[1].Messages)
+	if !strings.Contains(history, "Tool result persisted") || strings.Contains(history, strings.Repeat("x", 80)) {
+		t.Fatalf("tool result history:\n%s", history)
+	}
+}
+
+func TestRunnerAutomaticCompactBreakerAfterThreeFailures(t *testing.T) {
+	p := &scriptedProvider{rounds: []scriptedRound{
+		textRound("missing summary", provider.Usage{}),
+		textRound("missing summary", provider.Usage{}),
+		textRound("missing summary", provider.Usage{}),
+		textRound("done", provider.Usage{}),
+	}}
+	runner, session := testRunner(t, p, Options{Context: compactTestConfig()})
+	session.ReplaceHistory([]provider.Message{testTextMessage(provider.RoleUser, strings.Repeat("a", 144))})
+
+	for i := 0; i < 3; i++ {
+		task, err := runner.Start(context.Background(), Request{Mode: ModeAct, Prompt: "continue"})
+		if err != nil {
+			t.Fatal(err)
+		}
+		events := drainTask(t, task)
+		if events[len(events)-1].Type != EventFailed {
+			t.Fatalf("attempt %d terminal=%+v", i+1, events[len(events)-1])
+		}
+	}
+	task, err := runner.Start(context.Background(), Request{Mode: ModeAct, Prompt: "continue"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	events := drainTask(t, task)
+	if events[len(events)-1].Type != EventCompleted {
+		t.Fatalf("terminal=%+v", events[len(events)-1])
+	}
+	if len(p.requests) != 4 || len(p.requests[3].Tools) == 0 {
+		t.Fatalf("breaker did not skip fourth automatic summary: requests=%d fourth tools=%d", len(p.requests), len(p.requests[3].Tools))
+	}
+}
+
+func TestRunnerManualCompactResetsAutomaticBreaker(t *testing.T) {
+	p := &scriptedProvider{rounds: []scriptedRound{
+		textRound("missing summary", provider.Usage{}),
+		textRound("missing summary", provider.Usage{}),
+		textRound("missing summary", provider.Usage{}),
+		textRound("<summary>manual state</summary>", provider.Usage{}),
+		textRound("<summary>automatic state</summary>", provider.Usage{}),
+		textRound("done", provider.Usage{}),
+	}}
+	runner, session := testRunner(t, p, Options{Context: compactTestConfig()})
+	session.ReplaceHistory([]provider.Message{testTextMessage(provider.RoleUser, strings.Repeat("a", 144))})
+	for i := 0; i < 3; i++ {
+		task, err := runner.Start(context.Background(), Request{Mode: ModeAct, Prompt: "continue"})
+		if err != nil {
+			t.Fatal(err)
+		}
+		drainTask(t, task)
+	}
+	manual, err := runner.Start(context.Background(), Request{Mode: ModeCompact})
+	if err != nil {
+		t.Fatal(err)
+	}
+	drainTask(t, manual)
+	session.ReplaceHistory([]provider.Message{testTextMessage(provider.RoleUser, strings.Repeat("b", 144))})
+
+	task, err := runner.Start(context.Background(), Request{Mode: ModeAct, Prompt: "continue"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	events := drainTask(t, task)
+	if events[len(events)-1].Type != EventCompleted {
+		t.Fatalf("terminal=%+v", events[len(events)-1])
+	}
+	if len(p.requests) != 6 || len(p.requests[4].Tools) != 0 {
+		t.Fatalf("automatic did not recover after manual compact: requests=%d fifth tools=%d", len(p.requests), len(p.requests[4].Tools))
+	}
+}
+
+func TestRunnerAutomaticSuccessResetsFailureStreak(t *testing.T) {
+	p := &scriptedProvider{rounds: []scriptedRound{
+		textRound("missing summary", provider.Usage{}),
+		textRound("missing summary", provider.Usage{}),
+		textRound("<summary>automatic state</summary>", provider.Usage{}),
+		textRound("done", provider.Usage{}),
+		textRound("missing summary", provider.Usage{}),
+		textRound("<summary>automatic recovered</summary>", provider.Usage{}),
+		textRound("done", provider.Usage{}),
+	}}
+	runner, session := testRunner(t, p, Options{Context: compactTestConfig()})
+	session.ReplaceHistory([]provider.Message{testTextMessage(provider.RoleUser, strings.Repeat("a", 144))})
+	for i := 0; i < 2; i++ {
+		task, err := runner.Start(context.Background(), Request{Mode: ModeAct, Prompt: "continue"})
+		if err != nil {
+			t.Fatal(err)
+		}
+		drainTask(t, task)
+	}
+	for i := 0; i < 3; i++ {
+		session.ReplaceHistory([]provider.Message{testTextMessage(provider.RoleUser, strings.Repeat("b", 144))})
+		task, err := runner.Start(context.Background(), Request{Mode: ModeAct, Prompt: "continue"})
+		if err != nil {
+			t.Fatal(err)
+		}
+		drainTask(t, task)
+	}
+	if len(p.requests) != 7 || len(p.requests[5].Tools) != 0 {
+		t.Fatalf("automatic success did not reset failure streak: requests=%d sixth tools=%d", len(p.requests), len(p.requests[5].Tools))
+	}
+}
+
+func TestRunnerPlanCompactReplacesOnlyTaskHistory(t *testing.T) {
+	p := &scriptedProvider{rounds: []scriptedRound{
+		textRound("<summary>plan compressed</summary>", provider.Usage{}),
+		textRound("plan output", provider.Usage{}),
+	}}
+	runner, session := testRunner(t, p, Options{Context: compactTestConfig()})
+	original := testTextMessage(provider.RoleUser, strings.Repeat("a", 144))
+	session.ReplaceHistory([]provider.Message{original})
+
+	task, err := runner.Start(context.Background(), Request{Mode: ModePlan, Prompt: "inspect"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	drainTask(t, task)
+	if got := session.Snapshot(); len(got) != 1 || got[0].Blocks[0].Text != original.Blocks[0].Text {
+		t.Fatalf("shared history changed: %+v", got)
+	}
+	if len(p.requests) != 2 || !strings.Contains(allMessageText(p.requests[1].Messages), "plan compressed") {
+		t.Fatalf("plan compact requests=%d second=%+v", len(p.requests), p.requests[1])
+	}
+}
+
+func TestRunnerPlanCompactDoesNotPolluteSharedContextAnchor(t *testing.T) {
+	p := &scriptedProvider{rounds: []scriptedRound{
+		textRound("<summary>plan compressed</summary>", provider.Usage{}),
+		textRound("plan output", provider.Usage{}),
+		textRound("<summary>act compressed</summary>", provider.Usage{}),
+		textRound("done", provider.Usage{}),
+	}}
+	runner, session := testRunner(t, p, Options{Context: compactTestConfig()})
+	session.ReplaceHistory([]provider.Message{
+		testTextMessage(provider.RoleUser, strings.Repeat("a", 48)),
+		testTextMessage(provider.RoleAssistant, strings.Repeat("b", 48)),
+		testTextMessage(provider.RoleUser, strings.Repeat("c", 48)),
+	})
+
+	plan, err := runner.Start(context.Background(), Request{Mode: ModePlan, Prompt: "inspect"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	drainTask(t, plan)
+	act, err := runner.Start(context.Background(), Request{Mode: ModeAct, Prompt: "continue"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	drainTask(t, act)
+	if len(p.requests) != 4 || len(p.requests[2].Tools) != 0 {
+		t.Fatalf("shared context anchor was polluted by plan: requests=%d third tools=%d", len(p.requests), len(p.requests[2].Tools))
+	}
+}
+
+func TestRunnerEmergencyCompactRetriesContextTooLongOnce(t *testing.T) {
+	p := &scriptedProvider{rounds: []scriptedRound{
+		{err: errors.New("context length exceeded")},
+		textRound("<summary>emergency state</summary>", provider.Usage{}),
+		textRound("done", provider.Usage{}),
+	}}
+	runner, session := testRunner(t, p, Options{Context: compactTestConfig()})
+	session.ReplaceHistory([]provider.Message{testTextMessage(provider.RoleUser, "short")})
+
+	task, err := runner.Start(context.Background(), Request{Mode: ModeAct, Prompt: "continue"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	events := drainTask(t, task)
+	if events[len(events)-1].Type != EventCompleted {
+		t.Fatalf("terminal=%+v", events[len(events)-1])
+	}
+	if len(p.requests) != 3 || len(p.requests[1].Tools) != 0 {
+		t.Fatalf("requests=%d summary tools=%d", len(p.requests), len(p.requests[1].Tools))
+	}
+	event := firstCompactionEvent(events)
+	if event == nil || event.Trigger != contextmanager.TriggerEmergency {
+		t.Fatalf("compaction event=%+v", event)
+	}
+}
+
+func TestRunnerLogsContextCompactionLifecycle(t *testing.T) {
+	root := t.TempDir()
+	logger, err := logging.New(root, func() time.Time { return time.Unix(1, 0).UTC() }, 123)
+	if err != nil {
+		t.Fatal(err)
+	}
+	p := &scriptedProvider{rounds: []scriptedRound{
+		textRound("<summary>draft state</summary><summary>logged state</summary>", provider.Usage{InputTokens: 30}),
+		textRound("done", provider.Usage{InputTokens: 12}),
+	}}
+	runner, session := testRunner(t, p, Options{Context: compactTestConfig(), Logger: logger})
+	session.ReplaceHistory([]provider.Message{testTextMessage(provider.RoleUser, strings.Repeat("a", 144))})
+	task, err := runner.Start(context.Background(), Request{Mode: ModeAct, Prompt: "continue"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	drainTask(t, task)
+	if err := logger.Close(); err != nil {
+		t.Fatal(err)
+	}
+	events := readLogEvents(t, root)
+	assertLogEvent(t, events, "context compaction started", map[string]any{"stage": "context_compaction", "status": "started", "trigger": "automatic"})
+	assertLogEvent(t, events, "context compaction completed", map[string]any{"stage": "context_compaction", "status": "completed", "trigger": "automatic", "summary_candidates": float64(2), "summary_used_last": true, "summary_chars": float64(len("logged state")), "summary": "logged state"})
+	if logText := marshalLogEvents(t, events); strings.Contains(logText, "draft state") || strings.Contains(logText, strings.Repeat("a", 24)) {
+		t.Fatalf("context log leaked discarded summary or prompt: %s", logText)
+	}
+}
+
+func TestLoggerCapturesBoundedGenericDiagnostic(t *testing.T) {
+	root := t.TempDir()
+	logger, err := logging.New(root, func() time.Time { return time.Unix(1, 0).UTC() }, 123)
+	if err != nil {
+		t.Fatal(err)
+	}
+	ref, err := logger.CaptureDiagnostic("generic content", "diagnostic-payload", 10)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if ref.OriginalChars != len("diagnostic-payload") || ref.CapturedChars != 10 || !ref.Truncated || ref.Path == "" {
+		t.Fatalf("ref=%+v", ref)
+	}
+	info, err := os.Stat(filepath.Join(root, ref.Path))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if info.Mode().Perm() != 0o600 {
+		t.Fatalf("mode=%#o", info.Mode().Perm())
+	}
+	content, err := os.ReadFile(filepath.Join(root, ref.Path))
+	if err != nil || string(content) != "diagnostic" {
+		t.Fatalf("content=%q err=%v", content, err)
+	}
+}
+
+func TestRunnerLogsMalformedSummaryResponse(t *testing.T) {
+	root := t.TempDir()
+	logger, err := logging.New(root, func() time.Time { return time.Unix(1, 0).UTC() }, 123)
+	if err != nil {
+		t.Fatal(err)
+	}
+	cfg := compactTestConfig()
+	p := &scriptedProvider{rounds: []scriptedRound{textRound("<summary>draft<summary>diagnostic-payload</summary></summary>", provider.Usage{})}}
+	runner, session := testRunner(t, p, Options{Context: cfg, Logger: logger})
+	session.ReplaceHistory([]provider.Message{testTextMessage(provider.RoleUser, strings.Repeat("a", 144))})
+	task, err := runner.Start(context.Background(), Request{Mode: ModeAct, Prompt: "continue"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	drainTask(t, task)
+	if err := logger.Close(); err != nil {
+		t.Fatal(err)
+	}
+	events := readLogEvents(t, root)
+	var fields map[string]any
+	for _, event := range events {
+		if event["message"] == "context compaction failed" {
+			fields, _ = event["fields"].(map[string]any)
+		}
+	}
+	if fields["parse_reason"] != "summary wrapper contains content" || fields["summary_response"] != "<summary>draft<summary>diagnostic-payload</summary></summary>" {
+		t.Fatalf("fields=%+v", fields)
+	}
+}
+
+func TestRunnerLogsToolResultPersistenceAndEmergencyRetry(t *testing.T) {
+	root := t.TempDir()
+	logger, err := logging.New(root, func() time.Time { return time.Unix(1, 0).UTC() }, 123)
+	if err != nil {
+		t.Fatal(err)
+	}
+	p := &scriptedProvider{rounds: []scriptedRound{
+		toolRound(provider.ToolCall{ID: "big", Name: "big_result", Arguments: []byte(`{}`)}),
+		{err: errors.New("context length exceeded")},
+		textRound("<summary>emergency state</summary>", provider.Usage{}),
+		textRound("done", provider.Usage{}),
+	}}
+	registry := tools.NewRegistry()
+	if err := registry.Register(bigResultTool{content: strings.Repeat("x", 80)}); err != nil {
+		t.Fatal(err)
+	}
+	session := conversation.NewSession()
+	cfg := compactTestConfig()
+	cfg.WindowTokens = 1000
+	cfg.SingleResultChars = 20
+	cfg.MessageResultChars = 100
+	cfg.PreviewChars = 8
+	runner := NewRunner(p, session, registry, tools.NewExecutor(time.Second), Options{Workspace: root, Context: cfg, Logger: logger})
+	task, err := runner.Start(context.Background(), Request{Mode: ModeAct, Prompt: "call tool"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	drainTask(t, task)
+	if err := logger.Close(); err != nil {
+		t.Fatal(err)
+	}
+	events := readLogEvents(t, root)
+	assertLogEvent(t, events, "context tool results persisted", map[string]any{"stage": "tool_result_persistence", "status": "persisted", "persisted_count": float64(1)})
+	assertLogEvent(t, events, "context emergency retry started", map[string]any{"stage": "context_emergency_retry", "status": "started"})
+	assertLogEvent(t, events, "context compaction completed", map[string]any{"stage": "context_compaction", "status": "completed", "trigger": "emergency"})
+	if logText := marshalLogEvents(t, events); strings.Contains(logText, strings.Repeat("x", 24)) || strings.Contains(logText, "context length exceeded") {
+		t.Fatalf("context log leaked tool content or raw error: %s", logText)
+	}
+}
+
+type bigResultTool struct {
+	content string
+}
+
+func (t bigResultTool) Metadata() tools.Metadata {
+	return tools.Metadata{Name: "big_result", Description: "return a large result", Schema: tools.Schema{"type": "object"}, Safety: tools.SafetyReadOnly}
+}
+
+func (t bigResultTool) Execute(context.Context, json.RawMessage) tools.Result {
+	return tools.Success("big_result", map[string]any{"content": t.content})
+}
+
+func compactTestConfig() contextmanager.Config {
+	cfg := contextmanager.DefaultConfig()
+	cfg.WindowTokens = 50
+	cfg.SummaryOutputTokens = 10
+	cfg.AutoSafetyTokens = 5
+	cfg.ManualSafetyTokens = 3
+	cfg.RecentTokens = 4
+	cfg.RecentMessageMinimum = 1
+	return cfg
+}
+
+func testTextMessage(role provider.Role, text string) provider.Message {
+	return provider.Message{Role: role, Blocks: []provider.ContentBlock{{Type: provider.BlockText, Text: text}}}
+}
+
+func allMessageText(messages []provider.Message) string {
+	var b strings.Builder
+	for _, message := range messages {
+		for _, block := range message.Blocks {
+			b.WriteString(block.Text)
+			if block.ToolResult != nil {
+				b.WriteString(block.ToolResult.Content)
+			}
+			b.WriteByte('\n')
+		}
+	}
+	return b.String()
+}
+
+func firstCompactionEvent(events []Event) *CompactionEvent {
+	for _, event := range events {
+		if event.ContextCompaction != nil {
+			return event.ContextCompaction
+		}
+	}
+	return nil
+}
+
+func readLogEvents(t *testing.T, root string) []map[string]any {
+	t.Helper()
+	matches, err := filepath.Glob(filepath.Join(root, "logs", "*", "*", "*", "*.jsonl"))
+	if err != nil || len(matches) != 1 {
+		t.Fatalf("log files=%v err=%v", matches, err)
+	}
+	data, err := os.ReadFile(matches[0])
+	if err != nil {
+		t.Fatal(err)
+	}
+	lines := strings.Split(strings.TrimSpace(string(data)), "\n")
+	events := make([]map[string]any, 0, len(lines))
+	for _, line := range lines {
+		var event map[string]any
+		if err := json.Unmarshal([]byte(line), &event); err != nil {
+			t.Fatalf("decode log line %q: %v", line, err)
+		}
+		events = append(events, event)
+	}
+	return events
+}
+
+func assertLogEvent(t *testing.T, events []map[string]any, message string, fields map[string]any) {
+	t.Helper()
+	for _, event := range events {
+		if event["message"] != message {
+			continue
+		}
+		gotFields, ok := event["fields"].(map[string]any)
+		if !ok {
+			t.Fatalf("log event %q has no fields: %#v", message, event)
+		}
+		matches := true
+		for key, want := range fields {
+			if gotFields[key] != want {
+				matches = false
+				break
+			}
+		}
+		if matches {
+			return
+		}
+	}
+	t.Fatalf("missing log event %q with fields %#v in %#v", message, fields, events)
+}
+
+func marshalLogEvents(t *testing.T, events []map[string]any) string {
+	t.Helper()
+	data, err := json.Marshal(events)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return string(data)
 }
 
 func TestCompleteEventSequenceAndProgress(t *testing.T) {

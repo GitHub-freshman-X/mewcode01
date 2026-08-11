@@ -13,6 +13,7 @@ import (
 
 	"github.com/GitHub-freshman-X/mewcode01/internal/agent"
 	"github.com/GitHub-freshman-X/mewcode01/internal/config"
+	contextmanager "github.com/GitHub-freshman-X/mewcode01/internal/context"
 	"github.com/GitHub-freshman-X/mewcode01/internal/conversation"
 	"github.com/GitHub-freshman-X/mewcode01/internal/envfile"
 	"github.com/GitHub-freshman-X/mewcode01/internal/logging"
@@ -87,7 +88,7 @@ func run(args []string, stderr io.Writer) int {
 		fmt.Fprintln(stderr, err)
 		return 1
 	}
-	p, err := newProvider(cfg, newHTTPClient())
+	p, err := newProvider(cfg, newHTTPClient(), logger)
 	if err != nil {
 		fmt.Fprintln(stderr, provider.UserError(err))
 		return 1
@@ -137,12 +138,24 @@ func run(args []string, stderr io.Writer) int {
 		Workspace:     root,
 		Permissions:   gate,
 		Confirmer:     bridge,
+		Context:       agentContextConfig(cfg.Agent.Context),
+		Logger:        logger,
 	})
 	if err := runTUI(runner, session, bridge); err != nil {
 		fmt.Fprintln(stderr, "tui:", err)
 		return 1
 	}
 	return 0
+}
+
+func agentContextConfig(cfg config.ContextConfig) contextmanager.Config {
+	return contextmanager.Config{
+		WindowTokens: cfg.WindowTokens, SummaryOutputTokens: cfg.SummaryOutputTokens,
+		AutoSafetyTokens: cfg.AutoSafetyTokens, ManualSafetyTokens: cfg.ManualSafetyTokens,
+		SingleResultChars: cfg.SingleResultChars, MessageResultChars: cfg.MessageResultChars,
+		PreviewChars: cfg.PreviewChars, RecentTokens: cfg.RecentTokens,
+		RecentMessageMinimum: cfg.RecentMessageMinimum,
+	}
 }
 
 func permissionMode(mode config.PermissionMode) permissions.Mode {

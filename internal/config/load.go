@@ -34,7 +34,7 @@ func Load(path string) (Config, error) {
 		APIKey      string                     `yaml:"api_key"`
 		MaxTokens   *int                       `yaml:"max_tokens,omitempty"`
 		Thinking    ThinkingConfig             `yaml:"thinking,omitempty"`
-		Agent       AgentConfig                `yaml:"agent,omitempty"`
+		Agent       rawAgentConfig             `yaml:"agent,omitempty"`
 		Permissions PermissionConfig           `yaml:"permissions,omitempty"`
 		MCPServers  map[string]MCPServerConfig `yaml:"mcp_servers,omitempty"`
 	}
@@ -42,8 +42,9 @@ func Load(path string) (Config, error) {
 	if err := loader.Load(&raw); err != nil {
 		return Config{}, fmt.Errorf("config: parse YAML: %w", err)
 	}
-	cfg := Config{Protocol: raw.Protocol, Model: raw.Model, BaseURL: raw.BaseURL, APIKey: raw.APIKey, Thinking: raw.Thinking, Agent: raw.Agent, Permissions: raw.Permissions, MCPServers: raw.MCPServers, MaxTokens: DefaultMaxTokens}
+	cfg := Config{Protocol: raw.Protocol, Model: raw.Model, BaseURL: raw.BaseURL, APIKey: raw.APIKey, Thinking: raw.Thinking, Agent: AgentConfig{MaxIterations: raw.Agent.MaxIterations}, Permissions: raw.Permissions, MCPServers: raw.MCPServers, MaxTokens: DefaultMaxTokens}
 	cfg.applyDefaults()
+	raw.Agent.Context.apply(&cfg.Agent.Context)
 	if raw.MaxTokens != nil {
 		cfg.MaxTokens = *raw.MaxTokens
 	}
@@ -51,4 +52,38 @@ func Load(path string) (Config, error) {
 		return Config{}, err
 	}
 	return cfg, nil
+}
+
+type rawAgentConfig struct {
+	MaxIterations int              `yaml:"max_iterations,omitempty"`
+	Context       rawContextConfig `yaml:"context,omitempty"`
+}
+
+type rawContextConfig struct {
+	WindowTokens         *int `yaml:"window_tokens,omitempty"`
+	SummaryOutputTokens  *int `yaml:"summary_output_tokens,omitempty"`
+	AutoSafetyTokens     *int `yaml:"auto_safety_tokens,omitempty"`
+	ManualSafetyTokens   *int `yaml:"manual_safety_tokens,omitempty"`
+	SingleResultChars    *int `yaml:"single_result_chars,omitempty"`
+	MessageResultChars   *int `yaml:"message_result_chars,omitempty"`
+	PreviewChars         *int `yaml:"preview_chars,omitempty"`
+	RecentTokens         *int `yaml:"recent_tokens,omitempty"`
+	RecentMessageMinimum *int `yaml:"recent_message_minimum,omitempty"`
+}
+
+func (r rawContextConfig) apply(cfg *ContextConfig) {
+	for _, field := range []struct {
+		source *int
+		target *int
+	}{
+		{r.WindowTokens, &cfg.WindowTokens}, {r.SummaryOutputTokens, &cfg.SummaryOutputTokens},
+		{r.AutoSafetyTokens, &cfg.AutoSafetyTokens}, {r.ManualSafetyTokens, &cfg.ManualSafetyTokens},
+		{r.SingleResultChars, &cfg.SingleResultChars}, {r.MessageResultChars, &cfg.MessageResultChars},
+		{r.PreviewChars, &cfg.PreviewChars}, {r.RecentTokens, &cfg.RecentTokens},
+		{r.RecentMessageMinimum, &cfg.RecentMessageMinimum},
+	} {
+		if field.source != nil {
+			*field.target = *field.source
+		}
+	}
 }

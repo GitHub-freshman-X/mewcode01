@@ -3,10 +3,14 @@ package agent
 import (
 	"context"
 	"errors"
+	"fmt"
+	"path/filepath"
 	"strings"
 	"sync"
 
+	contextmanager "github.com/GitHub-freshman-X/mewcode01/internal/context"
 	"github.com/GitHub-freshman-X/mewcode01/internal/conversation"
+	"github.com/GitHub-freshman-X/mewcode01/internal/logging"
 	"github.com/GitHub-freshman-X/mewcode01/internal/prompt"
 	"github.com/GitHub-freshman-X/mewcode01/internal/provider"
 	"github.com/GitHub-freshman-X/mewcode01/internal/tools"
@@ -18,13 +22,19 @@ type Runner struct {
 	registry *tools.Registry
 	executor *tools.Executor
 	options  Options
+	context  *contextmanager.Manager
 
 	mu     sync.Mutex
 	active bool
 }
 
 func NewRunner(p provider.Provider, session *conversation.Session, registry *tools.Registry, executor *tools.Executor, options Options) *Runner {
-	return &Runner{provider: p, session: session, registry: registry, executor: executor, options: options.normalized()}
+	opts := options.normalized()
+	var store *contextmanager.ResultStore
+	if opts.Workspace != "" && session != nil {
+		store, _ = contextmanager.NewResultStore(filepath.Join(opts.Workspace, ".mew", "context"), fmt.Sprintf("%p", session))
+	}
+	return &Runner{provider: p, session: session, registry: registry, executor: executor, options: opts, context: contextmanager.NewManager(opts.Context, store)}
 }
 
 func (r *Runner) Start(ctx context.Context, req Request) (*Task, error) {
@@ -62,8 +72,10 @@ func (r *Runner) run(ctx context.Context, mode Mode, prepared preparedRequest, e
 	terminal := func(event Event) { events <- event }
 	user := provider.Message{Role: provider.RoleUser, Blocks: []provider.ContentBlock{{Type: provider.BlockText, Text: prepared.prompt}}}
 	var planHistory *taskHistory
+	manager := r.context
 	if mode == ModePlan {
 		planHistory = newTaskHistory(r.session.Snapshot())
+		manager = contextmanager.NewManager(r.options.Context, r.context.Store)
 	}
 	modelSnapshot := func() []provider.Message {
 		if planHistory != nil {
@@ -81,6 +93,27 @@ func (r *Runner) run(ctx context.Context, mode Mode, prepared preparedRequest, e
 	unknownCount := 0
 	hasPartial := false
 	iterations := 0
+	emergencyRetried := false
+	replaceHistory := func(messages []provider.Message) {
+		if planHistory != nil {
+			planHistory.Replace(messages)
+			return
+		}
+		r.session.ReplaceHistory(messages)
+	}
+
+	if mode == ModeCompact {
+		usage, err := r.compact(ctx, manager, contextmanager.TriggerManual, 1, modelSnapshot, replaceHistory, emit)
+		total.Add(usage)
+		if err != nil {
+			summary := &Summary{Reason: StopStreamError, Iterations: 0, Usage: total}
+			terminal(Event{Type: EventFailed, Iteration: 1, Phase: PhaseFinishing, Summary: summary, Err: err})
+			return
+		}
+		summary := &Summary{Reason: StopFinalAnswer, Iterations: 1, Usage: total}
+		terminal(Event{Type: EventCompleted, Iteration: 1, Phase: PhaseFinishing, Summary: summary})
+		return
+	}
 
 	for iterations < r.options.MaxIterations {
 		iterations++
@@ -89,6 +122,18 @@ func (r *Runner) run(ctx context.Context, mode Mode, prepared preparedRequest, e
 			return
 		}
 		messages := modelSnapshot()
+		if trigger, ok := manager.Decision(messages, false); ok {
+			usage, err := r.compact(ctx, manager, trigger, iterations, modelSnapshot, replaceHistory, emit)
+			total.Add(usage)
+			if err != nil {
+				summary := &Summary{Reason: StopStreamError, Iterations: iterations - 1, Usage: total, Partial: hasPartial}
+				terminal(Event{Type: EventFailed, Iteration: iterations, Phase: PhaseFinishing, Summary: summary, Err: err})
+				return
+			}
+			messages = modelSnapshot()
+		} else if manager.State.AutomaticFailures >= 3 && manager.Estimate(messages) >= manager.Config.WindowTokens-manager.Config.SummaryOutputTokens-manager.Config.AutoSafetyTokens {
+			r.options.Logger.Info("context automatic compaction skipped", logging.Fields{"stage": "context_compaction", "status": "breaker_open", "trigger": string(contextmanager.TriggerAutomatic), "automatic_failures": manager.State.AutomaticFailures})
+		}
 		var roundUser *provider.Message
 		if iterations == 1 {
 			messages = append(messages, provider.CloneMessage(user))
@@ -113,34 +158,56 @@ func (r *Runner) run(ctx context.Context, mode Mode, prepared preparedRequest, e
 			return
 		}
 		definitions := prompt.EnhanceDefinitions(prepared.registry.Definitions(), promptMode)
-		roundCtx, cancelRound := context.WithCancel(ctx)
-		stream, done := r.provider.Stream(roundCtx, provider.ChatRequest{
-			Prompt:   bundle,
-			Messages: messages, MaxTokens: r.options.MaxTokens, Thinking: r.options.Thinking,
-			Tools: definitions,
-		})
-		if !emit(Event{Type: EventProgress, Iteration: iterations, Phase: PhaseStreaming}) {
-			cancelRound()
-			terminal(cancelledEvent(iterations-1, total, hasPartial))
-			return
-		}
-		round, err := collectRound(roundCtx, iterations, stream, done, func(event Event) bool {
-			if event.Type == EventTextDelta && event.Text != "" {
-				hasPartial = true
+		var round roundResult
+		for {
+			roundCtx, cancelRound := context.WithCancel(ctx)
+			stream, done := r.provider.Stream(roundCtx, provider.ChatRequest{
+				Prompt:   bundle,
+				Messages: messages, MaxTokens: r.options.MaxTokens, Thinking: r.options.Thinking,
+				Tools: definitions,
+			})
+			if !emit(Event{Type: EventProgress, Iteration: iterations, Phase: PhaseStreaming}) {
+				cancelRound()
+				terminal(cancelledEvent(iterations-1, total, hasPartial))
+				return
 			}
-			return emit(event)
-		})
-		cancelRound()
-		if err != nil {
+			var err error
+			round, err = collectRound(roundCtx, iterations, stream, done, func(event Event) bool {
+				if event.Type == EventTextDelta && event.Text != "" {
+					hasPartial = true
+				}
+				return emit(event)
+			})
+			cancelRound()
+			if err == nil {
+				break
+			}
 			if errors.Is(err, context.Canceled) || errors.Is(ctx.Err(), context.Canceled) {
 				terminal(cancelledEvent(iterations-1, total, hasPartial))
-			} else {
-				summary := &Summary{Reason: StopStreamError, Iterations: iterations - 1, Usage: total, Partial: hasPartial}
-				terminal(Event{Type: EventFailed, Iteration: iterations, Phase: PhaseFinishing, Summary: summary, Err: err})
+				return
 			}
+			if isContextTooLongError(err) && !emergencyRetried {
+				emergencyRetried = true
+				r.options.Logger.Info("context emergency retry started", logging.Fields{"stage": "context_emergency_retry", "status": "started"})
+				usage, compactErr := r.compact(ctx, manager, contextmanager.TriggerEmergency, iterations, modelSnapshot, replaceHistory, emit)
+				total.Add(usage)
+				if compactErr != nil {
+					summary := &Summary{Reason: StopStreamError, Iterations: iterations - 1, Usage: total, Partial: hasPartial}
+					terminal(Event{Type: EventFailed, Iteration: iterations, Phase: PhaseFinishing, Summary: summary, Err: compactErr})
+					return
+				}
+				messages = modelSnapshot()
+				if iterations == 1 {
+					messages = append(messages, provider.CloneMessage(user))
+				}
+				continue
+			}
+			summary := &Summary{Reason: StopStreamError, Iterations: iterations - 1, Usage: total, Partial: hasPartial}
+			terminal(Event{Type: EventFailed, Iteration: iterations, Phase: PhaseFinishing, Summary: summary, Err: err})
 			return
 		}
 		total.Add(round.Usage)
+		manager.RecordUsage(round.Usage, messages)
 		if len(round.ToolCalls) == 0 {
 			text := messageText(round.Assistant)
 			if mode == ModePlan && text == "" {
@@ -191,6 +258,19 @@ func (r *Runner) run(ctx context.Context, mode Mode, prepared preparedRequest, e
 			}
 			return
 		}
+		results, persisted, err := manager.PrepareResults(results)
+		if err != nil {
+			summary := &Summary{Reason: StopStreamError, Iterations: iterations - 1, Usage: total}
+			terminal(Event{Type: EventFailed, Iteration: iterations, Phase: PhaseFinishing, Summary: summary, Err: err})
+			return
+		}
+		if len(persisted) > 0 && !emit(Event{Type: EventContextCompaction, Iteration: iterations, Phase: PhaseRunningTools, ContextCompaction: &CompactionEvent{Persisted: persisted}}) {
+			terminal(cancelledEvent(iterations-1, total, hasPartial))
+			return
+		}
+		if len(persisted) > 0 {
+			r.options.Logger.Info("context tool results persisted", logging.Fields{"stage": "tool_result_persistence", "status": "persisted", "persisted_count": len(persisted), "persisted_bytes": persistedBytes(persisted)})
+		}
 		if err := commitRound(roundUser, round.Assistant, results); err != nil {
 			summary := &Summary{Reason: StopStreamError, Iterations: iterations - 1, Usage: total}
 			terminal(Event{Type: EventFailed, Iteration: iterations, Phase: PhaseFinishing, Summary: summary, Err: err})
@@ -218,6 +298,75 @@ func (r *Runner) run(ctx context.Context, mode Mode, prepared preparedRequest, e
 			return
 		}
 	}
+}
+
+func isContextTooLongError(err error) bool {
+	if err == nil {
+		return false
+	}
+	text := strings.ToLower(err.Error())
+	return strings.Contains(text, "context length") ||
+		strings.Contains(text, "context too long") ||
+		strings.Contains(text, "maximum context") ||
+		strings.Contains(text, "context window")
+}
+
+func (r *Runner) compact(ctx context.Context, manager *contextmanager.Manager, trigger contextmanager.Trigger, iteration int, snapshot func() []provider.Message, replace func([]provider.Message), emit func(Event) bool) (provider.Usage, error) {
+	messages := snapshot()
+	before := manager.Estimate(messages)
+	r.options.Logger.Info("context compaction started", logging.Fields{"stage": "context_compaction", "status": "started", "trigger": string(trigger), "before_tokens": before, "automatic_failures": manager.State.AutomaticFailures})
+	req := manager.BuildSummaryRequest(messages, trigger)
+	stream, done := r.provider.Stream(ctx, req)
+	round, err := collectRound(ctx, iteration, stream, done, func(Event) bool { return true })
+	if err != nil {
+		_ = emit(Event{Type: EventContextCompaction, Iteration: iteration, Phase: PhaseCallingModel, ContextCompaction: &CompactionEvent{Trigger: trigger, BeforeTokens: before, Error: err.Error()}})
+		if trigger == contextmanager.TriggerAutomatic {
+			manager.State.AutomaticFailures++
+		}
+		r.options.Logger.Error("context compaction failed", logging.Fields{"stage": "context_compaction", "status": "failed", "trigger": string(trigger), "before_tokens": before, "automatic_failures": manager.State.AutomaticFailures})
+		return round.Usage, err
+	}
+	rawSummary := messageText(round.Assistant)
+	extraction, err := contextmanager.ExtractSummary(rawSummary)
+	if err != nil {
+		_ = emit(Event{Type: EventContextCompaction, Iteration: iteration, Phase: PhaseCallingModel, ContextCompaction: &CompactionEvent{Trigger: trigger, BeforeTokens: before, Error: err.Error()}})
+		if trigger == contextmanager.TriggerAutomatic {
+			manager.State.AutomaticFailures++
+		}
+		fields := logging.Fields{"stage": "context_compaction", "status": "summary_invalid", "trigger": string(trigger), "before_tokens": before, "automatic_failures": manager.State.AutomaticFailures, "summary_response_chars": len([]rune(rawSummary))}
+		var parseErr *contextmanager.SummaryParseError
+		if errors.As(err, &parseErr) {
+			fields["parse_reason"] = parseErr.Reason
+			fields["summary_open_tags"] = parseErr.OpenTags
+			fields["summary_close_tags"] = parseErr.CloseTags
+			fields["summary_max_depth"] = parseErr.MaxDepth
+			fields["summary_tag_trace"] = parseErr.TagTrace
+		}
+		fields["summary_response"] = rawSummary
+		r.options.Logger.Error("context compaction failed", fields)
+		return round.Usage, err
+	}
+	rebuilt := manager.Rebuild(messages, extraction.Text)
+	replace(rebuilt)
+	after := manager.Estimate(rebuilt)
+	manager.RecordUsage(provider.Usage{InputTokens: after}, rebuilt)
+	if trigger == contextmanager.TriggerManual || trigger == contextmanager.TriggerAutomatic {
+		manager.State.AutomaticFailures = 0
+	}
+	// r.options.Logger.Info("context compaction completed", logging.Fields{"stage": "context_compaction", "status": "completed", "trigger": string(trigger), "before_tokens": before, "after_tokens": after, "automatic_failures": manager.State.AutomaticFailures, "summary_candidates": extraction.CandidateCount, "summary_used_last": extraction.UsedLast, "summary_chars": len(extraction.Text), "summary": extraction.Text})
+	r.options.Logger.Info("context compaction completed", logging.Fields{"stage": "context_compaction", "status": "completed", "trigger": string(trigger), "before_tokens": before, "after_tokens": after, "automatic_failures": manager.State.AutomaticFailures, "summary_candidates": extraction.CandidateCount, "summary_used_last": extraction.UsedLast, "summary_chars": len(extraction.Text)})
+	if !emit(Event{Type: EventContextCompaction, Iteration: iteration, Phase: PhaseCallingModel, ContextCompaction: &CompactionEvent{Trigger: trigger, BeforeTokens: before, AfterTokens: after}}) {
+		return round.Usage, context.Canceled
+	}
+	return round.Usage, nil
+}
+
+func persistedBytes(persisted []contextmanager.Persistence) int {
+	total := 0
+	for _, item := range persisted {
+		total += item.Size
+	}
+	return total
 }
 
 func cancelledEvent(iterations int, usage provider.Usage, partial bool) Event {

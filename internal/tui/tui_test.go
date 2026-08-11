@@ -24,6 +24,7 @@ func TestActPlanDoCommands(t *testing.T) {
 		{"hello", agent.ModeAct, "hello"},
 		{"/plan inspect this", agent.ModePlan, "inspect this"},
 		{"/do", agent.ModeDo, ""},
+		{"/compact", agent.ModeCompact, ""},
 	}
 	for _, test := range tests {
 		req, err := parseRequest(test.input)
@@ -33,6 +34,19 @@ func TestActPlanDoCommands(t *testing.T) {
 	}
 	if _, err := parseRequest("/plan"); err == nil {
 		t.Fatal("empty plan accepted")
+	}
+}
+
+func TestViewContextCompactionEvent(t *testing.T) {
+	m := NewModel(nil, conversation.NewSession())
+	m.current.prompt = "/compact"
+	m.applyAgentEvent(agent.Event{Type: agent.EventContextCompaction, ContextCompaction: &agent.CompactionEvent{Trigger: "manual", BeforeTokens: 120, AfterTokens: 40}})
+	m.applyAgentEvent(agent.Event{Type: agent.EventCompleted, Summary: &agent.Summary{Reason: agent.StopFinalAnswer, Iterations: 1}})
+	m.refreshContent()
+
+	view := m.View().Content
+	if !strings.Contains(view, "上下文压缩: manual") || !strings.Contains(view, "120 -> 40") {
+		t.Fatalf("view=%q", view)
 	}
 }
 

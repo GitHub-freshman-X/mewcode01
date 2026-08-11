@@ -12,16 +12,17 @@ import (
 )
 
 type taskView struct {
-	prompt     string
-	text       string
-	iteration  int
-	phase      agent.Phase
-	usage      provider.Usage
-	toolCalls  []provider.ToolCall
-	toolResult []provider.ToolResult
-	terminal   *agent.Summary
-	terminalTy agent.EventType
-	err        error
+	prompt      string
+	text        string
+	iteration   int
+	phase       agent.Phase
+	usage       provider.Usage
+	toolCalls   []provider.ToolCall
+	toolResult  []provider.ToolResult
+	compactions []agent.CompactionEvent
+	terminal    *agent.Summary
+	terminalTy  agent.EventType
+	err         error
 }
 
 type Model struct {

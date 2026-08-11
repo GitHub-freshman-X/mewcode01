@@ -23,6 +23,12 @@ func (s *Session) Snapshot() []provider.Message {
 	return provider.CloneMessages(s.history)
 }
 
+func (s *Session) ReplaceHistory(messages []provider.Message) {
+	s.mu.Lock()
+	s.history = provider.CloneMessages(messages)
+	s.mu.Unlock()
+}
+
 func (s *Session) DisplaySnapshot() []provider.Message {
 	s.mu.RLock()
 	defer s.mu.RUnlock()

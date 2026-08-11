@@ -6,9 +6,13 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"net/url"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
+	"github.com/GitHub-freshman-X/mewcode01/internal/logging"
 	"github.com/GitHub-freshman-X/mewcode01/internal/provider"
 )
 
@@ -47,6 +51,38 @@ func TestRequestStream(t *testing.T) {
 	}
 	if text != "你好" || usage == nil || usage.InputTokens != 9 || usage.OutputTokens != 2 || got.MaxOutputTokens != 42 || len(got.Input[1].Content) != 1 {
 		t.Fatalf("text=%q body=%+v", text, got)
+	}
+}
+
+func TestStreamCapturesFinalRequestPayload(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "text/event-stream")
+		_, _ = w.Write([]byte("data: {\"type\":\"response.completed\"}\n\n"))
+	}))
+	defer server.Close()
+	root := t.TempDir()
+	logger, err := logging.New(root, func() time.Time { return time.Unix(1, 0).UTC() }, 1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	u, _ := url.Parse(server.URL)
+	p := New(Options{BaseURL: u, APIKey: "secret", Model: "gpt", HTTPClient: server.Client(), Logger: logger})
+	events, done := p.Stream(context.Background(), provider.ChatRequest{Messages: []provider.Message{{Role: provider.RoleUser, Blocks: []provider.ContentBlock{{Type: provider.BlockText, Text: "request-canary"}}}}})
+	for range events {
+	}
+	if err := <-done; err != nil {
+		t.Fatal(err)
+	}
+	if err := logger.Close(); err != nil {
+		t.Fatal(err)
+	}
+	files, err := filepath.Glob(filepath.Join(root, "logs", "*", "*", "*", "*.jsonl"))
+	if err != nil || len(files) != 1 {
+		t.Fatalf("files=%v err=%v", files, err)
+	}
+	payload, err := os.ReadFile(files[0])
+	if err != nil || !strings.Contains(string(payload), "request-canary") || strings.Contains(string(payload), "secret") {
+		t.Fatalf("payload=%s err=%v", payload, err)
 	}
 }
 

@@ -3,6 +3,18 @@ package config
 const DefaultMaxTokens = 4096
 const DefaultMaxIterations = 20
 
+const (
+	DefaultContextWindowTokens         = 200000
+	DefaultContextSummaryOutputTokens  = 20000
+	DefaultContextAutoSafetyTokens     = 13000
+	DefaultContextManualSafetyTokens   = 3000
+	DefaultContextSingleResultChars    = 50000
+	DefaultContextMessageResultChars   = 200000
+	DefaultContextPreviewChars         = 2000
+	DefaultContextRecentTokens         = 10000
+	DefaultContextRecentMessageMinimum = 5
+)
+
 type Protocol string
 
 const (
@@ -39,7 +51,20 @@ type MCPServerConfig struct {
 }
 
 type AgentConfig struct {
-	MaxIterations int `yaml:"max_iterations,omitempty"`
+	MaxIterations int           `yaml:"max_iterations,omitempty"`
+	Context       ContextConfig `yaml:"context,omitempty"`
+}
+
+type ContextConfig struct {
+	WindowTokens         int `yaml:"window_tokens,omitempty"`
+	SummaryOutputTokens  int `yaml:"summary_output_tokens,omitempty"`
+	AutoSafetyTokens     int `yaml:"auto_safety_tokens,omitempty"`
+	ManualSafetyTokens   int `yaml:"manual_safety_tokens,omitempty"`
+	SingleResultChars    int `yaml:"single_result_chars,omitempty"`
+	MessageResultChars   int `yaml:"message_result_chars,omitempty"`
+	PreviewChars         int `yaml:"preview_chars,omitempty"`
+	RecentTokens         int `yaml:"recent_tokens,omitempty"`
+	RecentMessageMinimum int `yaml:"recent_message_minimum,omitempty"`
 }
 
 type ThinkingConfig struct {
@@ -66,7 +91,38 @@ func (c *Config) applyDefaults() {
 	if c.Agent.MaxIterations == 0 {
 		c.Agent.MaxIterations = DefaultMaxIterations
 	}
+	c.Agent.Context.applyDefaults()
 	if c.Permissions.Mode == "" {
 		c.Permissions.Mode = PermissionModeDefault
+	}
+}
+
+func (c *ContextConfig) applyDefaults() {
+	if c.WindowTokens == 0 {
+		c.WindowTokens = DefaultContextWindowTokens
+	}
+	if c.SummaryOutputTokens == 0 {
+		c.SummaryOutputTokens = DefaultContextSummaryOutputTokens
+	}
+	if c.AutoSafetyTokens == 0 {
+		c.AutoSafetyTokens = DefaultContextAutoSafetyTokens
+	}
+	if c.ManualSafetyTokens == 0 {
+		c.ManualSafetyTokens = DefaultContextManualSafetyTokens
+	}
+	if c.SingleResultChars == 0 {
+		c.SingleResultChars = DefaultContextSingleResultChars
+	}
+	if c.MessageResultChars == 0 {
+		c.MessageResultChars = DefaultContextMessageResultChars
+	}
+	if c.PreviewChars == 0 {
+		c.PreviewChars = DefaultContextPreviewChars
+	}
+	if c.RecentTokens == 0 {
+		c.RecentTokens = DefaultContextRecentTokens
+	}
+	if c.RecentMessageMinimum == 0 {
+		c.RecentMessageMinimum = DefaultContextRecentMessageMinimum
 	}
 }
