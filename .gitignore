@@ -9,4 +9,6 @@
 logs/
 .mewcode/config.yaml
 .mewcode/permissions.yaml
+.worktrees/
 .env
+superpowers/

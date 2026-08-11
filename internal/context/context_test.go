@@ -3,6 +3,7 @@ package context
 import (
 	"errors"
 	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -104,12 +105,9 @@ func TestPrepareResultsDoesNotRepersistReadback(t *testing.T) {
 	if err != nil || len(persisted) != 1 {
 		t.Fatalf("persisted=%v err=%v", persisted, err)
 	}
-	content, err := os.ReadFile(persisted[0].Path)
-	if err != nil {
-		t.Fatal(err)
-	}
-	results, again, err := m.PrepareResults([]provider.ToolResult{{CallID: "b", Name: "read_file", Content: string(content)}})
-	if err != nil || len(again) != 0 || results[0].Content != string(content) {
+	wrapped := `{"tool_name":"read_file","success":true,"data":{"path":"` + persisted[0].Path + `","content":"123456","truncated":false}}`
+	results, again, err := m.PrepareResults([]provider.ToolResult{{CallID: "b", Name: "read_file", Content: wrapped}})
+	if err != nil || len(again) != 0 || results[0].Content != wrapped {
 		t.Fatalf("results=%+v persisted=%v err=%v", results, again, err)
 	}
 }
@@ -126,10 +124,29 @@ func TestPrepareResultsDoesNotRepersistWrappedReadFileContent(t *testing.T) {
 	if err != nil || len(persisted) != 1 {
 		t.Fatalf("persisted=%v err=%v", persisted, err)
 	}
-	wrapped := `{"tool_name":"read_file","success":true,"data":{"path":"` + persisted[0].Path + `","content":"123456","truncated":false}}`
+	wrapped := `{"tool_name":"read_file","success":true,"data":{"path":"` + persisted[0].Path + `","content":"123","truncated":true}}`
 	results, again, err := m.PrepareResults([]provider.ToolResult{{CallID: "b", Name: "read_file", Content: wrapped}})
 	if err != nil || len(again) != 0 || results[0].Content != wrapped {
 		t.Fatalf("results=%+v persisted=%v err=%v", results, again, err)
+	}
+}
+
+func TestPrepareResultsRepersistsReadFileFromUnregisteredPath(t *testing.T) {
+	store, err := NewResultStore(t.TempDir(), "session")
+	if err != nil {
+		t.Fatal(err)
+	}
+	cfg := DefaultConfig()
+	cfg.SingleResultChars = 5
+	m := NewManager(cfg, store)
+	_, persisted, err := m.PrepareResults([]provider.ToolResult{{CallID: "a", Name: "run", Content: "123456"}})
+	if err != nil || len(persisted) != 1 {
+		t.Fatalf("persisted=%v err=%v", persisted, err)
+	}
+	wrapped := `{"tool_name":"read_file","success":true,"data":{"path":"` + filepath.Join(t.TempDir(), "other.txt") + `","content":"123456","truncated":false}}`
+	_, again, err := m.PrepareResults([]provider.ToolResult{{CallID: "b", Name: "read_file", Content: wrapped}})
+	if err != nil || len(again) != 1 {
+		t.Fatalf("persisted=%v err=%v", again, err)
 	}
 }
 

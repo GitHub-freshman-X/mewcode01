@@ -2,13 +2,23 @@
 protocol: anthropic
 model: claude-sonnet-4-6
 base_url: https://api.anthropic.com
-api_key: replace-with-your-anthropic-key
+api_key: <replace-with-your-anthropic-key>
 max_tokens: 4096
 thinking:
   enabled: true
   budget_tokens: 2048
 agent:
   max_iterations: 20
+  context:
+    window_tokens: 200000
+    summary_output_tokens: 20000
+    auto_safety_tokens: 13000
+    manual_safety_tokens: 3000
+    single_result_chars: 50000
+    message_result_chars: 200000
+    preview_chars: 2000
+    recent_tokens: 10000
+    recent_message_minimum: 5
 permissions:
   mode: default
 
@@ -19,6 +29,8 @@ mcp_servers:
     type: stdio
     command: npx
     args: ["-y", "@modelcontextprotocol/server-filesystem", "${MCP_WORKSPACE}"]
+    env:
+      MCP_WORKSPACE: ${MCP_WORKSPACE}
   issues:
     type: http
     url: ${MCP_ISSUES_URL}

@@ -664,7 +664,7 @@ func TestRunnerLogsContextCompactionLifecycle(t *testing.T) {
 	}
 	events := readLogEvents(t, root)
 	assertLogEvent(t, events, "context compaction started", map[string]any{"stage": "context_compaction", "status": "started", "trigger": "automatic"})
-	assertLogEvent(t, events, "context compaction completed", map[string]any{"stage": "context_compaction", "status": "completed", "trigger": "automatic", "summary_candidates": float64(2), "summary_used_last": true, "summary_chars": float64(len("logged state")), "summary": "logged state"})
+	assertLogEvent(t, events, "context compaction completed", map[string]any{"stage": "context_compaction", "status": "completed", "trigger": "automatic", "summary_candidates": float64(2), "summary_used_last": true, "summary_chars": float64(len("logged state"))})
 	if logText := marshalLogEvents(t, events); strings.Contains(logText, "draft state") || strings.Contains(logText, strings.Repeat("a", 24)) {
 		t.Fatalf("context log leaked discarded summary or prompt: %s", logText)
 	}

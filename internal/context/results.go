@@ -19,7 +19,7 @@ type Persistence struct {
 type ResultStore struct {
 	root     string
 	sequence int
-	contents map[string]struct{}
+	paths    map[string]struct{}
 }
 
 func NewResultStore(root, session string) (*ResultStore, error) {
@@ -27,7 +27,7 @@ func NewResultStore(root, session string) (*ResultStore, error) {
 	if err := os.MkdirAll(dir, 0700); err != nil {
 		return nil, err
 	}
-	return &ResultStore{root: dir, contents: make(map[string]struct{})}, nil
+	return &ResultStore{root: dir, paths: make(map[string]struct{})}, nil
 }
 
 func (s *ResultStore) Persist(result provider.ToolResult) (Persistence, error) {
@@ -39,7 +39,7 @@ func (s *ResultStore) Persist(result provider.ToolResult) (Persistence, error) {
 	if err := os.WriteFile(path, []byte(result.Content), 0600); err != nil {
 		return Persistence{}, err
 	}
-	s.contents[result.Content] = struct{}{}
+	s.paths[filepath.Clean(path)] = struct{}{}
 	return Persistence{CallID: result.CallID, Path: path, Size: len(result.Content)}, nil
 }
 
@@ -165,17 +165,19 @@ func (m *Manager) isReadback(result provider.ToolResult) bool {
 	if m.Store == nil || result.Name != "read_file" {
 		return false
 	}
-	if _, ok := m.Store.contents[result.Content]; ok {
-		return true
-	}
 	var wrapped struct {
-		Data struct {
-			Content string `json:"content"`
+		Success bool `json:"success"`
+		Data    struct {
+			Path string `json:"path"`
 		} `json:"data"`
 	}
-	if err := json.Unmarshal([]byte(result.Content), &wrapped); err != nil || wrapped.Data.Content == "" {
+	if err := json.Unmarshal([]byte(result.Content), &wrapped); err != nil || !wrapped.Success || wrapped.Data.Path == "" {
 		return false
 	}
-	_, ok := m.Store.contents[wrapped.Data.Content]
+	path, err := filepath.Abs(wrapped.Data.Path)
+	if err != nil {
+		return false
+	}
+	_, ok := m.Store.paths[filepath.Clean(path)]
 	return ok
 }
