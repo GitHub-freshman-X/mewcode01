@@ -18,7 +18,11 @@ type MemoryOperation struct {
 }
 
 func ParseOperations(data []byte) ([]MemoryOperation, error) {
-	if !bytes.HasPrefix(bytes.TrimSpace(data), []byte("[")) {
+	data, err := normalizeOperationJSON(data)
+	if err != nil {
+		return nil, err
+	}
+	if !bytes.HasPrefix(data, []byte("[")) {
 		return nil, errors.New("memory operations must be a JSON array")
 	}
 	decoder := json.NewDecoder(bytes.NewReader(data))
@@ -36,6 +40,26 @@ func ParseOperations(data []byte) ([]MemoryOperation, error) {
 		}
 	}
 	return operations, nil
+}
+
+func normalizeOperationJSON(data []byte) ([]byte, error) {
+	trimmed := bytes.TrimSpace(data)
+	if !bytes.HasPrefix(trimmed, []byte("```")) {
+		return trimmed, nil
+	}
+	text := string(trimmed)
+	newline := strings.IndexByte(text, '\n')
+	if newline < 0 {
+		return nil, errors.New("memory operation code block is incomplete")
+	}
+	language := strings.TrimSpace(text[3:newline])
+	if language != "" && !strings.EqualFold(language, "json") {
+		return nil, errors.New("memory operation code block is not JSON")
+	}
+	if !strings.HasSuffix(text, "```") {
+		return nil, errors.New("memory operation code block is incomplete")
+	}
+	return bytes.TrimSpace([]byte(text[newline+1 : len(text)-3])), nil
 }
 
 func ApplyOperations(paths Paths, operations []MemoryOperation) error {

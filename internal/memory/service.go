@@ -112,7 +112,7 @@ func extractionRequest(mode Mode, transcript []provider.Message) provider.ChatRe
 	messages := provider.CloneMessages(transcript)
 	messages = append(messages, provider.Message{Role: provider.RoleUser, Blocks: []provider.ContentBlock{{Type: provider.BlockText, Text: "Extract durable memories for mode " + string(mode) + ". Return only a JSON array of constrained memory operations."}}})
 	return provider.ChatRequest{
-		Prompt:    provider.PromptBundle{StableSystem: "You extract durable memory from a completed conversation. Return only a JSON array. Allowed actions are create, update, delete, and noop. Do not call tools."},
+		Prompt:    provider.PromptBundle{StableSystem: memoryOperationProtocol("extract durable memory from a completed conversation")},
 		Messages:  messages,
 		MaxTokens: 2048,
 	}
@@ -241,10 +241,19 @@ func acquireConsolidationLock(directory string, now time.Time) (func(), bool, er
 func consolidationRequest(directory string) provider.ChatRequest {
 	index, _ := os.ReadFile(filepath.Join(directory, "MEMORY.md"))
 	return provider.ChatRequest{
-		Prompt:    provider.PromptBundle{StableSystem: "You consolidate durable memories in one directory. Return only a JSON array of constrained memory operations. Do not call tools."},
+		Prompt:    provider.PromptBundle{StableSystem: memoryOperationProtocol("consolidate durable memories in one directory")},
 		Messages:  []provider.Message{{Role: provider.RoleUser, Blocks: []provider.ContentBlock{{Type: provider.BlockText, Text: "Consolidate this memory index:\n" + string(index)}}}},
 		MaxTokens: 2048,
 	}
+}
+
+func memoryOperationProtocol(task string) string {
+	return task + `. Do not call tools. Return exactly one JSON array and no Markdown or explanatory text.
+Each item has action, kind, name, description, and content fields.
+action is create, update, delete, or noop. kind is user, feedback, project, or reference.
+For create/update, name is a lowercase slug, description is one line, and content is non-empty.
+For delete, omit description and content. For noop, return {"action":"noop"}.
+Example: [{"action":"create","kind":"user","name":"prefers-any","description":"Prefers any","content":"Use any instead of interface{}."}].`
 }
 
 func memoryText(messages []provider.Message) string {

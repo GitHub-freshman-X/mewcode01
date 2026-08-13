@@ -173,6 +173,27 @@ func TestMemoryServiceExtractCreatesMemoryWithoutTools(t *testing.T) {
 	}
 }
 
+func TestMemoryServiceExtractAcceptsFencedJSONOperations(t *testing.T) {
+	paths := testPaths(t)
+	service := NewService(paths, ServiceOptions{Caller: &memoryTestCaller{response: "```json\n[{\"action\":\"create\",\"kind\":\"user\",\"name\":\"prefers-any\",\"description\":\"Prefers any\",\"content\":\"Use any instead of interface{}.\"}]\n```"}})
+
+	if err := service.Extract(context.Background(), ModeAct, nil); err != nil {
+		t.Fatalf("Extract() error = %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(paths.UserMemory, "prefers-any.md")); err != nil {
+		t.Fatalf("Extract() did not write fenced JSON operation: %v", err)
+	}
+}
+
+func TestExtractionRequestDefinesOperationSchema(t *testing.T) {
+	request := extractionRequest(ModeAct, nil)
+	for _, expected := range []string{"action", "kind", "name", "description", "content", "user", "feedback", "project", "reference"} {
+		if !strings.Contains(request.Prompt.StableSystem, expected) {
+			t.Fatalf("extraction request omits %q: %q", expected, request.Prompt.StableSystem)
+		}
+	}
+}
+
 func TestMemoryServiceExtractAppliesCreateUpdateDeleteAndNoop(t *testing.T) {
 	paths := testPaths(t)
 	operations := `[
