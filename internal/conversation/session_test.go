@@ -1,11 +1,106 @@
 package conversation
 
 import (
+	"bytes"
+	"encoding/json"
+	"errors"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/GitHub-freshman-X/mewcode01/internal/provider"
 )
+
+func TestJSONLJournalEncodesProviderNeutralRound(t *testing.T) {
+	var output bytes.Buffer
+	journal := NewJSONLJournal(&output)
+	journal.now = func() time.Time { return time.Unix(1_700_000_000, 0) }
+
+	user := provider.Message{Role: provider.RoleUser, Blocks: []provider.ContentBlock{{Type: provider.BlockText, Text: "read the file"}}}
+	call := provider.ToolCall{ID: "call-1", Name: "read_file", Arguments: []byte(`{"path":"README.md"}`)}
+	assistant := provider.Message{Role: provider.RoleAssistant, Blocks: []provider.ContentBlock{
+		{Type: provider.BlockText, Text: "I will inspect it."},
+		{Type: provider.BlockToolCall, ToolCall: &call},
+	}}
+	result := provider.ToolResult{CallID: "call-1", Name: "read_file", Content: "contents", IsError: true}
+	messages, err := BuildRound(&user, assistant, []provider.ToolResult{result})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := journal.Append(messages, JournalPurposeHistory); err != nil {
+		t.Fatal(err)
+	}
+
+	lines := strings.Split(strings.TrimSuffix(output.String(), "\n"), "\n")
+	if len(lines) != 3 {
+		t.Fatalf("records=%d", len(lines))
+	}
+	var assistantRecord, resultRecord JournalRecord
+	if err := json.Unmarshal([]byte(lines[1]), &assistantRecord); err != nil {
+		t.Fatal(err)
+	}
+	if err := json.Unmarshal([]byte(lines[2]), &resultRecord); err != nil {
+		t.Fatal(err)
+	}
+	if assistantRecord.Role != provider.RoleAssistant || assistantRecord.Content != "I will inspect it." || assistantRecord.Purpose != JournalPurposeHistory || assistantRecord.Timestamp != 1_700_000_000 {
+		t.Fatalf("assistant record=%+v", assistantRecord)
+	}
+	if len(assistantRecord.ToolUses) != 1 || assistantRecord.ToolUses[0].ID != "call-1" || assistantRecord.ToolUses[0].Name != "read_file" || string(assistantRecord.ToolUses[0].Arguments) != `{"path":"README.md"}` {
+		t.Fatalf("tool uses=%+v", assistantRecord.ToolUses)
+	}
+	if len(resultRecord.ToolResults) != 1 || resultRecord.ToolResults[0].CallID != "call-1" || resultRecord.ToolResults[0].Name != "read_file" || resultRecord.ToolResults[0].Content != "contents" || !resultRecord.ToolResults[0].IsError {
+		t.Fatalf("tool results=%+v", resultRecord.ToolResults)
+	}
+	var raw map[string]any
+	if err := json.Unmarshal([]byte(lines[1]), &raw); err != nil {
+		t.Fatal(err)
+	}
+	if _, ok := raw["blocks"]; ok {
+		t.Fatalf("provider-specific blocks were persisted: %s", lines[1])
+	}
+}
+
+func TestSessionCommitPlanWritesPlanJournalRecords(t *testing.T) {
+	journal := &recordingJournal{}
+	s := NewSession(journal)
+	if err := commitTestPlan(s, "create a file"); err != nil {
+		t.Fatal(err)
+	}
+	if len(journal.entries) != 1 {
+		t.Fatalf("append calls=%d", len(journal.entries))
+	}
+	entry := journal.entries[0]
+	if entry.purpose != JournalPurposePlan || len(entry.messages) != 2 || entry.messages[0].Blocks[0].Text != "/plan task" || entry.messages[1].Blocks[0].Text != "create a file" {
+		t.Fatalf("entry=%+v", entry)
+	}
+}
+
+func TestSessionJournalFailureLeavesMemoryUnchanged(t *testing.T) {
+	s := NewSession(failingJournal{err: errors.New("disk full")})
+	user := provider.Message{Role: provider.RoleUser, Blocks: []provider.ContentBlock{{Type: provider.BlockText, Text: "task"}}}
+	assistant := provider.Message{Role: provider.RoleAssistant, Blocks: []provider.ContentBlock{{Type: provider.BlockText, Text: "answer"}}}
+	if err := s.CommitRound(&user, assistant, nil); err == nil {
+		t.Fatal("round journal failure was accepted")
+	}
+	if len(s.Snapshot()) != 0 || len(s.DisplaySnapshot()) != 0 || len(s.PendingPlans()) != 0 {
+		t.Fatal("round journal failure changed session memory")
+	}
+	if err := s.CommitPlan(user, assistant, "make a plan"); err == nil {
+		t.Fatal("plan journal failure was accepted")
+	}
+	if len(s.Snapshot()) != 0 || len(s.DisplaySnapshot()) != 0 || len(s.PendingPlans()) != 0 {
+		t.Fatal("plan journal failure changed session memory")
+	}
+}
+
+func TestSessionReplaceHistoryDoesNotWriteJournal(t *testing.T) {
+	journal := &recordingJournal{}
+	s := NewSession(journal)
+	s.ReplaceHistory([]provider.Message{{Role: provider.RoleUser, Blocks: []provider.ContentBlock{{Type: provider.BlockText, Text: "compressed"}}}})
+	if len(journal.entries) != 0 {
+		t.Fatalf("replace history wrote %d journal entries", len(journal.entries))
+	}
+}
 
 func TestSessionSnapshotIsolation(t *testing.T) {
 	s := NewSession()
@@ -143,4 +238,26 @@ func commitTestPlan(s *Session, plan string) error {
 	user := provider.Message{Role: provider.RoleUser, Blocks: []provider.ContentBlock{{Type: provider.BlockText, Text: "/plan task"}}}
 	assistant := provider.Message{Role: provider.RoleAssistant, Blocks: []provider.ContentBlock{{Type: provider.BlockText, Text: strings.TrimSpace(plan)}}}
 	return s.CommitPlan(user, assistant, plan)
+}
+
+type journalEntry struct {
+	messages []provider.Message
+	purpose  JournalPurpose
+}
+
+type recordingJournal struct {
+	entries []journalEntry
+}
+
+func (j *recordingJournal) Append(messages []provider.Message, purpose JournalPurpose) error {
+	j.entries = append(j.entries, journalEntry{messages: provider.CloneMessages(messages), purpose: purpose})
+	return nil
+}
+
+type failingJournal struct {
+	err error
+}
+
+func (j failingJournal) Append([]provider.Message, JournalPurpose) error {
+	return j.err
 }

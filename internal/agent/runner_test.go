@@ -14,7 +14,9 @@ import (
 	contextmanager "github.com/GitHub-freshman-X/mewcode01/internal/context"
 	"github.com/GitHub-freshman-X/mewcode01/internal/conversation"
 	"github.com/GitHub-freshman-X/mewcode01/internal/logging"
+	"github.com/GitHub-freshman-X/mewcode01/internal/memory"
 	"github.com/GitHub-freshman-X/mewcode01/internal/permissions"
+	"github.com/GitHub-freshman-X/mewcode01/internal/prompt"
 	"github.com/GitHub-freshman-X/mewcode01/internal/provider"
 	"github.com/GitHub-freshman-X/mewcode01/internal/tools"
 )
@@ -103,6 +105,51 @@ func TestRunnerFinalAnswer(t *testing.T) {
 	if got := len(session.Snapshot()); got != 2 {
 		t.Fatalf("history=%d", got)
 	}
+}
+
+func TestRunnerInjectsOptionalModulesIntoFirstPrompt(t *testing.T) {
+	p := &scriptedProvider{rounds: []scriptedRound{textRound("done", provider.Usage{})}}
+	runner, _ := testRunner(t, p, Options{OptionalModules: prompt.OptionalModules{
+		CustomInstructions: []string{"project rules"},
+		LongTermMemory:     []string{"memory index"},
+	}})
+	task, err := runner.Start(context.Background(), Request{Mode: ModeAct, Prompt: "hello"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	drainTask(t, task)
+	if len(p.requests) != 1 || !strings.Contains(p.requests[0].Prompt.StableSystem, "project rules") || !strings.Contains(p.requests[0].Prompt.StableSystem, "memory index") {
+		t.Fatalf("prompt=%+v", p.requests)
+	}
+}
+
+func TestRunnerExtractsMemoryAfterSuccessfulFinalAnswer(t *testing.T) {
+	p := &scriptedProvider{rounds: []scriptedRound{textRound("done", provider.Usage{})}}
+	root := t.TempDir()
+	called := make(chan struct{}, 1)
+	service := memory.NewService(memory.NewPaths(filepath.Join(root, "config"), root), memory.ServiceOptions{
+		Caller: memoryCaller(func(context.Context, provider.ChatRequest) (string, error) {
+			called <- struct{}{}
+			return `[{"action":"noop"}]`, nil
+		}),
+	})
+	runner, _ := testRunner(t, p, Options{Memory: service})
+	task, err := runner.Start(context.Background(), Request{Mode: ModeAct, Prompt: "hello"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	drainTask(t, task)
+	select {
+	case <-called:
+	case <-time.After(time.Second):
+		t.Fatal("memory extraction was not started")
+	}
+}
+
+type memoryCaller func(context.Context, provider.ChatRequest) (string, error)
+
+func (f memoryCaller) Call(ctx context.Context, request provider.ChatRequest) (string, error) {
+	return f(ctx, request)
 }
 
 func TestStandaloneConsumer(t *testing.T) {

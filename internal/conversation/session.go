@@ -13,9 +13,16 @@ type Session struct {
 	history      []provider.Message
 	display      []provider.Message
 	pendingPlans []string
+	journal      Journal
 }
 
-func NewSession() *Session { return &Session{} }
+func NewSession(journals ...Journal) *Session {
+	session := &Session{}
+	if len(journals) > 0 {
+		session.journal = journals[0]
+	}
+	return session
+}
 
 func (s *Session) Snapshot() []provider.Message {
 	s.mu.RLock()
@@ -86,9 +93,14 @@ func (s *Session) CommitRound(user *provider.Message, assistant provider.Message
 		return err
 	}
 	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.journal != nil {
+		if err := s.journal.Append(provider.CloneMessages(additions), JournalPurposeHistory); err != nil {
+			return err
+		}
+	}
 	s.history = append(s.history, provider.CloneMessages(additions)...)
 	s.display = append(s.display, provider.CloneMessages(additions)...)
-	s.mu.Unlock()
 	return nil
 }
 
@@ -108,9 +120,14 @@ func (s *Session) CommitPlan(user provider.Message, assistant provider.Message, 
 		return err
 	}
 	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.journal != nil {
+		if err := s.journal.Append(provider.CloneMessages(additions), JournalPurposePlan); err != nil {
+			return err
+		}
+	}
 	s.display = append(s.display, provider.CloneMessages(additions)...)
 	s.pendingPlans = append(s.pendingPlans, plan)
-	s.mu.Unlock()
 	return nil
 }
 

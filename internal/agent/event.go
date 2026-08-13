@@ -6,6 +6,7 @@ import (
 
 	contextmanager "github.com/GitHub-freshman-X/mewcode01/internal/context"
 	"github.com/GitHub-freshman-X/mewcode01/internal/logging"
+	"github.com/GitHub-freshman-X/mewcode01/internal/memory"
 	"github.com/GitHub-freshman-X/mewcode01/internal/permissions"
 	"github.com/GitHub-freshman-X/mewcode01/internal/prompt"
 	"github.com/GitHub-freshman-X/mewcode01/internal/provider"
@@ -31,16 +32,18 @@ const (
 )
 
 type Options struct {
-	MaxIterations int
-	MaxTokens     int
-	Thinking      provider.ThinkingOptions
-	Workspace     string
-	Clock         prompt.Clock
-	Injection     prompt.InjectionPolicy
-	Permissions   *permissions.Engine
-	Confirmer     PermissionBridge
-	Context       contextmanager.Config
-	Logger        *logging.Logger
+	MaxIterations   int
+	MaxTokens       int
+	Thinking        provider.ThinkingOptions
+	Workspace       string
+	Clock           prompt.Clock
+	Injection       prompt.InjectionPolicy
+	OptionalModules prompt.OptionalModules
+	Memory          *memory.Service
+	Permissions     *permissions.Engine
+	Confirmer       PermissionBridge
+	Context         contextmanager.Config
+	Logger          *logging.Logger
 }
 
 type PermissionBridge interface {

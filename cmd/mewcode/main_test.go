@@ -44,6 +44,74 @@ func TestRunConfigOverride(t *testing.T) {
 	}
 }
 
+func TestRunCreatesChapterNineSessionAndInjectsMemoryModules(t *testing.T) {
+	origLoad, origNew, origTUI, origPaths, origUserDir := loadConfig, newProvider, runTUI, permissionFilePaths, userConfigDir
+	defer func() {
+		loadConfig, newProvider, runTUI, permissionFilePaths, userConfigDir = origLoad, origNew, origTUI, origPaths, origUserDir
+	}()
+	root := t.TempDir()
+	userRoot := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(root, ".mewcode"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(root, ".mewcode", "MEWCODE.md"), []byte("project rule"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(filepath.Join(userRoot, "mewcode", "memory"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(userRoot, "mewcode", "memory", "MEMORY.md"), []byte("user memory"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	origWD, err := os.Getwd()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chdir(root); err != nil {
+		t.Fatal(err)
+	}
+	defer os.Chdir(origWD)
+	userConfigDir = func() (string, error) { return userRoot, nil }
+	loadConfig = func(string) (config.Config, error) { return validTestConfig(), nil }
+	captured := &captureProvider{}
+	newProvider = func(config.Config, *http.Client, *logging.Logger) (provider.Provider, error) { return captured, nil }
+	permissionFilePaths = func(string) (permissions.FilePaths, error) { return permissions.FilePaths{}, nil }
+	runTUI = func(runner *agent.Runner, _ *conversation.Session, _ *tui.PermissionBridge) error {
+		task, err := runner.Start(context.Background(), agent.Request{Mode: agent.ModeAct, Prompt: "hello"})
+		if err != nil {
+			return err
+		}
+		for range task.Events {
+		}
+		return nil
+	}
+	if code := run([]string{"--config", "custom.yaml"}, &bytes.Buffer{}); code != 0 {
+		t.Fatalf("run code=%d", code)
+	}
+	if len(captured.requests) == 0 || !strings.Contains(captured.requests[0].Prompt.StableSystem, "project rule") || !strings.Contains(captured.requests[0].Prompt.StableSystem, "user memory") {
+		t.Fatalf("requests=%+v", captured.requests)
+	}
+	entries, err := os.ReadDir(filepath.Join(root, ".mewcode", "sessions"))
+	if err != nil || len(entries) != 1 {
+		t.Fatalf("sessions=%v err=%v", entries, err)
+	}
+}
+
+type captureProvider struct{ requests []provider.ChatRequest }
+
+func (p *captureProvider) Stream(_ context.Context, request provider.ChatRequest) (<-chan provider.StreamEvent, <-chan error) {
+	p.requests = append(p.requests, request)
+	events := make(chan provider.StreamEvent, 3)
+	done := make(chan error, 1)
+	events <- provider.StreamEvent{Type: provider.EventStarted}
+	events <- provider.StreamEvent{Type: provider.EventTextDelta, Delta: "done"}
+	events <- provider.StreamEvent{Type: provider.EventCompleted}
+	close(events)
+	done <- nil
+	close(done)
+	return events, done
+}
+
 func TestAgentContextConfig(t *testing.T) {
 	got := agentContextConfig(config.ContextConfig{
 		WindowTokens: 300000, SummaryOutputTokens: 25000, AutoSafetyTokens: 11000,

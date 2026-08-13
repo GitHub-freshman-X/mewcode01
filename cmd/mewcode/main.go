@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"strings"
 	"time"
 
 	"github.com/GitHub-freshman-X/mewcode01/internal/agent"
@@ -16,9 +17,12 @@ import (
 	contextmanager "github.com/GitHub-freshman-X/mewcode01/internal/context"
 	"github.com/GitHub-freshman-X/mewcode01/internal/conversation"
 	"github.com/GitHub-freshman-X/mewcode01/internal/envfile"
+	"github.com/GitHub-freshman-X/mewcode01/internal/instructions"
 	"github.com/GitHub-freshman-X/mewcode01/internal/logging"
 	"github.com/GitHub-freshman-X/mewcode01/internal/mcp"
+	"github.com/GitHub-freshman-X/mewcode01/internal/memory"
 	"github.com/GitHub-freshman-X/mewcode01/internal/permissions"
+	"github.com/GitHub-freshman-X/mewcode01/internal/prompt"
 	"github.com/GitHub-freshman-X/mewcode01/internal/provider"
 	"github.com/GitHub-freshman-X/mewcode01/internal/provider/factory"
 	"github.com/GitHub-freshman-X/mewcode01/internal/tools"
@@ -32,6 +36,7 @@ var (
 	runTUI              = tui.RunWithPermissions
 	permissionFilePaths = permissions.DefaultFilePaths
 	newLogger           = func(root string) (*logging.Logger, error) { return logging.New(root, time.Now, os.Getpid()) }
+	userConfigDir       = os.UserConfigDir
 )
 
 func main() { os.Exit(run(os.Args[1:], os.Stderr)) }
@@ -93,6 +98,33 @@ func run(args []string, stderr io.Writer) int {
 		fmt.Fprintln(stderr, provider.UserError(err))
 		return 1
 	}
+	configRoot, err := userConfigDir()
+	if err != nil {
+		fmt.Fprintln(stderr, "user config:", err)
+		return 1
+	}
+	instructionPaths := instructions.NewPaths(configRoot, root)
+	customInstructions, err := instructions.LoadInstructions(instructionPaths)
+	if err != nil {
+		fmt.Fprintln(stderr, "instructions:", err)
+		return 1
+	}
+	memoryPaths := memory.NewPaths(configRoot, root)
+	memoryIndexes, err := memory.LoadIndexes(memoryPaths)
+	if err != nil {
+		fmt.Fprintln(stderr, "memory:", err)
+		return 1
+	}
+	sessionStore := conversation.NewSessionStore(instructionPaths.Sessions)
+	if _, err := sessionStore.CleanupExpired(time.Now()); err != nil {
+		fmt.Fprintln(stderr, "session cleanup:", err)
+		return 1
+	}
+	session, _, err := sessionStore.Create()
+	if err != nil {
+		fmt.Fprintln(stderr, "session create:", err)
+		return 1
+	}
 	registry, err := tools.NewDefaultRegistry(root)
 	if err != nil {
 		fmt.Fprintln(stderr, err)
@@ -129,23 +161,56 @@ func run(args []string, stderr io.Writer) int {
 		Paths:   paths,
 	}
 	executor := tools.NewExecutor(30 * time.Second)
-	session := conversation.NewSession()
 	bridge := tui.NewPermissionBridge()
 	runner := agent.NewRunner(p, session, registry, executor, agent.Options{
-		MaxIterations: cfg.Agent.MaxIterations,
-		MaxTokens:     cfg.MaxTokens,
-		Thinking:      provider.ThinkingOptions{Enabled: cfg.Thinking.Enabled, BudgetTokens: cfg.Thinking.BudgetTokens},
-		Workspace:     root,
-		Permissions:   gate,
-		Confirmer:     bridge,
-		Context:       agentContextConfig(cfg.Agent.Context),
-		Logger:        logger,
+		MaxIterations:   cfg.Agent.MaxIterations,
+		MaxTokens:       cfg.MaxTokens,
+		Thinking:        provider.ThinkingOptions{Enabled: cfg.Thinking.Enabled, BudgetTokens: cfg.Thinking.BudgetTokens},
+		Workspace:       root,
+		Permissions:     gate,
+		Confirmer:       bridge,
+		Context:         agentContextConfig(cfg.Agent.Context),
+		Logger:          logger,
+		OptionalModules: prompt.OptionalModules{CustomInstructions: nonEmpty(customInstructions), LongTermMemory: memoryIndexes},
+		Memory: memory.NewService(memoryPaths, memory.ServiceOptions{
+			Caller: providerMemoryCaller{provider: p}, Sessions: memorySessionLister{store: sessionStore}, Logger: logger,
+		}),
 	})
 	if err := runTUI(runner, session, bridge); err != nil {
 		fmt.Fprintln(stderr, "tui:", err)
 		return 1
 	}
 	return 0
+}
+
+func nonEmpty(value string) []string {
+	if value == "" {
+		return nil
+	}
+	return []string{value}
+}
+
+type providerMemoryCaller struct{ provider provider.Provider }
+
+func (c providerMemoryCaller) Call(ctx context.Context, request provider.ChatRequest) (string, error) {
+	events, done := c.provider.Stream(ctx, request)
+	var output strings.Builder
+	for event := range events {
+		if event.Type == provider.EventTextDelta {
+			output.WriteString(event.Delta)
+		}
+	}
+	return output.String(), <-done
+}
+
+type memorySessionLister struct{ store *conversation.SessionStore }
+
+func (l memorySessionLister) List() ([]memory.SessionMeta, error) {
+	metas, err := l.store.List()
+	if err != nil {
+		return nil, err
+	}
+	return make([]memory.SessionMeta, len(metas)), nil
 }
 
 func agentContextConfig(cfg config.ContextConfig) contextmanager.Config {

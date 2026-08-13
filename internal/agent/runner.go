@@ -11,6 +11,7 @@ import (
 	contextmanager "github.com/GitHub-freshman-X/mewcode01/internal/context"
 	"github.com/GitHub-freshman-X/mewcode01/internal/conversation"
 	"github.com/GitHub-freshman-X/mewcode01/internal/logging"
+	"github.com/GitHub-freshman-X/mewcode01/internal/memory"
 	"github.com/GitHub-freshman-X/mewcode01/internal/prompt"
 	"github.com/GitHub-freshman-X/mewcode01/internal/provider"
 	"github.com/GitHub-freshman-X/mewcode01/internal/tools"
@@ -151,6 +152,7 @@ func (r *Runner) run(ctx context.Context, mode Mode, prepared preparedRequest, e
 			Mode:            promptMode,
 			Iteration:       iterations,
 			InjectionPolicy: r.options.Injection,
+			OptionalModules: r.options.OptionalModules,
 		})
 		if err != nil {
 			summary := &Summary{Reason: StopStreamError, Iterations: iterations - 1, Usage: total, Partial: hasPartial}
@@ -237,6 +239,7 @@ func (r *Runner) run(ctx context.Context, mode Mode, prepared preparedRequest, e
 			}
 			summary := &Summary{Reason: StopFinalAnswer, Iterations: iterations, Usage: total}
 			terminal(Event{Type: EventCompleted, Iteration: iterations, Phase: PhaseFinishing, Summary: summary})
+			r.startMemoryTasks(mode)
 			return
 		}
 
@@ -298,6 +301,22 @@ func (r *Runner) run(ctx context.Context, mode Mode, prepared preparedRequest, e
 			return
 		}
 	}
+}
+
+func (r *Runner) startMemoryTasks(mode Mode) {
+	if r.options.Memory == nil || (mode != ModeAct && mode != ModePlan && mode != ModeDo) {
+		return
+	}
+	transcript := r.session.DisplaySnapshot()
+	memoryMode := memory.Mode(mode)
+	go func() {
+		if err := r.options.Memory.Extract(context.Background(), memoryMode, transcript); err != nil {
+			r.options.Logger.Error("memory extraction failed", logging.Fields{"stage": "memory_extract", "status": "failed", "error_type": fmt.Sprintf("%T", err)})
+		}
+		if err := r.options.Memory.MaybeConsolidate(context.Background()); err != nil {
+			r.options.Logger.Error("memory consolidation failed", logging.Fields{"stage": "memory_consolidation", "status": "failed", "error_type": fmt.Sprintf("%T", err)})
+		}
+	}()
 }
 
 func isContextTooLongError(err error) bool {
