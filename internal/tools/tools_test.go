@@ -54,6 +54,22 @@ func TestDefaultRegistryAndCoreTools(t *testing.T) {
 	runTool(t, registry, "run_command", map[string]any{"command": command, "args": args}, true)
 }
 
+func TestFindFilesAcceptsAbsolutePatternsAndReturnsDirectories(t *testing.T) {
+	root := t.TempDir()
+	if err := os.Mkdir(filepath.Join(root, ".mewcode"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	registry, err := NewDefaultRegistry(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	result := runTool(t, registry, "find_files", map[string]any{"pattern": filepath.Join(root, ".mewcode", "**")}, true)
+	matches, ok := result.Data["matches"].([]string)
+	if !ok || len(matches) != 1 || matches[0] != ".mewcode" {
+		t.Fatalf("matches=%#v", result.Data["matches"])
+	}
+}
+
 func TestSafetyAndFilterBySafety(t *testing.T) {
 	registry, err := NewDefaultRegistry(t.TempDir())
 	if err != nil {

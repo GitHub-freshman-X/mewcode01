@@ -3,6 +3,7 @@ package tools
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"io/fs"
 	"path/filepath"
 	"sort"
@@ -18,7 +19,7 @@ func NewFindFilesTool(workspace *Workspace) *FindFilesTool {
 func (t *FindFilesTool) Metadata() Metadata {
 	return Metadata{
 		Name:        "find_files",
-		Description: "Find workspace files matching a glob pattern.",
+		Description: "Find workspace files or directories matching a glob pattern. Patterns may be workspace-relative or absolute paths within the workspace.",
 		Safety:      SafetyReadOnly,
 		Permission:  PermissionMetadata{Target: PermissionTargetPattern},
 		Schema: Schema{"type": "object", "required": []any{"pattern"}, "properties": map[string]any{
@@ -33,21 +34,21 @@ func (t *FindFilesTool) Execute(ctx context.Context, input json.RawMessage) Resu
 	if verr != nil {
 		return Failure(t.Metadata().Name, verr.Type, verr.Message, verr.Details)
 	}
-	pattern := filepath.ToSlash(args["pattern"].(string))
+	pattern, err := normalizeFindPattern(t.workspace.Root, args["pattern"].(string))
+	if err != nil {
+		return Failure(t.Metadata().Name, ErrorPermission, err.Error(), nil)
+	}
 	if pattern == "" {
 		return Failure(t.Metadata().Name, ErrorValidation, "pattern must not be empty", nil)
 	}
 	limit := intValue(args["limit"], 100)
 	var matches []string
-	err := filepath.WalkDir(t.workspace.Root, func(path string, d fs.DirEntry, err error) error {
+	err = filepath.WalkDir(t.workspace.Root, func(path string, d fs.DirEntry, err error) error {
 		if err != nil {
 			return nil
 		}
 		if d.IsDir() && path != t.workspace.Root && shouldSkipDir(d.Name()) {
 			return filepath.SkipDir
-		}
-		if d.IsDir() {
-			return nil
 		}
 		rel, err := filepath.Rel(t.workspace.Root, path)
 		if err != nil {
@@ -58,7 +59,7 @@ func (t *FindFilesTool) Execute(ctx context.Context, input json.RawMessage) Resu
 		if err != nil {
 			return err
 		}
-		if ok {
+		if ok && path != t.workspace.Root {
 			matches = append(matches, rel)
 		}
 		return nil
@@ -73,6 +74,20 @@ func (t *FindFilesTool) Execute(ctx context.Context, input json.RawMessage) Resu
 		truncated = true
 	}
 	return Success(t.Metadata().Name, map[string]any{"matches": matches, "count": len(matches), "truncated": truncated})
+}
+
+func normalizeFindPattern(root, pattern string) (string, error) {
+	if pattern == "" {
+		return "", nil
+	}
+	if !filepath.IsAbs(pattern) {
+		return filepath.ToSlash(pattern), nil
+	}
+	rel, err := filepath.Rel(root, pattern)
+	if err != nil || rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
+		return "", fmt.Errorf("pattern must be within the workspace")
+	}
+	return filepath.ToSlash(rel), nil
 }
 
 func globMatch(pattern, rel string) (bool, error) {

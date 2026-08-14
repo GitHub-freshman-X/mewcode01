@@ -2,6 +2,7 @@ package memory
 
 import (
 	"context"
+	"crypto/sha256"
 	"errors"
 	"fmt"
 	"os"
@@ -62,6 +63,7 @@ type Service struct {
 
 	mu       sync.Mutex
 	lastScan map[string]time.Time
+	recent   map[[32]byte]struct{}
 }
 
 const (
@@ -82,7 +84,40 @@ func NewService(paths Paths, options ServiceOptions) *Service {
 	if logger == nil {
 		logger = logging.Nop()
 	}
-	return &Service{paths: paths, caller: options.Caller, clock: clock, sessions: options.Sessions, logger: logger, lastScan: make(map[string]time.Time)}
+	return &Service{paths: paths, caller: options.Caller, clock: clock, sessions: options.Sessions, logger: logger, lastScan: make(map[string]time.Time), recent: make(map[[32]byte]struct{})}
+}
+
+func (s *Service) ShouldExtract(transcript []provider.Message) bool {
+	for i := len(transcript) - 1; i >= 0; i-- {
+		if transcript[i].Role != provider.RoleUser {
+			continue
+		}
+		for _, block := range transcript[i].Blocks {
+			if block.Type != provider.BlockText || !isDurableMemoryCandidate(block.Text) {
+				continue
+			}
+			key := sha256.Sum256([]byte(strings.TrimSpace(block.Text)))
+			s.mu.Lock()
+			_, seen := s.recent[key]
+			if !seen {
+				s.recent[key] = struct{}{}
+			}
+			s.mu.Unlock()
+			return !seen
+		}
+		return false
+	}
+	return false
+}
+
+func isDurableMemoryCandidate(text string) bool {
+	text = strings.ToLower(text)
+	for _, marker := range []string{"请记住", "记住", "长期偏好", "偏好", "习惯", "以后", "始终", "不要", "规则", "preference", "remember", "always", "never"} {
+		if strings.Contains(text, marker) {
+			return true
+		}
+	}
+	return false
 }
 
 func (s *Service) Extract(ctx context.Context, mode Mode, transcript []provider.Message) error {
@@ -90,7 +125,11 @@ func (s *Service) Extract(ctx context.Context, mode Mode, transcript []provider.
 		return errors.New("memory service caller is not configured")
 	}
 	started := s.clock.Now()
-	response, err := s.caller.Call(ctx, extractionRequest(mode, transcript))
+	indexes, err := LoadIndexes(s.paths)
+	if err != nil {
+		return err
+	}
+	response, err := s.caller.Call(ctx, extractionRequest(mode, transcript, indexes))
 	if err != nil {
 		s.logger.Error("memory extraction failed", logging.Fields{"stage": "memory_extract", "status": "provider_failed", "duration_ms": s.clock.Now().Sub(started).Milliseconds()})
 		return err
@@ -108,9 +147,9 @@ func (s *Service) Extract(ctx context.Context, mode Mode, transcript []provider.
 	return nil
 }
 
-func extractionRequest(mode Mode, transcript []provider.Message) provider.ChatRequest {
+func extractionRequest(mode Mode, transcript []provider.Message, indexes []string) provider.ChatRequest {
 	messages := provider.CloneMessages(transcript)
-	messages = append(messages, provider.Message{Role: provider.RoleUser, Blocks: []provider.ContentBlock{{Type: provider.BlockText, Text: "Extract durable memories for mode " + string(mode) + ". Return only a JSON array of constrained memory operations."}}})
+	messages = append(messages, provider.Message{Role: provider.RoleUser, Blocks: []provider.ContentBlock{{Type: provider.BlockText, Text: "Extract durable memories for mode " + string(mode) + ". Existing memory indexes follow. If a candidate is semantically equivalent to an existing entry, update that entry; never create a duplicate. Return only a JSON array of constrained memory operations.\n\nUser index:\n" + indexes[0] + "\n\nProject index:\n" + indexes[1]}}})
 	return provider.ChatRequest{
 		Prompt:    provider.PromptBundle{StableSystem: memoryOperationProtocol("extract durable memory from a completed conversation")},
 		Messages:  messages,

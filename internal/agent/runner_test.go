@@ -93,7 +93,7 @@ func drainTask(t *testing.T, task *Task) []Event {
 func TestRunnerFinalAnswer(t *testing.T) {
 	p := &scriptedProvider{rounds: []scriptedRound{textRound("done", provider.Usage{InputTokens: 10, OutputTokens: 4})}}
 	runner, session := testRunner(t, p, Options{})
-	task, err := runner.Start(context.Background(), Request{Mode: ModeAct, Prompt: "hello"})
+	task, err := runner.Start(context.Background(), Request{Mode: ModeAct, Prompt: "请记住：我在 Go 中偏好 any。"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -113,7 +113,7 @@ func TestRunnerInjectsOptionalModulesIntoFirstPrompt(t *testing.T) {
 		CustomInstructions: []string{"project rules"},
 		LongTermMemory:     []string{"memory index"},
 	}})
-	task, err := runner.Start(context.Background(), Request{Mode: ModeAct, Prompt: "hello"})
+	task, err := runner.Start(context.Background(), Request{Mode: ModeAct, Prompt: "请记住：我在 Go 中偏好 any。"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -134,7 +134,7 @@ func TestRunnerExtractsMemoryAfterSuccessfulFinalAnswer(t *testing.T) {
 		}),
 	})
 	runner, _ := testRunner(t, p, Options{Memory: service})
-	task, err := runner.Start(context.Background(), Request{Mode: ModeAct, Prompt: "hello"})
+	task, err := runner.Start(context.Background(), Request{Mode: ModeAct, Prompt: "请记住：我在 Go 中偏好 any。"})
 	if err != nil {
 		t.Fatal(err)
 	}

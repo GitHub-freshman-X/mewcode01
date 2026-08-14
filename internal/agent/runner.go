@@ -308,6 +308,9 @@ func (r *Runner) startMemoryTasks(mode Mode) {
 		return
 	}
 	transcript := r.session.DisplaySnapshot()
+	if !r.options.Memory.ShouldExtract(transcript) {
+		return
+	}
 	memoryMode := memory.Mode(mode)
 	go func() {
 		if err := r.options.Memory.Extract(context.Background(), memoryMode, transcript); err != nil {

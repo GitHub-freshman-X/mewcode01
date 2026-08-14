@@ -186,11 +186,28 @@ func TestMemoryServiceExtractAcceptsFencedJSONOperations(t *testing.T) {
 }
 
 func TestExtractionRequestDefinesOperationSchema(t *testing.T) {
-	request := extractionRequest(ModeAct, nil)
+	request := extractionRequest(ModeAct, nil, []string{"[existing](existing.md)", ""})
 	for _, expected := range []string{"action", "kind", "name", "description", "content", "user", "feedback", "project", "reference"} {
 		if !strings.Contains(request.Prompt.StableSystem, expected) {
 			t.Fatalf("extraction request omits %q: %q", expected, request.Prompt.StableSystem)
 		}
+	}
+	if len(request.Messages) == 0 || !strings.Contains(request.Messages[len(request.Messages)-1].Blocks[0].Text, "[existing](existing.md)") {
+		t.Fatalf("extraction request omits existing index: %#v", request.Messages)
+	}
+}
+
+func TestMemoryServiceShouldExtractOnlyDistinctDurableCandidates(t *testing.T) {
+	service := NewService(testPaths(t), ServiceOptions{})
+	candidate := []provider.Message{{Role: provider.RoleUser, Blocks: []provider.ContentBlock{{Type: provider.BlockText, Text: "请记住：我在 Go 中偏好 any。"}}}}
+	if !service.ShouldExtract(candidate) {
+		t.Fatal("first durable candidate was skipped")
+	}
+	if service.ShouldExtract(candidate) {
+		t.Fatal("duplicate durable candidate was not skipped")
+	}
+	if service.ShouldExtract([]provider.Message{{Role: provider.RoleUser, Blocks: []provider.ContentBlock{{Type: provider.BlockText, Text: "当前目录有什么文件？"}}}}) {
+		t.Fatal("ordinary request was selected for extraction")
 	}
 }
 
