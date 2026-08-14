@@ -2,6 +2,7 @@ package context
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -24,9 +25,6 @@ type ResultStore struct {
 
 func NewResultStore(root, session string) (*ResultStore, error) {
 	dir := filepath.Join(root, session, "tool-results")
-	if err := os.MkdirAll(dir, 0700); err != nil {
-		return nil, err
-	}
 	return &ResultStore{root: dir, paths: make(map[string]struct{})}, nil
 }
 
@@ -34,10 +32,29 @@ func (s *ResultStore) Persist(result provider.ToolResult) (Persistence, error) {
 	if s == nil {
 		return Persistence{}, fmt.Errorf("result store is not configured")
 	}
-	s.sequence++
-	path := filepath.Join(s.root, fmt.Sprintf("%03d-%s.txt", s.sequence, safeName(result.CallID)))
-	if err := os.WriteFile(path, []byte(result.Content), 0600); err != nil {
+	if err := os.MkdirAll(s.root, 0700); err != nil {
 		return Persistence{}, err
+	}
+	var path string
+	for {
+		s.sequence++
+		candidate := filepath.Join(s.root, fmt.Sprintf("%03d-%s.txt", s.sequence, safeName(result.CallID)))
+		file, err := os.OpenFile(candidate, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0600)
+		if errors.Is(err, os.ErrExist) {
+			continue
+		}
+		if err != nil {
+			return Persistence{}, err
+		}
+		if _, err := file.WriteString(result.Content); err != nil {
+			_ = file.Close()
+			return Persistence{}, err
+		}
+		if err := file.Close(); err != nil {
+			return Persistence{}, err
+		}
+		path = candidate
+		break
 	}
 	s.paths[filepath.Clean(path)] = struct{}{}
 	return Persistence{CallID: result.CallID, Path: path, Size: len(result.Content)}, nil
@@ -81,7 +98,7 @@ func (m *Manager) PrepareResults(input []provider.ToolResult) ([]provider.ToolRe
 		}
 		if len(results[i].Content) > m.Config.SingleResultChars {
 			if err := replace(i); err != nil {
-				return nil, nil, err
+				return input, nil, nil
 			}
 			continue
 		}
@@ -95,7 +112,7 @@ func (m *Manager) PrepareResults(input []provider.ToolResult) ([]provider.ToolRe
 		}
 		total -= len(results[index].Content)
 		if err := replace(index); err != nil {
-			return nil, nil, err
+			return input, nil, nil
 		}
 	}
 	fitPersistedPreviews(results, replacements, m.Config.MessageResultChars, m.Config.PreviewChars)

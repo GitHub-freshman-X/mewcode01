@@ -8,6 +8,13 @@
 - [x] **AC2 聚合预算按大小收缩**：多个工具结果分别未超单项阈值、合计超消息预算时，最大结果先被替换，直到总量合规，调用顺序不变。（验证：`go test ./internal/context -run 'Aggregate|Largest|Order'`，期望替换集合与结果顺序断言通过。）
 - [x] **AC1/AC2 写入即终态**：后续轮次不会重新替换或恢复已提交消息，持久化结果只经路径按需读取。（验证：`go test ./internal/context ./internal/conversation -run 'Final|Stable|Persist'`，期望历史快照逐轮保持不变。）
 
+## 结果目录生命周期与恢复定位
+
+- [x] **AC11 惰性创建**：创建新会话、创建 Runner 和创建结果存储对象均不产生 context 目录；首次超过阈值的工具结果才创建 `.mewcode/context/<会话 ID>/tool-results/`。（验证：`go test ./internal/context ./internal/agent -count=1`，通过。）
+- [x] **AC11 目录迁移完成**：新结果引用均位于 `.mewcode/context`，不再创建 `.mew/context`。（验证：`TestRunnerPersistsToolResultsBeforeCommit` 检查新目录存在、旧目录不存在，已通过。）
+- [x] **AC12 恢复会话续写**：以相同持久会话 ID 创建恢复后的 Runner 时，旧结果引用仍可读取；新大结果写入同一 `tool-results` 目录且不覆盖已有文件。（验证：`TestResultStoreReusesSessionDirectoryWithoutOverwriting` 已通过。）
+- [x] **AC12 安全降级**：没有工作区或持久会话 ID 时，超阈值工具结果保留原文且任务继续完成。（验证：`TestPrepareResultsWithoutStoreKeepsOriginalContent` 已通过。）
+
 ## 阈值、自动与手动压缩
 
 - [x] **AC3 默认自动线正确**：默认窗口 200K、摘要预留 20K、自动余量 13K 时，167K 以上自动压缩，未超过时不压缩。（验证：`go test ./internal/context ./internal/agent -run 'Default|167000|Automatic'`，期望摘要 Provider 调用次数分别为 1 和 0。）
@@ -48,3 +55,4 @@
 - [x] **E2E 1：长工具循环自动压缩**：脚本化 Agent 连续读取大文件，第一层保存超大结果，累计历史超过 167K 后产生摘要；随后模型继续并给出最终回复。（验证：运行 `go test ./internal/agent -run 'AutomaticCompactBeforeNormalRequest|PersistsToolResultsBeforeCommit'`，期望持久化事件、automatic 事件和 completed 终态依次出现。）
 - [x] **E2E 2：用户主动话题切换**：已有低用量历史时输入 `/compact`，摘要成功后再提交新任务；新请求包含边界消息与摘要且能正常完成。（验证：运行 `go test ./internal/tui ./internal/agent -run 'ManualCompact|CompactionEvent'`，期望 manual 后下一任务 completed。）
 - [x] **E2E 3：Plan 不污染主会话**：`/plan` 读取足量内容并压缩后返回计划，随后普通任务或 `/do` 的请求不包含规划的内部工具结果。（验证：运行 `go test ./internal/agent -run 'PlanCompactReplacesOnlyTaskHistory|Plan.*Isolation'`，期望 Plan 内有压缩、共享历史没有规划中间消息。）
+- [ ] **E2E 4：恢复后继续存放大结果**：创建会话并产生一个大工具结果，记录会话 ID 和结果路径；恢复同一会话后再产生一个大结果。（验证：两个结果均位于 `.mewcode/context/<相同会话 ID>/tool-results/`，均可读取，文件数为二。）

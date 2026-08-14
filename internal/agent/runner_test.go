@@ -493,7 +493,7 @@ func TestRunnerPersistsToolResultsBeforeCommit(t *testing.T) {
 	cfg.SingleResultChars = 20
 	cfg.MessageResultChars = 100
 	cfg.PreviewChars = 8
-	runner := NewRunner(p, session, registry, tools.NewExecutor(time.Second), Options{Workspace: root, Context: cfg})
+	runner := NewRunner(p, session, registry, tools.NewExecutor(time.Second), Options{Workspace: root, SessionID: "20260814-103000-a1b2", Context: cfg})
 
 	task, err := runner.Start(context.Background(), Request{Mode: ModeAct, Prompt: "call tool"})
 	if err != nil {
@@ -506,6 +506,12 @@ func TestRunnerPersistsToolResultsBeforeCommit(t *testing.T) {
 	history := allMessageText(p.requests[1].Messages)
 	if !strings.Contains(history, "Tool result persisted") || strings.Contains(history, strings.Repeat("x", 80)) {
 		t.Fatalf("tool result history:\n%s", history)
+	}
+	if _, err := os.Stat(filepath.Join(root, ".mewcode", "context", "20260814-103000-a1b2", "tool-results")); err != nil {
+		t.Fatalf("new result directory missing: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(root, ".mew")); !os.IsNotExist(err) {
+		t.Fatalf("legacy result directory exists: %v", err)
 	}
 }
 
@@ -795,7 +801,7 @@ func TestRunnerLogsToolResultPersistenceAndEmergencyRetry(t *testing.T) {
 	cfg.SingleResultChars = 20
 	cfg.MessageResultChars = 100
 	cfg.PreviewChars = 8
-	runner := NewRunner(p, session, registry, tools.NewExecutor(time.Second), Options{Workspace: root, Context: cfg, Logger: logger})
+	runner := NewRunner(p, session, registry, tools.NewExecutor(time.Second), Options{Workspace: root, SessionID: "20260814-103000-a1b2", Context: cfg, Logger: logger})
 	task, err := runner.Start(context.Background(), Request{Mode: ModeAct, Prompt: "call tool"})
 	if err != nil {
 		t.Fatal(err)

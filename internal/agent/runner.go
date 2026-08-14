@@ -32,8 +32,8 @@ type Runner struct {
 func NewRunner(p provider.Provider, session *conversation.Session, registry *tools.Registry, executor *tools.Executor, options Options) *Runner {
 	opts := options.normalized()
 	var store *contextmanager.ResultStore
-	if opts.Workspace != "" && session != nil {
-		store, _ = contextmanager.NewResultStore(filepath.Join(opts.Workspace, ".mew", "context"), fmt.Sprintf("%p", session))
+	if opts.Workspace != "" && opts.SessionID != "" && session != nil {
+		store, _ = contextmanager.NewResultStore(filepath.Join(opts.Workspace, ".mewcode", "context"), opts.SessionID)
 	}
 	return &Runner{provider: p, session: session, registry: registry, executor: executor, options: opts, context: contextmanager.NewManager(opts.Context, store)}
 }

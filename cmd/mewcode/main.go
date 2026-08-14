@@ -120,7 +120,7 @@ func run(args []string, stderr io.Writer) int {
 		fmt.Fprintln(stderr, "session cleanup:", err)
 		return 1
 	}
-	session, _, err := sessionStore.Create()
+	session, sessionMeta, err := sessionStore.Create()
 	if err != nil {
 		fmt.Fprintln(stderr, "session create:", err)
 		return 1
@@ -167,6 +167,7 @@ func run(args []string, stderr io.Writer) int {
 		MaxTokens:       cfg.MaxTokens,
 		Thinking:        provider.ThinkingOptions{Enabled: cfg.Thinking.Enabled, BudgetTokens: cfg.Thinking.BudgetTokens},
 		Workspace:       root,
+		SessionID:       sessionMeta.ID,
 		Permissions:     gate,
 		Confirmer:       bridge,
 		Context:         agentContextConfig(cfg.Agent.Context),

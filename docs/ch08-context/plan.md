@@ -30,7 +30,7 @@ Runner（每轮请求前）← Estimate + automatic/forced decision
 TUI /compact → ModeCompact → Runner compact-only task
 ```
 
-- **`internal/context`**：保存阈值、用量锚点和熔断状态；提供第一层、Token 估算、压缩请求与重建的纯业务能力；`ResultStore` 封装会话专属文件写入。
+- **`internal/context`**：保存阈值、用量锚点和熔断状态；提供第一层、Token 估算、压缩请求与重建的纯业务能力；`ResultStore` 延迟创建会话专属目录并封装结果文件写入。
 - **`internal/conversation`**：在锁内把共享历史整体替换；保留现有 `CommitRound` 的成组校验语义。
 - **`internal/agent`**：管理摘要 Provider 调用、四种触发原因、一次紧急重试和事件转发；Plan 使用其临时历史的替换方法。
 - **`internal/config` 与启动层**：为 `AgentConfig` 增加嵌套的上下文配置，并映射为 `agent.Options`。
@@ -70,7 +70,7 @@ type State struct {
 
 `Config` 提供默认值和校验：所有预算非负，窗口严格大于摘要预留加自动/手动余量；第一层与近期保留预算为正。`State` 只在一个 Runner 任务内变更；共享 Session 不保存模型调用状态。
 
-### `context.Manager`
+### `context.Manager` 与 `ResultStore`
 
 ```go
 type Manager struct { /* Config、ResultStore、State */ }
@@ -85,6 +85,8 @@ func (m *Manager) RecordSummaryResult(success bool, manual bool)
 ```
 
 `PrepareResults` 先处理单项，再在同一 user 工具结果消息内按内容长度降序替换，输出的结果保持原始调用顺序。`Rebuild` 保留末尾约 10K Token 或至少五条消息，并以整个 assistant/tool-result 组为不可拆分单元。摘要文本必须抽取非空 `<summary>`；失败不改动输入历史。
+
+`NewResultStore(root, sessionID)` 只校验并保存路径，不创建目录。`Persist` 首次需要保存完整结果时才以 `0700` 创建 `.mewcode/context/<sessionID>/tool-results`，并用排他创建的递增文件名写入 `0600` 结果文件。排他创建确保恢复同一会话后不会覆盖既有结果。没有有效持久会话 ID 时，Runner 不创建 ResultStore，`PrepareResults` 保留工具结果原文。
 
 ### `conversation` 与 `agent` 扩展
 
@@ -114,6 +116,7 @@ type CompactionEvent struct {
 4. 工具返回后，Runner 调用 `PrepareResults`，发出持久化事件，再以替换结果调用现有 `CommitRound`。
 5. 正常请求被统一错误分类认定为上下文超限时，执行一次 `TriggerEmergency`，然后用重建历史重试原请求；第二次错误进入现有失败终态。
 6. `/compact` 创建 `ModeCompact` 任务，仅执行步骤 2 并发出终态；活跃任务时沿用 Runner 的单任务拒绝。
+7. 启动层将 `SessionStore.Create` 或 `SessionStore.Restore` 返回的 `SessionMeta.ID` 传入 Runner。恢复后的 Runner 使用同一 ID，因此工具结果读写继续定位到原会话目录。
 
 ## 文件组织
 
@@ -124,9 +127,10 @@ internal/context/
 ├── results.go         — ResultStore、单项/聚合持久化与预览
 ├── compact.go         — 摘要 prompt、XML 标签提取、近期边界与历史重建
 └── context_test.go    — 上述纯逻辑与文件存储测试
+internal/conversation/store.go         — 为新建与恢复会话提供持久会话 ID
 internal/conversation/session.go       — ReplaceHistory
 internal/conversation/session_test.go  — 原子替换与隔离测试
-internal/agent/event.go                — ModeCompact、压缩事件和 Options
+internal/agent/event.go                — ModeCompact、压缩事件、持久会话 ID 和 Options
 internal/agent/history.go              — taskHistory.Replace
 internal/agent/runner.go               — 请求前决策、摘要、紧急重试、结果预处理
 internal/agent/runner_test.go          — Runner 集成场景
@@ -145,7 +149,8 @@ internal/tui/tui_test.go               — 命令与展示状态测试
 | 压缩位置 | 独立 `internal/context` | Runner 保持编排职责，Session 保持状态职责，纯逻辑易测。 |
 | Token 计数 | usage 锚点 + 字符增量近似 | 无新依赖，误差限制在最近增量。 |
 | 摘要模型 | 当前 Provider，空工具定义 | Provider 中立，避免摘要意外执行工具。 |
-| 工具结果完整性 | 会话专属磁盘文件 + 预览引用 | 第一层零 API 成本且可按需读取。 |
+| 工具结果完整性 | `.mewcode/context/<持久会话 ID>` + 预览引用 | 第一层零 API 成本；未产生大结果时不留目录，恢复会话可继续访问同一完整结果。 |
+| 结果文件命名 | 延迟目录创建 + 排他递增写入 | 避免空目录，并防止恢复会话覆盖旧结果。 |
 | 摘要历史 | 边界消息 + 9 段摘要 + 近期成组原文 | 保留用户约束和最近执行细节，防止模型臆测。 |
 | 熔断 | 仅自动路径三次失败暂停 | 防止循环，同时保留用户主动恢复路径。 |
 | 错误恢复 | 单次紧急压缩重试 | 避免无限重试且覆盖估算漏网情形。 |

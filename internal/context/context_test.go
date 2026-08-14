@@ -63,6 +63,60 @@ func TestPrepareResultsPersistsLargestResultsAndKeepsOrder(t *testing.T) {
 	}
 }
 
+func TestResultStoreCreatesDirectoryOnlyWhenPersisting(t *testing.T) {
+	root := t.TempDir()
+	store, err := NewResultStore(root, "session")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(filepath.Join(root, "session", "tool-results")); !os.IsNotExist(err) {
+		t.Fatalf("result directory exists before persistence: %v", err)
+	}
+	persisted, err := store.Persist(provider.ToolResult{CallID: "call", Content: "large result"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(persisted.Path); err != nil {
+		t.Fatalf("persisted result missing: %v", err)
+	}
+}
+
+func TestResultStoreReusesSessionDirectoryWithoutOverwriting(t *testing.T) {
+	root := t.TempDir()
+	first, err := NewResultStore(root, "session")
+	if err != nil {
+		t.Fatal(err)
+	}
+	old, err := first.Persist(provider.ToolResult{CallID: "first", Content: "old"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	second, err := NewResultStore(root, "session")
+	if err != nil {
+		t.Fatal(err)
+	}
+	newer, err := second.Persist(provider.ToolResult{CallID: "second", Content: "new"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if old.Path == newer.Path {
+		t.Fatalf("restored store overwrote %q", old.Path)
+	}
+	if content, err := os.ReadFile(old.Path); err != nil || string(content) != "old" {
+		t.Fatalf("old result=%q err=%v", content, err)
+	}
+}
+
+func TestPrepareResultsWithoutStoreKeepsOriginalContent(t *testing.T) {
+	cfg := DefaultConfig()
+	cfg.SingleResultChars = 5
+	result := provider.ToolResult{CallID: "call", Name: "run", Content: "123456"}
+	results, persisted, err := NewManager(cfg, nil).PrepareResults([]provider.ToolResult{result})
+	if err != nil || len(persisted) != 0 || len(results) != 1 || results[0].Content != result.Content {
+		t.Fatalf("results=%+v persisted=%+v err=%v", results, persisted, err)
+	}
+}
+
 func TestPrepareResultsShrinksPersistedPreviewsToFitMessageBudget(t *testing.T) {
 	store, err := NewResultStore(t.TempDir(), "session")
 	if err != nil {

@@ -36,6 +36,7 @@ type Options struct {
 	MaxTokens       int
 	Thinking        provider.ThinkingOptions
 	Workspace       string
+	SessionID       string
 	Clock           prompt.Clock
 	Injection       prompt.InjectionPolicy
 	OptionalModules prompt.OptionalModules

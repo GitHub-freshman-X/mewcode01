@@ -45,7 +45,7 @@ PY
 find <fixture_root> -maxdepth 4 -type f | sort
 ```
 
-此时应只有 `fixtures/` 的文件，尚不存在 `.mew/context/.../tool-results`。
+此时应只有 `fixtures/` 的文件，尚不存在 `.mewcode/context/.../tool-results`；启动后但在首次大工具结果前，也不得产生 context 目录。
 
 如未构建二进制，在项目根目录执行：
 
@@ -125,7 +125,7 @@ permissions:
 通过：TUI 显示“工具结果已持久化 1 项”；执行下列命令后恰有一个文件，且其最后一行为 `END-LARGE`。
 
 ```sh
-find <fixture_root>/.mew/context -path '*/tool-results/*' -type f -print
+find <fixture_root>/.mewcode/context -path '*/tool-results/*' -type f -print
 tail -n 1 <持久化结果文件>
 ```
 
@@ -148,6 +148,18 @@ tail -n 1 <持久化结果文件>
 ```
 
 通过：三个工具调用在同一轮；TUI 显示持久化一项；`tool-results` 总数由一变为二；新增文件含 `BEGIN-MEDIUM-A` 和 `END-MEDIUM-A`。若模型拆为多个 Agent 轮次，本场景重启会话重试，不能判通过。
+
+### A3b 惰性目录创建
+
+在启动后、执行 A1 前运行：
+
+```sh
+test ! -e <fixture_root>/.mewcode/context
+```
+
+通过：命令成功。完成 A1 后，持久化文件位于 `.mewcode/context/<会话 ID>/tool-results/`，且工作区不存在 `.mew/context`。
+
+> 当前版本尚未提供恢复会话的命令入口。恢复后在同一会话 ID 目录续写且不覆盖旧结果由自动化测试覆盖；恢复入口实现后，应补充真实 API 场景验证。
 
 ### A4 手动摘要
 
