@@ -25,6 +25,19 @@ func (m *Model) refreshContent() {
 			renderMessage(&b, message, false, m.thinkingExpanded)
 		}
 	}
+	for _, message := range m.systemMessages {
+		fmt.Fprintf(&b, "%s\n%s\n\n", assistantStyle.Render("系统"), message)
+	}
+	if len(m.completion) > 1 {
+		fmt.Fprintln(&b, "命令候选:")
+		for i, item := range m.completion {
+			marker := "  "
+			if i == m.completionIndex {
+				marker = "> "
+			}
+			fmt.Fprintf(&b, "%s%s\n", marker, item)
+		}
+	}
 	if m.task != nil || m.current.terminalTy == agent.EventCancelled || m.current.terminalTy == agent.EventFailed || len(m.current.compactions) > 0 {
 		if m.current.prompt != "" {
 			renderMessage(&b, provider.Message{Role: provider.RoleUser, Blocks: []provider.ContentBlock{{Type: provider.BlockText, Text: m.current.prompt}}}, false, false)
@@ -125,11 +138,15 @@ func renderMessage(b *strings.Builder, message provider.Message, active, expande
 }
 
 func (m *Model) statusText() string {
+	mode := "[DEFAULT]"
+	if m.planMode {
+		mode = "[PLAN]"
+	}
 	if m.pendingPermission != nil {
-		return "permission · 等待确认 · o/s/p 允许 · d 拒绝 · Ctrl+C 取消"
+		return mode + " · permission · 等待确认 · o/s/p 允许 · d 拒绝 · Ctrl+C 取消"
 	}
 	if m.task != nil {
-		return fmt.Sprintf("iteration %d · %s · tokens in:%d out:%d · Ctrl+C 取消", m.current.iteration, m.current.phase, m.current.usage.InputTokens, m.current.usage.OutputTokens)
+		return fmt.Sprintf("%s · iteration %d · %s · tokens in:%d out:%d · Ctrl+C 取消", mode, m.current.iteration, m.current.phase, m.current.usage.InputTokens, m.current.usage.OutputTokens)
 	}
 	if m.current.terminal != nil {
 		return fmt.Sprintf("%s · %s · %d iterations · tokens in:%d out:%d · 可继续输入", m.current.terminalTy, m.current.terminal.Reason, m.current.terminal.Iterations, m.current.terminal.Usage.InputTokens, m.current.terminal.Usage.OutputTokens)
@@ -137,7 +154,7 @@ func (m *Model) statusText() string {
 	if m.current.err != nil {
 		return "failed · " + provider.UserError(m.current.err) + " · 可继续输入"
 	}
-	return "idle · Enter 发送 · Ctrl+C 退出"
+	return mode + " · idle · tokens in:" + fmt.Sprint(m.TokenUsage().InputTokens) + " out:" + fmt.Sprint(m.TokenUsage().OutputTokens) + " · Enter 发送 · /help"
 }
 
 func (m *Model) hasThinking() bool {

@@ -87,6 +87,114 @@ func NewService(paths Paths, options ServiceOptions) *Service {
 	return &Service{paths: paths, caller: options.Caller, clock: clock, sessions: options.Sessions, logger: logger, lastScan: make(map[string]time.Time), recent: make(map[[32]byte]struct{})}
 }
 
+type CommandSummary struct{ UserCount, ProjectCount int }
+type CommandItem struct {
+	Kind              MemoryKind
+	Name, Description string
+}
+
+func (s *Service) CommandSummary() (CommandSummary, error) {
+	items, err := s.CommandList()
+	if err != nil {
+		return CommandSummary{}, err
+	}
+	var summary CommandSummary
+	for _, item := range items {
+		if item.Kind == MemoryUser || item.Kind == MemoryFeedback {
+			summary.UserCount++
+		} else {
+			summary.ProjectCount++
+		}
+	}
+	return summary, nil
+}
+
+func (s *Service) CommandList() ([]CommandItem, error) {
+	if s == nil {
+		return nil, errors.New("memory service is nil")
+	}
+	var items []CommandItem
+	for _, kind := range []MemoryKind{MemoryUser, MemoryProject} {
+		directory, err := MemoryDirectory(s.paths, kind)
+		if err != nil {
+			return nil, err
+		}
+		entries, err := os.ReadDir(directory)
+		if errors.Is(err, os.ErrNotExist) {
+			continue
+		}
+		if err != nil {
+			return nil, err
+		}
+		for _, entry := range entries {
+			if entry.IsDir() || entry.Name() == "MEMORY.md" || filepath.Ext(entry.Name()) != ".md" {
+				continue
+			}
+			name := strings.TrimSuffix(entry.Name(), ".md")
+			content, err := os.ReadFile(filepath.Join(directory, entry.Name()))
+			if err != nil {
+				return nil, err
+			}
+			description := ""
+			for _, line := range strings.Split(string(content), "\n") {
+				if strings.HasPrefix(line, "description: ") {
+					description = strings.Trim(strings.TrimPrefix(line, "description: "), "\"")
+					break
+				}
+			}
+			items = append(items, CommandItem{Kind: kind, Name: name, Description: description})
+		}
+	}
+	return items, nil
+}
+
+func (s *Service) CommandAdd(kind, content string) error {
+	kind = strings.ToLower(strings.TrimSpace(kind))
+	content = strings.TrimSpace(content)
+	if content == "" {
+		return errors.New("memory content is empty")
+	}
+	var memoryKind MemoryKind
+	switch kind {
+	case "user":
+		memoryKind = MemoryUser
+	case "project":
+		memoryKind = MemoryProject
+	default:
+		return errors.New("memory category must be user or project")
+	}
+	key := sha256.Sum256([]byte(content))
+	name := fmt.Sprintf("manual-%x", key[:6])
+	return ApplyOperations(s.paths, []MemoryOperation{{Action: "create", Kind: memoryKind, Name: name, Description: "Manual memory", Content: content}})
+}
+
+func (s *Service) CommandClear() error {
+	if s == nil {
+		return errors.New("memory service is nil")
+	}
+	for _, kind := range []MemoryKind{MemoryUser, MemoryProject} {
+		directory, err := MemoryDirectory(s.paths, kind)
+		if err != nil {
+			return err
+		}
+		entries, err := os.ReadDir(directory)
+		if errors.Is(err, os.ErrNotExist) {
+			continue
+		}
+		if err != nil {
+			return err
+		}
+		for _, entry := range entries {
+			if !entry.IsDir() && filepath.Ext(entry.Name()) == ".md" {
+				if err := os.Remove(filepath.Join(directory, entry.Name())); err != nil {
+					return err
+				}
+			}
+		}
+	}
+	return nil
+}
+
 func (s *Service) ShouldExtract(transcript []provider.Message) bool {
 	for i := len(transcript) - 1; i >= 0; i-- {
 		if transcript[i].Role != provider.RoleUser {

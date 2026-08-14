@@ -5,6 +5,7 @@ import (
 	"os"
 
 	contextmanager "github.com/GitHub-freshman-X/mewcode01/internal/context"
+	"github.com/GitHub-freshman-X/mewcode01/internal/conversation"
 	"github.com/GitHub-freshman-X/mewcode01/internal/logging"
 	"github.com/GitHub-freshman-X/mewcode01/internal/memory"
 	"github.com/GitHub-freshman-X/mewcode01/internal/permissions"
@@ -37,6 +38,7 @@ type Options struct {
 	Thinking        provider.ThinkingOptions
 	Workspace       string
 	SessionID       string
+	SessionStore    *conversation.SessionStore
 	Clock           prompt.Clock
 	Injection       prompt.InjectionPolicy
 	OptionalModules prompt.OptionalModules

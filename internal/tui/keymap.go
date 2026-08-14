@@ -6,4 +6,7 @@ const (
 	keyCancelOrQuit   = "ctrl+c"
 	keyPageUp         = "pgup"
 	keyPageDown       = "pgdown"
+	keyComplete       = "tab"
+	keyUp             = "up"
+	keyDown           = "down"
 )

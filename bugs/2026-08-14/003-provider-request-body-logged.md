@@ -18,6 +18,8 @@
 
 ## 修复与验证
 
-OpenAI 请求日志现仅记录 provider、请求大小、消息数和工具数，不再写入请求正文。OpenAI 包测试因沙箱禁止监听本地端口而无法在当前环境完成。
+OpenAI 请求日志现仅记录 provider、请求大小、消息数和工具数，不再写入请求正文。
 
 2026-08-14 10:18 的 fixture 日志仍写入 `request` 正文，表明该 fixture 尚未重新构建并使用本修复。
+
+2026-08-14 09:29 第十章全量验收与单测 `go test ./internal/provider/openai -run '^TestStreamCapturesFinalRequestPayload$' -count=1` 均稳定失败：测试仍要求日志包含 `request-canary`，实际日志只有 `message_count`、`provider`、`request_bytes`、`stage` 和 `tool_count`。该现象符合当前安全日志实现，未发现第十章 Slash Command 改动影响 Provider。待处理项是更新该过时测试，使其断言请求正文和 API key 均不会进入日志，并确认 OpenAI 包全量测试通过。

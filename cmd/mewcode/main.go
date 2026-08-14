@@ -168,6 +168,7 @@ func run(args []string, stderr io.Writer) int {
 		Thinking:        provider.ThinkingOptions{Enabled: cfg.Thinking.Enabled, BudgetTokens: cfg.Thinking.BudgetTokens},
 		Workspace:       root,
 		SessionID:       sessionMeta.ID,
+		SessionStore:    sessionStore,
 		Permissions:     gate,
 		Confirmer:       bridge,
 		Context:         agentContextConfig(cfg.Agent.Context),

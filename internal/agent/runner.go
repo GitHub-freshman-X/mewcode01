@@ -59,6 +59,51 @@ func (r *Runner) Start(ctx context.Context, req Request) (*Task, error) {
 	return &Task{Events: events, Cancel: cancel}, nil
 }
 
+// ReplaceSession atomically moves an idle runner to a persisted session.
+func (r *Runner) ReplaceSession(session *conversation.Session, sessionID string) error {
+	if r == nil || session == nil || strings.TrimSpace(sessionID) == "" {
+		return errors.New("session and session ID are required")
+	}
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if r.active {
+		return errors.New("cannot switch session while an agent task is active")
+	}
+	var store *contextmanager.ResultStore
+	if r.options.Workspace != "" {
+		var err error
+		store, err = contextmanager.NewResultStore(filepath.Join(r.options.Workspace, ".mewcode", "context"), sessionID)
+		if err != nil {
+			return err
+		}
+	}
+	r.session = session
+	r.options.SessionID = sessionID
+	r.context = contextmanager.NewManager(r.options.Context, store)
+	return nil
+}
+
+func (r *Runner) SessionStore() *conversation.SessionStore {
+	if r == nil {
+		return nil
+	}
+	return r.options.SessionStore
+}
+func (r *Runner) SessionID() string {
+	if r == nil {
+		return ""
+	}
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return r.options.SessionID
+}
+func (r *Runner) MemoryService() *memory.Service {
+	if r == nil {
+		return nil
+	}
+	return r.options.Memory
+}
+
 func (r *Runner) run(ctx context.Context, mode Mode, prepared preparedRequest, events chan<- Event) {
 	defer close(events)
 	defer func() { r.mu.Lock(); r.active = false; r.mu.Unlock() }()

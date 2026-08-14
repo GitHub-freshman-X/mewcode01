@@ -5,6 +5,7 @@ import (
 
 	tea "charm.land/bubbletea/v2"
 	"github.com/GitHub-freshman-X/mewcode01/internal/agent"
+	"github.com/GitHub-freshman-X/mewcode01/internal/command"
 	"github.com/GitHub-freshman-X/mewcode01/internal/permissions"
 )
 
@@ -46,29 +47,52 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.autoFollow = m.viewport.AtBottom()
 			return m, nil
 		}
+		if m.task == nil && key == keyComplete {
+			m.completeInput()
+			return m, nil
+		}
+		if m.task == nil && len(m.completion) > 1 && (key == keyUp || key == keyDown) {
+			if key == keyUp {
+				m.completionIndex = (m.completionIndex + len(m.completion) - 1) % len(m.completion)
+			} else {
+				m.completionIndex = (m.completionIndex + 1) % len(m.completion)
+			}
+			m.refreshContent()
+			return m, nil
+		}
 		if m.task == nil && key == keySubmit {
+			if len(m.completion) > 1 {
+				m.textarea.SetValue(m.completion[m.completionIndex] + " ")
+				m.completion = nil
+				m.refreshContent()
+				return m, nil
+			}
 			input := strings.TrimSpace(m.textarea.Value())
 			if input == "" {
 				return m, nil
 			}
-			req, err := parseRequest(input)
-			if err != nil {
+			invocation := command.Parse(input)
+			if invocation.IsCommand {
+				err := command.Dispatch(m.commands, invocation, command.CommandContext{Context: m.ctx, UI: m, Sessions: m, Memory: m})
+				if err != nil {
+					m.AddSystemMessage("错误: " + err.Error())
+				} else if m.task == nil {
+					m.textarea.Reset()
+				}
+				m.refreshContent()
+				return m, nil
+			}
+			req := agent.Request{Mode: agent.ModeAct, Prompt: input}
+			if m.planMode {
+				req.Mode = agent.ModePlan
+			}
+			if err := m.StartAgent(req); err != nil {
 				m.current = taskView{prompt: input, terminalTy: agent.EventFailed, err: err}
 				m.refreshContent()
 				return m, nil
 			}
-			task, err := m.runner.Start(m.ctx, req)
-			if err != nil {
-				m.current = taskView{prompt: input, terminalTy: agent.EventFailed, err: err}
-				m.refreshContent()
-				return m, nil
-			}
-			m.task = task
-			m.current = taskView{prompt: input}
-			m.textarea.Reset()
-			m.textarea.Blur()
 			m.refreshContent()
-			return m, waitForAgent(task.Events)
+			return m, waitForAgent(m.task.Events)
 		}
 	case agentEventMsg:
 		m.applyAgentEvent(msg.Event)
@@ -89,6 +113,17 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	}
 	m.textarea, cmd = m.textarea.Update(msg)
 	return m, cmd
+}
+
+func (m *Model) completeInput() {
+	matches := command.Complete(m.commands, strings.TrimSpace(m.textarea.Value()))
+	if len(matches) == 1 {
+		m.textarea.SetValue(matches[0] + " ")
+		m.completion = nil
+		return
+	}
+	m.completion, m.completionIndex = matches, 0
+	m.refreshContent()
 }
 
 func (m *Model) handlePermissionKey(key string) tea.Cmd {
