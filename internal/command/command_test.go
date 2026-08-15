@@ -53,6 +53,17 @@ func (u *fakeUI) RefreshStatus()                   {}
 func (u *fakeUI) MemoryClearPending() bool         { return false }
 func (u *fakeUI) SetMemoryClearPending(bool)       {}
 
+type fakeSessions struct {
+	current SessionMeta
+	list    []SessionMeta
+}
+
+func (s fakeSessions) Current() SessionMeta                 { return s.current }
+func (s fakeSessions) List() ([]SessionMeta, error)         { return s.list, nil }
+func (s fakeSessions) New(context.Context) error            { return nil }
+func (s fakeSessions) Resume(context.Context, string) error { return nil }
+func (s fakeSessions) Delete(string) error                  { return nil }
+
 func TestDispatchLocalAndPrompt(t *testing.T) {
 	u := &fakeUI{}
 	ctx := CommandContext{Context: context.Background(), UI: u}
@@ -64,5 +75,38 @@ func TestDispatchLocalAndPrompt(t *testing.T) {
 	}
 	if err := Dispatch(DefaultRegistry(), Parse("/plan task"), ctx); err != nil || !u.plan || len(u.requests) != 2 || u.requests[1].Mode != agent.ModePlan {
 		t.Fatalf("plan=%+v mode=%v err=%v", u.requests, u.plan, err)
+	}
+}
+
+func TestSessionListUsesTitle(t *testing.T) {
+	u := &fakeUI{}
+	longTitle := "  第一条消息含有中文和 emoji 😀，并且它足够长，应该在字符边界截断而不会破坏最后一个字符，同时还要保留省略号  "
+	sessions := fakeSessions{list: []SessionMeta{
+		{ID: "20260816-100000-a1b2", Title: longTitle, MessageCount: 99},
+		{ID: "20260816-090000-c3d4"},
+	}}
+	ctx := CommandContext{Context: context.Background(), UI: u, Sessions: sessions}
+	if err := Dispatch(DefaultRegistry(), Parse("/session list"), ctx); err != nil {
+		t.Fatal(err)
+	}
+	if len(u.messages) != 1 {
+		t.Fatalf("messages=%v", u.messages)
+	}
+	message := u.messages[0]
+	if !strings.Contains(message, "20260816-100000-a1b2 — 第一条消息") || !strings.Contains(message, "…") {
+		t.Fatalf("message=%q", message)
+	}
+	if !strings.Contains(message, "20260816-090000-c3d4 — （空会话）") || strings.Contains(message, "99 条消息") {
+		t.Fatalf("message=%q", message)
+	}
+}
+
+func TestFormatSessionTitle(t *testing.T) {
+	if got := formatSessionTitle(" \n "); got != "（空会话）" {
+		t.Fatalf("empty title=%q", got)
+	}
+	value := strings.Repeat("😀", sessionTitleLimit+1)
+	if got := formatSessionTitle(value); got != strings.Repeat("😀", sessionTitleLimit)+"…" {
+		t.Fatalf("title=%q", got)
 	}
 }

@@ -9,6 +9,8 @@ import (
 	"github.com/GitHub-freshman-X/mewcode01/internal/logging"
 )
 
+const sessionTitleLimit = 48
+
 func DefaultCommands() []Command {
 	return []Command{
 		{Name: "help", Aliases: []string{"h"}, Description: "显示命令帮助", Usage: "/help [命令]", Kind: KindLocal, Handler: helpCommand},
@@ -123,7 +125,7 @@ func sessionCommand(ctx CommandContext) error {
 	parts := strings.Fields(ctx.Args)
 	if len(parts) == 0 {
 		m := ctx.Sessions.Current()
-		ctx.systemf("当前会话: %s（%d 条消息）", m.ID, m.MessageCount)
+		ctx.systemf("当前会话: %s — %s", m.ID, formatSessionTitle(m.Title))
 		return nil
 	}
 	switch parts[0] {
@@ -134,7 +136,7 @@ func sessionCommand(ctx CommandContext) error {
 		}
 		var lines []string
 		for _, m := range metas {
-			lines = append(lines, fmt.Sprintf("%s（%d 条消息）", m.ID, m.MessageCount))
+			lines = append(lines, fmt.Sprintf("%s — %s", m.ID, formatSessionTitle(m.Title)))
 		}
 		ctx.systemf("会话:\n%s", strings.Join(lines, "\n"))
 	case "new":
@@ -147,6 +149,18 @@ func sessionCommand(ctx CommandContext) error {
 		ctx.systemf("用法: /session [list|new|resume <id>|delete <id>]")
 	}
 	return nil
+}
+
+func formatSessionTitle(title string) string {
+	title = strings.TrimSpace(title)
+	if title == "" {
+		return "（空会话）"
+	}
+	runes := []rune(title)
+	if len(runes) <= sessionTitleLimit {
+		return title
+	}
+	return string(runes[:sessionTitleLimit]) + "…"
 }
 func memoryCommand(ctx CommandContext) error {
 	if ctx.Memory == nil {

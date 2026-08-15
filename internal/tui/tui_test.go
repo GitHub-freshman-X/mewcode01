@@ -6,6 +6,7 @@ import (
 	"reflect"
 	"strings"
 	"testing"
+	"time"
 
 	tea "charm.land/bubbletea/v2"
 	"charm.land/lipgloss/v2"
@@ -13,7 +14,152 @@ import (
 	"github.com/GitHub-freshman-X/mewcode01/internal/conversation"
 	"github.com/GitHub-freshman-X/mewcode01/internal/permissions"
 	"github.com/GitHub-freshman-X/mewcode01/internal/provider"
+	"github.com/GitHub-freshman-X/mewcode01/internal/tools"
 )
+
+type tuiScriptedProvider struct{}
+
+func (tuiScriptedProvider) Stream(_ context.Context, _ provider.ChatRequest) (<-chan provider.StreamEvent, <-chan error) {
+	events := make(chan provider.StreamEvent, 3)
+	done := make(chan error, 1)
+	events <- provider.StreamEvent{Type: provider.EventStarted}
+	events <- provider.StreamEvent{Type: provider.EventTextDelta, Delta: "planned"}
+	events <- provider.StreamEvent{Type: provider.EventCompleted}
+	close(events)
+	done <- nil
+	close(done)
+	return events, done
+}
+
+func TestCommandPlanConsumesAgentEvents(t *testing.T) {
+	registry, err := tools.NewDefaultRegistry(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	session := conversation.NewSession()
+	runner := agent.NewRunner(tuiScriptedProvider{}, session, registry, tools.NewExecutor(time.Second), agent.Options{})
+	m := NewModel(runner, session)
+	m.textarea.SetValue("/plan write a plan")
+	_, cmd := m.Update(tea.KeyPressMsg{Text: keySubmit})
+	if cmd == nil {
+		t.Fatal("/plan command did not schedule agent event consumption")
+	}
+	for cmd != nil && m.task != nil {
+		message := cmd()
+		_, cmd = m.Update(message)
+	}
+	if len(session.PendingPlans()) != 1 {
+		t.Fatalf("plans=%v", session.PendingPlans())
+	}
+	m.textarea.SetValue("/do")
+	_, cmd = m.Update(tea.KeyPressMsg{Text: keySubmit})
+	if cmd == nil {
+		t.Fatal("/do command did not schedule agent event consumption")
+	}
+	for cmd != nil && m.task != nil {
+		message := cmd()
+		_, cmd = m.Update(message)
+	}
+	if len(session.PendingPlans()) != 0 {
+		t.Fatalf("plans=%v", session.PendingPlans())
+	}
+}
+
+func TestPlanStatusOverridesPreviousTerminal(t *testing.T) {
+	m := NewModel(nil, conversation.NewSession())
+	m.planMode = true
+	m.current.terminalTy = agent.EventCompleted
+	m.current.terminal = &agent.Summary{Reason: agent.StopFinalAnswer}
+	if got := m.statusText(); !strings.HasPrefix(got, "[PLAN]") {
+		t.Fatalf("status=%q", got)
+	}
+}
+
+func TestSystemMessageFollowsCurrentCommand(t *testing.T) {
+	m := NewModel(nil, conversation.NewSession())
+	m.current = taskView{prompt: "/do", terminalTy: agent.EventFailed, err: errors.New("no valid plan")}
+	m.systemMessages = []systemMessage{{content: "错误: no valid plan", after: -1}}
+	m.refreshContent()
+	view := m.View().Content
+	if strings.Index(view, "/do") > strings.Index(view, "错误: no valid plan") {
+		t.Fatalf("system message precedes command: %q", view)
+	}
+}
+
+func TestSystemMessageStaysBetweenConversationTurns(t *testing.T) {
+	session := conversation.NewSession()
+	if err := session.CommitRound(
+		&provider.Message{Role: provider.RoleUser, Blocks: []provider.ContentBlock{{Type: provider.BlockText, Text: "first user"}}},
+		provider.Message{Role: provider.RoleAssistant, Blocks: []provider.ContentBlock{{Type: provider.BlockText, Text: "first assistant"}}}, nil,
+	); err != nil {
+		t.Fatal(err)
+	}
+	m := NewModel(nil, session)
+	m.AddSystemMessage("command feedback")
+	if err := session.CommitRound(
+		&provider.Message{Role: provider.RoleUser, Blocks: []provider.ContentBlock{{Type: provider.BlockText, Text: "second user"}}},
+		provider.Message{Role: provider.RoleAssistant, Blocks: []provider.ContentBlock{{Type: provider.BlockText, Text: "second assistant"}}}, nil,
+	); err != nil {
+		t.Fatal(err)
+	}
+	m.refreshContent()
+	view := m.View().Content
+	first := strings.Index(view, "first assistant")
+	feedback := strings.Index(view, "command feedback")
+	second := strings.Index(view, "second user")
+	if first < 0 || feedback < 0 || second < 0 || !(first < feedback && feedback < second) {
+		t.Fatalf("messages are not chronological: %q", view)
+	}
+	if len(session.Snapshot()) != 4 {
+		t.Fatalf("system message leaked into history: %v", session.Snapshot())
+	}
+}
+
+func TestLocalCommandAndFeedbackStayBetweenConversationTurns(t *testing.T) {
+	session := conversation.NewSession()
+	if err := session.CommitRound(
+		&provider.Message{Role: provider.RoleUser, Blocks: []provider.ContentBlock{{Type: provider.BlockText, Text: "first user"}}},
+		provider.Message{Role: provider.RoleAssistant, Blocks: []provider.ContentBlock{{Type: provider.BlockText, Text: "first assistant"}}}, nil,
+	); err != nil {
+		t.Fatal(err)
+	}
+	m := NewModel(nil, session)
+	m.Update(tea.WindowSizeMsg{Width: 160, Height: 80})
+	m.textarea.SetValue("/help")
+	m.Update(tea.KeyPressMsg{Text: keySubmit})
+	if err := session.CommitRound(
+		&provider.Message{Role: provider.RoleUser, Blocks: []provider.ContentBlock{{Type: provider.BlockText, Text: "second user"}}},
+		provider.Message{Role: provider.RoleAssistant, Blocks: []provider.ContentBlock{{Type: provider.BlockText, Text: "second assistant"}}}, nil,
+	); err != nil {
+		t.Fatal(err)
+	}
+	m.refreshContent()
+	view := m.View().Content
+	first := strings.Index(view, "first assistant")
+	commandText := strings.Index(view, "\n/help")
+	feedback := strings.Index(view, "可用命令:")
+	second := strings.Index(view, "second user")
+	if first < 0 || commandText < 0 || feedback < 0 || second < 0 || !(first < commandText && commandText < feedback && feedback < second) {
+		t.Fatalf("messages are not chronological: %q", view)
+	}
+	if len(session.Snapshot()) != 4 {
+		t.Fatalf("command leaked into history: %v", session.Snapshot())
+	}
+}
+
+func TestLocalCommandPrecedesFeedbackAfterSessionReset(t *testing.T) {
+	m := NewModel(nil, conversation.NewSession())
+	m.systemMessages = []systemMessage{{content: "old feedback", after: 0}}
+	m.systemMessages = nil
+	m.AddSystemMessage("已创建新会话。")
+	m.AddCommandMessage("/session new", 1)
+	view := m.View().Content
+	commandText := strings.Index(view, "/session new")
+	feedback := strings.Index(view, "已创建新会话。")
+	if commandText < 0 || feedback < 0 || commandText > feedback {
+		t.Fatalf("command does not precede feedback: %q", view)
+	}
+}
 
 func TestActPlanDoCommands(t *testing.T) {
 	tests := []struct {

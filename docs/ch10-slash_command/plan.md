@@ -8,6 +8,8 @@
 
 `/clear` 与 `/session resume` 需要切换当前会话，因此 Runner 提供仅在空闲状态调用的会话替换操作：同时更新 Session 和会话 ID，并重建该会话对应的上下文结果存储。`/do` 先退出计划模式，再启动既有 `ModeDo` 任务，继续执行当前会话中保存的计划。
 
+本地命令会作为临时聊天条目显示：先显示用户输入的命令，再显示该命令的系统反馈。临时条目使用提交时的会话消息数作为锚点，因此后续普通对话不会把旧反馈推到最底部；它们只属于当前 TUI 视图，不写入会话、Journal 或模型请求。会话列表复用第九章已经保存的首条用户消息标题，并在命令层按 Unicode 字符边界截断为简短可辨识文本。
+
 ## 核心数据结构
 
 ### `command.Kind`
@@ -84,13 +86,25 @@ type Handler func(CommandContext) error
 
 ### TUI 状态
 
-`tui.Model` 增加当前计划模式、系统消息队列、补全候选与选中索引、命令注册中心及会话/记忆运行依赖。任务仍由现有 `task` 字段追踪；活跃任务或待确认权限时维持既有输入限制。
+`tui.Model` 增加当前计划模式、按会话消息位置锚定的临时展示条目、补全候选与选中索引、命令注册中心及会话/记忆运行依赖。临时条目包含展示角色（用户命令或系统反馈）、内容与锚点位置；任务仍由现有 `task` 字段追踪。活跃任务或待确认权限时维持既有输入限制。
+
+### `command.SessionMeta`
+
+```go
+type SessionMeta struct {
+	ID           string
+	Title        string
+	MessageCount int
+}
+```
+
+会话服务将第九章 `conversation.SessionMeta` 的 `Title` 透传给命令层。`/session list` 以 `ID + 截断标题` 为主展示；消息数可保留在内部元数据中，但不再作为用户识别会话的主要信息。标题为空时显示固定占位文本，避免空白列表项。
 
 ## 模块设计
 
 ### `internal/command`
 
-**职责：** 提供不依赖 TUI 的注册、解析、查找、帮助、补全及九个内置 Handler。
+**职责：** 提供不依赖 TUI 的注册、解析、查找、帮助、补全及九个内置 Handler，并格式化会话列表标题。
 
 **对外接口：** `NewRegistry`、`Parse`、`Registry.Find`、`Registry.Complete`、`DefaultCommands`、`Dispatch`。
 
@@ -103,14 +117,14 @@ type Handler func(CommandContext) error
 - `/clear`：创建并切换到新会话，清除当前视图状态。
 - `/plan`：无参数时切换计划模式；有参数时确保进入计划模式并以 `ModePlan` 提交需求。
 - `/do`：退出计划模式并以 `ModeDo` 执行当前会话的待执行计划。
-- `/session`：显示当前会话概要，并支持 `list`、`new`、`resume <id>`、`delete <id>`。
+- `/session`：显示当前会话概要，并支持 `list`、`new`、`resume <id>`、`delete <id>`；列表以会话 ID 与首条用户消息的截断标题帮助识别会话。
 - `/memory`：显示概要，并支持 `list`、`add <category> <content>`、`clear`；清空操作先显示确认提示，再由明确确认完成。
 - `/status`：显示模式、Token 用量、工具数量、记忆概要、工作目录及版本信息。
 - `/review`：构造固定的 git diff 审查请求，附加用户给出的关注点后以普通 Agent 对话提交。
 
 ### `internal/conversation` 与 `internal/memory`
 
-**职责：** 以现有第九章存储格式为基础，为命令提供受限服务入口。
+**职责：** 以现有第九章存储格式为基础，为命令提供受限服务入口。会话元数据继续从 Journal 的首条用户消息派生标题，不改变 JSONL 存储格式。
 
 **对外接口：** 会话存储继续使用 `Create`、`List`、`Restore`、`Delete`；记忆服务新增面向命令的概要、枚举、手动写入与清空入口。
 
@@ -126,7 +140,7 @@ type Handler func(CommandContext) error
 
 ### `internal/tui`
 
-**职责：** 实现 `UIController` 与命令服务适配；在 Enter 前进行分流；维护计划模式、消息与补全菜单；将命令结果渲染为系统消息。
+**职责：** 实现 `UIController` 与命令服务适配；在 Enter 前进行分流；维护计划模式、按提交顺序锚定的临时命令/系统条目与补全菜单；将本地命令及其结果渲染为可辨识的聊天记录。
 
 **对外接口：** `Run` 和 `RunWithPermissions` 扩展为接收命令运行依赖，保持应用启动层单一装配点。
 
@@ -138,10 +152,11 @@ type Handler func(CommandContext) error
 2. TUI 在 Enter 时修剪输入；空输入直接返回。
 3. `command.Parse` 判定非命令时，TUI 根据当前计划模式启动 `ModeAct` 或 `ModePlan` 请求。
 4. 对命令输入，TUI 调用 `Registry.Find`：输入 `/` 显示可见命令；未知命令写入带 `/help` 引导的系统消息；缺少参数时显示 `ArgPrompt`。
-5. 命中命令后，`Dispatch` 记录安全日志并调用 Handler。Handler 通过 `UIController` 写系统消息、改变模式或启动任务。
+5. 命中命令后，`Dispatch` 记录安全日志并调用 Handler。Handler 通过 `UIController` 写系统消息、改变模式或启动任务。若分发后未启动 Agent 任务，TUI 将本次输入作为用户命令条目插入，并把本次产生的系统反馈紧随其后；若启动任务，则复用既有任务转录，避免重复显示命令。
 6. `/plan` 更新模式后可启动 `ModePlan`；`/do` 先更新为默认模式，再启动 `ModeDo`。任务事件仍由既有 `applyAgentEvent` 消费。
 7. `/clear` 与 `/session resume` 成功创建或恢复会话后，TUI 调用 Runner 会话替换方法，再同步更新 `Model.session` 与视图。
 8. Tab 触发 `Registry.Complete`：零候选保持输入；一项候选直接替换；多项候选显示菜单，方向键改变选择，Tab 或 Enter 写入选中项。
+9. 视图按会话持久消息与临时条目的锚点交错渲染：任务 1、命令、命令反馈、任务 2 保持该顺序。临时条目不进入会话快照，也不参与下次模型上下文构造。
 
 ## 文件组织
 
@@ -155,12 +170,12 @@ internal/command/
 └── command_test.go  — 注册、解析、帮助、补全和分发测试
 internal/agent/runner.go       — 空闲会话替换
 internal/agent/runner_test.go  — 会话替换的并发与上下文存储测试
-internal/conversation/store.go — 命令使用的会话元数据辅助能力（如需要）
+internal/conversation/store.go — 既有会话元数据及首条用户消息标题派生
 internal/memory/service.go     — 受限记忆管理入口
 internal/memory/memory_test.go — 记忆管理入口测试
-internal/tui/model.go          — 命令运行依赖及 UI 状态
-internal/tui/update.go         — Enter 分流与补全键盘交互
-internal/tui/view.go           — 系统消息、补全菜单、模式状态栏
+internal/tui/model.go          — 命令运行依赖、临时展示条目及 UI 状态
+internal/tui/update.go         — Enter 分流、本地命令条目归档与补全键盘交互
+internal/tui/view.go           — 锚定命令/系统条目、补全菜单、模式状态栏
 internal/tui/run.go            — 命令依赖注入
 internal/tui/tui_test.go       — TUI 分流、模式、菜单和兼容性测试
 cmd/mewcode/main.go            — 命令运行依赖装配
@@ -175,7 +190,8 @@ cmd/mewcode/main_test.go       — 启动装配测试
 | 注册冲突 | 启动时建立规范化索引并返回错误 | 尽早失败，避免运行时不确定性。 |
 | 模式归属 | TUI 持久 UI 状态 + 每次请求显式 Mode | `/plan` toggle 能影响后续输入，同时不引入 Agent 全局可变模式。 |
 | `/do` 行为 | 先退出计划模式，再使用既有 `ModeDo` | 同时满足用户可见模式切换与第 4 章待执行计划语义。 |
-| 本地反馈 | TUI 系统消息队列 | 不污染会话历史，不会被发送给模型。 |
+| 本地命令与反馈 | TUI 锚定临时展示条目 | 命令与反馈可一一对应且保持交互顺序，不污染会话历史或模型上下文。 |
+| 会话标题 | 复用首条用户消息，命令层 Unicode 安全截断 | 不增加 LLM 调用、网络延迟或存储格式；长标题仍可辨识，空会话不显示空白项。 |
 | Tab 多候选 | TUI 内部菜单，方向键选择、Tab/Enter 接受 | 保持键盘优先且无需新增渲染依赖。 |
 | 会话切换 | Runner 空闲时原子替换 | 防止活跃任务向旧会话写入或跨会话串数据。 |
 | 记忆管理 | 复用第 9 章目录与 Markdown 格式 | 不创建第二套数据源或改变自动提取、治理行为。 |
@@ -191,6 +207,8 @@ cmd/mewcode/main_test.go       — 启动装配测试
 | F6 | `command.Complete` 与 TUI 补全菜单 |
 | F7、F8 | 默认命令目录、内置 Handler、TUI 持久模式与 `ModeDo` 复用 |
 | F9 | `tui.View` 状态栏 |
+| F10、AC10 | `tui.Update` 临时命令归档、`tui.View` 锚定渲染与 TUI 回归测试 |
+| F11、N7、AC11 | `conversation.SessionMeta.Title` 透传、`command` 标题格式化与会话列表测试 |
 | N2 | 本地 Registry 操作与 Agent 请求边界测试 |
 | N4、AC9 | Dispatcher/TUI 生命周期日志及日志断言 |
 | N6 | 不新增配置，`config.example.yaml` 不改动 |

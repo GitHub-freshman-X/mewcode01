@@ -10,6 +10,9 @@
 | 修改 | internal/memory/{service,memory_test}.go | 受限记忆命令服务及测试。 |
 | 修改 | internal/tui/{model,update,view,keymap,run}.go | 命令运行时、分流、补全、视图与依赖注入。 |
 | 修改 | internal/tui/tui_test.go | TUI 集成和回归测试。 |
+| 修改 | internal/command/{command,builtins,command_test}.go | 会话标题透传、格式化与 `/session list` 回归测试。 |
+| 修改 | internal/tui/{model,update,view,tui_test}.go | 本地命令文本与反馈的锚定临时展示及顺序回归测试。 |
+| 修改 | internal/conversation/store_test.go | 首条用户消息标题派生的持久化回归测试（如现有覆盖不足）。 |
 | 修改 | cmd/mewcode/{main,main_test}.go | 命令依赖装配及启动回归。 |
 | 修改 | docs/README.md | 第十章索引。 |
 
@@ -111,10 +114,38 @@
 
 **验证：** go test ./internal/tui -run 'Test.*(Completion|SystemMessage|Status|Mode)' 通过。
 
-## T8：索引更新与章节级验证
+## T8：按交互顺序显示本地命令和反馈
+
+**文件：** internal/tui/model.go、internal/tui/update.go、internal/tui/view.go、internal/tui/tui_test.go
+**依赖：** T2、T5、T6、T7
+
+**步骤：**
+
+1. 将临时展示状态由仅系统反馈扩展为带角色、内容和会话位置锚点的条目；用户命令条目使用与普通用户消息一致的视觉角色，系统反馈保持系统角色。
+2. 在命令分发前记录本次临时反馈的起始位置与会话锚点；仅当分发结束后未启动 Agent 任务时，把原始命令文本插入该批反馈之前。启动 Agent 的命令继续走既有任务转录，不重复显示命令。
+3. 修改视图渲染，在对应会话消息之后插入同一锚点的临时条目；当前失败任务的反馈仍位于其任务转录之后。
+4. 覆盖“任务 1 → 本地命令 → 系统反馈 → 任务 2”、连续本地命令、未知命令和缺参提示；断言临时内容不进入 Session snapshot、Journal 或后续 Provider 请求。
+
+**验证：** `go test ./internal/tui -run 'Test.*(Command.*Display|SystemMessage|Chronological)' -count=1` 通过。
+
+## T9：在会话列表中显示首条用户消息标题
+
+**文件：** internal/command/command.go、internal/command/builtins.go、internal/command/command_test.go、internal/conversation/store_test.go
+**依赖：** T2
+
+**步骤：**
+
+1. 将既有 `conversation.SessionMeta.Title` 透传到命令层 `SessionMeta`，不修改 JSONL 格式、会话扫描规则或创建流程。
+2. 在命令层实现纯本地标题格式化：去除首尾空白、按 Unicode 字符边界截断并添加省略号；空标题使用明确占位文本。
+3. 调整 `/session list` 输出为“会话 ID + 标题”，使标题成为主要识别信息；当前会话摘要同步使用同一格式。
+4. 覆盖含中文/emoji 的长标题、空会话、首条记录非用户消息与既有消息数兼容性；断言命令执行不启动 Agent 或 Provider 请求。
+
+**验证：** `go test ./internal/command ./internal/conversation -run 'Test.*(Session.*Title|Session.*List)' -count=1` 通过。
+
+## T10：索引更新与章节级验证
 
 **文件：** docs/README.md、docs/ch10-slash_command/{spec,plan,task,checklist}.md  
-**依赖：** T1–T7
+**依赖：** T1–T9
 
 **步骤：**
 
@@ -131,16 +162,16 @@
     go vet ./...
     git diff --check
 
-期望：全部命令退出码为 0，且九个命令的注册、分流、模式切换、补全和安全日志由自动化测试覆盖。
+期望：全部命令退出码为 0，且九个命令的注册、分流、模式切换、补全、安全日志、命令显示顺序和会话标题由自动化测试覆盖。
 
 ## 执行顺序
 
     T1 → T2 ────────────┐
-    T3 ─────────────────┼→ T5 → T6 → T7 → T8
+    T3 ─────────────────┼→ T5 → T6 → T7 → T8 → T10
     T4 ─────────────────┘
+           └────────────→ T9 ────────────────┘
 
 - T1、T3、T4 可并行执行。
 - T2 依赖 T1。
 - T5 依赖命令、会话切换与记忆服务。
-- T6、T7 按顺序接入 TUI；T8 更新索引并做全量验证。
-
+- T6、T7、T8 按顺序接入 TUI；T9 可在 T2 后独立完成；T10 更新索引并做全量验证。

@@ -3,6 +3,7 @@ package tui
 import (
 	"context"
 	"fmt"
+	"strings"
 
 	"charm.land/bubbles/v2/textarea"
 	"charm.land/bubbles/v2/viewport"
@@ -27,6 +28,12 @@ type taskView struct {
 	err         error
 }
 
+type systemMessage struct {
+	content string
+	after   int
+	role    provider.Role
+}
+
 type Model struct {
 	runner                       *agent.Runner
 	session                      *conversation.Session
@@ -41,7 +48,7 @@ type Model struct {
 	ctx                          context.Context
 	commands                     *command.Registry
 	planMode                     bool
-	systemMessages               []string
+	systemMessages               []systemMessage
 	completion                   []string
 	completionIndex              int
 	memoryClearPending           bool
@@ -68,8 +75,35 @@ func NewModelWithPermissions(runner *agent.Runner, session *conversation.Session
 }
 
 func (m *Model) AddSystemMessage(message string) {
-	m.systemMessages = append(m.systemMessages, message)
+	after := 0
+	if m.session != nil {
+		after = len(m.session.DisplaySnapshot())
+	}
+	if m.hasTransientTaskView() {
+		after = -1
+	}
+	m.systemMessages = append(m.systemMessages, systemMessage{content: message, after: after, role: provider.RoleAssistant})
 	m.refreshContent()
+}
+
+func (m *Model) AddCommandMessage(message string, start int) {
+	if start < 0 || start >= len(m.systemMessages) {
+		start = 0
+	}
+	after := 0
+	if start >= 0 && start < len(m.systemMessages) {
+		after = m.systemMessages[start].after
+	} else if m.session != nil {
+		after = len(m.session.DisplaySnapshot())
+	}
+	m.systemMessages = append(m.systemMessages, systemMessage{})
+	copy(m.systemMessages[start+1:], m.systemMessages[start:])
+	m.systemMessages[start] = systemMessage{content: message, after: after, role: provider.RoleUser}
+	m.refreshContent()
+}
+
+func (m *Model) hasTransientTaskView() bool {
+	return m.task != nil || m.current.terminalTy == agent.EventCancelled || m.current.terminalTy == agent.EventFailed
 }
 func (m *Model) SetPlanMode(enabled bool) { m.planMode = enabled; m.RefreshStatus() }
 func (m *Model) PlanMode() bool           { return m.planMode }
@@ -98,10 +132,26 @@ func (m *Model) StartAgent(req agent.Request) error {
 
 func (m *Model) Current() command.SessionMeta {
 	count := 0
+	title := ""
 	if m.session != nil {
-		count = len(m.session.DisplaySnapshot())
+		messages := m.session.DisplaySnapshot()
+		count = len(messages)
+		for _, message := range messages {
+			if message.Role != provider.RoleUser {
+				continue
+			}
+			for _, block := range message.Blocks {
+				if block.Type == provider.BlockText && strings.TrimSpace(block.Text) != "" {
+					title = strings.TrimSpace(block.Text)
+					break
+				}
+			}
+			if title != "" {
+				break
+			}
+		}
 	}
-	return command.SessionMeta{ID: m.runner.SessionID(), MessageCount: count}
+	return command.SessionMeta{ID: m.runner.SessionID(), Title: title, MessageCount: count}
 }
 
 func (m *Model) List() ([]command.SessionMeta, error) {
@@ -115,7 +165,7 @@ func (m *Model) List() ([]command.SessionMeta, error) {
 	}
 	out := make([]command.SessionMeta, len(metas))
 	for i, meta := range metas {
-		out[i] = command.SessionMeta{ID: meta.ID, MessageCount: meta.MessageCount}
+		out[i] = command.SessionMeta{ID: meta.ID, Title: meta.Title, MessageCount: meta.MessageCount}
 	}
 	return out, nil
 }

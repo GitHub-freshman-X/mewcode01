@@ -20,13 +20,14 @@ func (m *Model) View() tea.View {
 func (m *Model) refreshContent() {
 	wasBottom := m.viewport.AtBottom()
 	var b strings.Builder
+	var messages []provider.Message
 	if m.session != nil {
-		for _, message := range m.session.DisplaySnapshot() {
-			renderMessage(&b, message, false, m.thinkingExpanded)
-		}
+		messages = m.session.DisplaySnapshot()
 	}
-	for _, message := range m.systemMessages {
-		fmt.Fprintf(&b, "%s\n%s\n\n", assistantStyle.Render("系统"), message)
+	renderSystemMessages(&b, m.systemMessages, 0)
+	for i, message := range messages {
+		renderMessage(&b, message, false, m.thinkingExpanded)
+		renderSystemMessages(&b, m.systemMessages, i+1)
 	}
 	if len(m.completion) > 1 {
 		fmt.Fprintln(&b, "命令候选:")
@@ -74,6 +75,7 @@ func (m *Model) refreshContent() {
 			fmt.Fprintf(&b, "%s\n\n", errorStyle.Render("错误: "+provider.UserError(m.current.err)))
 		}
 	}
+	renderSystemMessages(&b, m.systemMessages, -1)
 	if m.pendingPermission != nil {
 		decision := m.pendingPermission.decision
 		fmt.Fprintf(&b, "权限确认: %s\n", decision.Request.Tool)
@@ -89,6 +91,18 @@ func (m *Model) refreshContent() {
 	if m.autoFollow || wasBottom {
 		m.viewport.GotoBottom()
 		m.autoFollow = true
+	}
+}
+
+func renderSystemMessages(b *strings.Builder, messages []systemMessage, after int) {
+	for _, message := range messages {
+		if message.after == after {
+			if message.role == provider.RoleUser {
+				renderMessage(b, provider.Message{Role: provider.RoleUser, Blocks: []provider.ContentBlock{{Type: provider.BlockText, Text: message.content}}}, false, false)
+				continue
+			}
+			fmt.Fprintf(b, "%s\n%s\n\n", assistantStyle.Render("系统"), message.content)
+		}
 	}
 }
 
@@ -149,10 +163,10 @@ func (m *Model) statusText() string {
 		return fmt.Sprintf("%s · iteration %d · %s · tokens in:%d out:%d · Ctrl+C 取消", mode, m.current.iteration, m.current.phase, m.current.usage.InputTokens, m.current.usage.OutputTokens)
 	}
 	if m.current.terminal != nil {
-		return fmt.Sprintf("%s · %s · %d iterations · tokens in:%d out:%d · 可继续输入", m.current.terminalTy, m.current.terminal.Reason, m.current.terminal.Iterations, m.current.terminal.Usage.InputTokens, m.current.terminal.Usage.OutputTokens)
+		return fmt.Sprintf("%s · %s · %s · %d iterations · tokens in:%d out:%d · 可继续输入", mode, m.current.terminalTy, m.current.terminal.Reason, m.current.terminal.Iterations, m.current.terminal.Usage.InputTokens, m.current.terminal.Usage.OutputTokens)
 	}
 	if m.current.err != nil {
-		return "failed · " + provider.UserError(m.current.err) + " · 可继续输入"
+		return mode + " · failed · " + provider.UserError(m.current.err) + " · 可继续输入"
 	}
 	return mode + " · idle · tokens in:" + fmt.Sprint(m.TokenUsage().InputTokens) + " out:" + fmt.Sprint(m.TokenUsage().OutputTokens) + " · Enter 发送 · /help"
 }

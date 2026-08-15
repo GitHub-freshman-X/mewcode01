@@ -44,6 +44,7 @@ type UIController interface {
 
 type SessionMeta struct {
 	ID           string
+	Title        string
 	MessageCount int
 }
 
