@@ -21,7 +21,7 @@ chNN-topic/
 | `ch06-permissions` | Permission System：危险命令黑名单、路径沙箱、规则与人在回路确认 | [Spec](ch06-permissions/spec.md) · [Plan](ch06-permissions/plan.md) · [Tasks](ch06-permissions/task.md) · [Checklist](ch06-permissions/checklist.md) |
 | `ch07-mcp` | MCP Client：外部工具配置、发现、调用与生命周期管理 | [Spec](ch07-mcp/spec.md) · [Plan](ch07-mcp/plan.md) · [Tasks](ch07-mcp/task.md) · [Checklist](ch07-mcp/checklist.md) |
 | `ch08` | 上下文管理：工具结果预算、摘要压缩、`/compact` 与紧急恢复 | [Spec](ch08/spec.md) · [Plan](ch08/plan.md) · [Tasks](ch08/task.md) · [Checklist](ch08/checklist.md) · [Manual scenarios](ch08/manual_scenarios.md) · [Summary tolerance design](ch08/summary-parser-tolerance-design.md) · [Summary tolerance plan](ch08/summary-parser-tolerance-plan.md) · [Reference](ch08/context-compression-and-token-management.md) |
-| `ch10-slash_command` | Slash Command：注册、解析、补全与 TUI 命令分流 | [Spec](ch10-slash_command/spec.md) · [Plan](ch10-slash_command/plan.md) · [Tasks](ch10-slash_command/task.md) · [Checklist](ch10-slash_command/checklist.md) · [Reference](ch10-slash_command/理论学习：Slash%20Command%20命令框架.md) |
+| `ch10-slash_command` | Slash Command：注册、解析、补全与 TUI 命令分流 | [Spec](ch10-slash_command/spec.md) · [Plan](ch10-slash_command/plan.md) · [Tasks](ch10-slash_command/task.md) · [Checklist](ch10-slash_command/checklist.md) · [Manual scenarios](ch10-slash_command/manual_scenarios.md) · [Reference](ch10-slash_command/理论学习：Slash%20Command%20命令框架.md) |
 
 新增章节时继续采用 `chNN-topic` 格式，并在本页追加索引。
 
