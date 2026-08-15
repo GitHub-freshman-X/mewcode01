@@ -174,6 +174,33 @@ func TestSessionStoreRestoreRestoresPlansAndAddsTimeGapReminder(t *testing.T) {
 	}
 }
 
+func TestSessionStoreRestoreAggregatesUsageAndIgnoresItForMetadata(t *testing.T) {
+	dir := t.TempDir()
+	store := NewSessionStore(dir)
+	id := "20260813-080000-a1b2"
+	now := time.Date(2026, 8, 13, 8, 0, 0, 0, time.UTC)
+	store.now = func() time.Time { return now }
+	writeSessionRecords(t, dir, id, []JournalRecord{
+		journalText(provider.RoleUser, JournalPurposeHistory, "first request", now),
+		{Purpose: JournalPurposeUsage, Usage: &UsageRecord{InputTokens: 10, OutputTokens: 4}, Timestamp: now.Add(time.Second).Unix()},
+		journalText(provider.RoleAssistant, JournalPurposeHistory, "answer", now.Add(2*time.Second)),
+		{Purpose: JournalPurposeUsage, Usage: &UsageRecord{InputTokens: 3, OutputTokens: 2}, Timestamp: now.Add(3 * time.Second).Unix()},
+	})
+	session, meta, err := store.Restore(id)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if meta.MessageCount != 2 || meta.Title != "first request" {
+		t.Fatalf("meta=%+v", meta)
+	}
+	if got := session.Usage(); got.InputTokens != 13 || got.OutputTokens != 6 {
+		t.Fatalf("usage=%+v", got)
+	}
+	if got := len(session.Snapshot()); got != 2 {
+		t.Fatalf("history=%d", got)
+	}
+}
+
 func TestSessionStoreDeleteAndCleanupExpiredOnlyTouchValidSessionFiles(t *testing.T) {
 	dir := t.TempDir()
 	store := NewSessionStore(dir)

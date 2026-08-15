@@ -144,6 +144,7 @@ func (s *SessionStore) Restore(id string) (*Session, SessionMeta, error) {
 	session.history = history
 	session.display = display
 	session.pendingPlans = plans
+	session.usage = sessionUsage(records)
 	return session, meta, nil
 }
 
@@ -221,14 +222,16 @@ func sessionMetadata(id string, records []JournalRecord) SessionMeta {
 	created, _ := time.ParseInLocation("20060102-150405", id[:15], time.UTC)
 	meta := SessionMeta{ID: id, CreatedAt: created, LastActiveAt: created}
 	for _, record := range records {
-		if meta.Title == "" && record.Role == provider.RoleUser && strings.TrimSpace(record.Content) != "" {
+		if record.Purpose != JournalPurposeUsage && meta.Title == "" && record.Role == provider.RoleUser && strings.TrimSpace(record.Content) != "" {
 			meta.Title = strings.TrimSpace(record.Content)
 		}
 		active := time.Unix(record.Timestamp, 0).UTC()
 		if active.After(meta.LastActiveAt) {
 			meta.LastActiveAt = active
 		}
-		meta.MessageCount++
+		if record.Purpose != JournalPurposeUsage {
+			meta.MessageCount++
+		}
 	}
 	return meta
 }
@@ -261,6 +264,9 @@ func readJournalRecords(path string) ([]JournalRecord, error) {
 }
 
 func validJournalRecord(record JournalRecord) bool {
+	if record.Purpose == JournalPurposeUsage {
+		return record.Role == "" && record.Usage != nil && record.Usage.InputTokens >= 0 && record.Usage.OutputTokens >= 0 && record.Timestamp > 0
+	}
 	if (record.Role != provider.RoleUser && record.Role != provider.RoleAssistant) || (record.Purpose != JournalPurposeHistory && record.Purpose != JournalPurposePlan) || record.Timestamp <= 0 {
 		return false
 	}
@@ -328,6 +334,9 @@ func restoreRecords(records []JournalRecord) ([]provider.Message, []provider.Mes
 	}
 
 	for _, record := range records {
+		if record.Purpose == JournalPurposeUsage {
+			continue
+		}
 		if len(pending) > 0 && (record.Purpose != JournalPurposeHistory || len(record.ToolResults) == 0) {
 			truncate()
 			break
@@ -376,6 +385,16 @@ func restoreRecords(records []JournalRecord) ([]provider.Message, []provider.Mes
 		truncate()
 	}
 	return history, display, plans
+}
+
+func sessionUsage(records []JournalRecord) provider.Usage {
+	var usage provider.Usage
+	for _, record := range records {
+		if record.Purpose == JournalPurposeUsage && record.Usage != nil {
+			usage.Add(provider.Usage{InputTokens: record.Usage.InputTokens, OutputTokens: record.Usage.OutputTokens})
+		}
+	}
+	return usage
 }
 
 func recordMessage(record JournalRecord) provider.Message {

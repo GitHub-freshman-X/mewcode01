@@ -14,6 +14,7 @@ const sessionTitleLimit = 48
 func DefaultCommands() []Command {
 	return []Command{
 		{Name: "help", Aliases: []string{"h"}, Description: "显示命令帮助", Usage: "/help [命令]", Kind: KindLocal, Handler: helpCommand},
+		{Name: "exit", Description: "退出 MewCode", Usage: "/exit", Kind: KindLocalUI, Handler: exitCommand},
 		{Name: "compact", Description: "压缩上下文", Usage: "/compact", Kind: KindPrompt, Handler: requestCommand(agent.ModeCompact, "")},
 		{Name: "clear", Description: "新建并切换会话", Usage: "/clear", Kind: KindLocalUI, Handler: clearCommand},
 		{Name: "plan", Description: "切换或提交计划", Usage: "/plan [需求]", Kind: KindLocalUI, Handler: planCommand},
@@ -80,6 +81,13 @@ func helpCommand(ctx CommandContext) error {
 		return nil
 	}
 	ctx.systemf("/%s\n%s\n用法: %s", c.Name, c.Description, c.Usage)
+	return nil
+}
+func exitCommand(ctx CommandContext) error {
+	if ctx.UI == nil {
+		return fmt.Errorf("command UI is not configured")
+	}
+	ctx.UI.RequestExit()
 	return nil
 }
 func requestCommand(mode agent.Mode, prompt string) Handler {

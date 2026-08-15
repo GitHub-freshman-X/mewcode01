@@ -60,6 +60,42 @@ func TestJSONLJournalEncodesProviderNeutralRound(t *testing.T) {
 	}
 }
 
+func TestSessionRecordUsagePersistsOnlyTokenCounts(t *testing.T) {
+	var output bytes.Buffer
+	journal := NewJSONLJournal(&output)
+	journal.now = func() time.Time { return time.Unix(1_700_000_000, 0) }
+	session := NewSession(journal)
+	if err := session.RecordUsage(provider.Usage{InputTokens: 12, OutputTokens: 5, CacheReadInputTokens: 3}); err != nil {
+		t.Fatal(err)
+	}
+	if err := session.RecordUsage(provider.Usage{InputTokens: 8, OutputTokens: 2}); err != nil {
+		t.Fatal(err)
+	}
+	if got := session.Usage(); got.InputTokens != 20 || got.OutputTokens != 7 {
+		t.Fatalf("usage=%+v", got)
+	}
+	var record JournalRecord
+	if err := json.Unmarshal([]byte(strings.TrimSpace(strings.Split(output.String(), "\n")[0])), &record); err != nil {
+		t.Fatal(err)
+	}
+	if record.Purpose != JournalPurposeUsage || record.Usage == nil || record.Usage.InputTokens != 12 || record.Usage.OutputTokens != 5 || record.Role != "" {
+		t.Fatalf("record=%+v", record)
+	}
+	if strings.Contains(output.String(), "CacheRead") {
+		t.Fatalf("journal contains unsupported usage fields: %s", output.String())
+	}
+}
+
+func TestSessionRecordUsageJournalFailureLeavesUsageUnchanged(t *testing.T) {
+	session := NewSession(&recordingJournal{})
+	if err := session.RecordUsage(provider.Usage{InputTokens: 1}); err == nil {
+		t.Fatal("usage was accepted without usage journal support")
+	}
+	if got := session.Usage(); got != (provider.Usage{}) {
+		t.Fatalf("usage=%+v", got)
+	}
+}
+
 func TestSessionCommitPlanWritesPlanJournalRecords(t *testing.T) {
 	journal := &recordingJournal{}
 	s := NewSession(journal)

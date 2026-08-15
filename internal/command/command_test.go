@@ -42,12 +42,14 @@ type fakeUI struct {
 	messages []string
 	requests []agent.Request
 	plan     bool
+	exit     bool
 }
 
 func (u *fakeUI) AddSystemMessage(s string)        { u.messages = append(u.messages, s) }
 func (u *fakeUI) StartAgent(r agent.Request) error { u.requests = append(u.requests, r); return nil }
 func (u *fakeUI) SetPlanMode(v bool)               { u.plan = v }
 func (u *fakeUI) PlanMode() bool                   { return u.plan }
+func (u *fakeUI) RequestExit()                     { u.exit = true }
 func (u *fakeUI) TokenUsage() provider.Usage       { return provider.Usage{} }
 func (u *fakeUI) RefreshStatus()                   {}
 func (u *fakeUI) MemoryClearPending() bool         { return false }
@@ -75,6 +77,16 @@ func TestDispatchLocalAndPrompt(t *testing.T) {
 	}
 	if err := Dispatch(DefaultRegistry(), Parse("/plan task"), ctx); err != nil || !u.plan || len(u.requests) != 2 || u.requests[1].Mode != agent.ModePlan {
 		t.Fatalf("plan=%+v mode=%v err=%v", u.requests, u.plan, err)
+	}
+}
+
+func TestExitCommandRequestsExitWithoutAgent(t *testing.T) {
+	u := &fakeUI{}
+	if err := Dispatch(DefaultRegistry(), Parse("/exit"), CommandContext{Context: context.Background(), UI: u}); err != nil {
+		t.Fatal(err)
+	}
+	if !u.exit || len(u.requests) != 0 || len(u.messages) != 0 {
+		t.Fatalf("exit=%v requests=%v messages=%v", u.exit, u.requests, u.messages)
 	}
 }
 

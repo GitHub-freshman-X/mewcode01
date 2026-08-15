@@ -21,6 +21,9 @@
 
 - [ ] **会话切换安全**：/clear、/session new 与 /session resume 创建或恢复后，Runner 和 TUI 均指向同一新 Session；活跃 Agent 任务期间切换被拒绝且不改原会话。（验证：go test ./internal/agent ./internal/tui -run 'Test.*(Session.*Switch|Clear|Resume)' -count=1，期望 Session ID 与拒绝分支断言通过）
 - [ ] **AC11 会话标题**：`/session` 与 `/session list` 以会话 ID 和首条用户消息标题帮助识别会话；标题会去除首尾空白，中文与 emoji 长标题按字符边界截断并带省略号，空会话显示占位标题。列表、创建、恢复、删除仍调用第九章既有存储能力，且整个标题流程不发起 Agent 或 Provider 请求。（验证：go test ./internal/command ./internal/conversation -run 'Test.*(Session.*Title|Session.*List)' -count=1，期望格式、截断、占位和零请求断言通过）
+- [ ] **AC12 会话级 Token 用量**：同一会话内的普通对话、计划、执行与压缩调用的 Provider 输入/输出 Token 会累加；`/status` 与状态栏读到相同的会话累计值。新会话从零开始，切换会话显示目标会话自己的值，恢复原会话后恢复原值；旧 JSONL 无用量行时显示零并可继续累加。本地命令不会改变用量。（验证：go test ./internal/conversation ./internal/agent ./internal/command ./internal/tui -run 'Test.*(Usage|Token|Session.*Resume)' -count=1，期望 JSONL、恢复、界面与零 Provider 请求断言通过）
+- [ ] **AC13 恢复后的压缩时机**：`/session resume` 本身不启动 Provider 或压缩任务；恢复后提交第一条 Agent 消息时，在任何 Provider 请求前，仍按恢复历史的上下文长度触发或跳过既有自动压缩。会话累计 Token 不得影响该决定。（验证：go test ./internal/agent ./internal/tui -run 'Test.*(Restore.*Compact|Resume.*NoProvider|Session.*Resume)' -count=1，期望调用顺序、压缩触发与零恢复请求断言通过）
+- [ ] **AC14 `/exit` 退出**：空闲时输入 `/exit` 返回 TUI 退出命令；不启动 Agent、不调用 Provider、不写入 Session、Display Journal 或 JSONL。`/help` 与 Tab 补全可发现该命令；任务或权限确认状态继续沿用 `Ctrl+C` 的取消/退出语义，不在这些状态执行 `/exit`。（验证：go test ./internal/command ./internal/tui -run 'Test.*(Exit|CommandList|Completion|Permission)' -count=1，期望退出命令、零副作用及状态守卫断言通过）
 - [ ] **记忆管理**：/memory 显示用户级和项目级概要；list、add <类别> <内容> 与 clear 只影响既有记忆目录及索引；未知类别、空内容和目录外文件被拒绝。（验证：go test ./internal/memory ./internal/command -run 'Test.*(Memory|Command.*Memory)' -count=1，期望文件范围、索引及错误提示断言通过）
 - [ ] **清空确认**：/memory clear 先提供确认提示；未经明确确认不得删除任何记忆文件或索引。（验证：go test ./internal/command ./internal/tui -run 'Test.*Memory.*Clear.*Confirm' -count=1，期望确认前后目录快照断言通过）
 

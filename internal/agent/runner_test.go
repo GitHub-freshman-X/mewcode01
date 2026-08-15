@@ -105,6 +105,9 @@ func TestRunnerFinalAnswer(t *testing.T) {
 	if got := len(session.Snapshot()); got != 2 {
 		t.Fatalf("history=%d", got)
 	}
+	if got := session.Usage(); got.InputTokens != 10 || got.OutputTokens != 4 {
+		t.Fatalf("usage=%+v", got)
+	}
 }
 
 func TestRunnerInjectsOptionalModulesIntoFirstPrompt(t *testing.T) {
@@ -452,6 +455,33 @@ func TestRunnerAutomaticCompactBeforeNormalRequest(t *testing.T) {
 	event := firstCompactionEvent(events)
 	if event == nil || event.Trigger != contextmanager.TriggerAutomatic || event.BeforeTokens == 0 || event.AfterTokens == 0 {
 		t.Fatalf("compaction event=%+v", event)
+	}
+	if got := session.Usage(); got.InputTokens != 42 {
+		t.Fatalf("usage=%+v", got)
+	}
+}
+
+func TestRunnerReplaceSessionDefersCompactionUntilNextTask(t *testing.T) {
+	p := &scriptedProvider{rounds: []scriptedRound{
+		textRound("<summary>compressed state</summary>", provider.Usage{InputTokens: 30}),
+		textRound("done", provider.Usage{InputTokens: 12}),
+	}}
+	runner, _ := testRunner(t, p, Options{Context: compactTestConfig()})
+	restored := conversation.NewSession()
+	restored.ReplaceHistory([]provider.Message{testTextMessage(provider.RoleUser, strings.Repeat("a", 144))})
+	if err := runner.ReplaceSession(restored, "20260816-120000-a1b2"); err != nil {
+		t.Fatal(err)
+	}
+	if len(p.requests) != 0 {
+		t.Fatalf("resume started provider requests=%d", len(p.requests))
+	}
+	task, err := runner.Start(context.Background(), Request{Mode: ModeAct, Prompt: "continue"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	events := drainTask(t, task)
+	if len(p.requests) != 2 || firstCompactionEvent(events) == nil {
+		t.Fatalf("requests=%d events=%+v", len(p.requests), events)
 	}
 }
 

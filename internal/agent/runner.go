@@ -254,6 +254,11 @@ func (r *Runner) run(ctx context.Context, mode Mode, prepared preparedRequest, e
 			return
 		}
 		total.Add(round.Usage)
+		if err := r.session.RecordUsage(round.Usage); err != nil {
+			summary := &Summary{Reason: StopStreamError, Iterations: iterations, Usage: total}
+			terminal(Event{Type: EventFailed, Iteration: iterations, Phase: PhaseFinishing, Summary: summary, Err: err})
+			return
+		}
 		manager.RecordUsage(round.Usage, messages)
 		if len(round.ToolCalls) == 0 {
 			text := messageText(round.Assistant)
@@ -391,6 +396,9 @@ func (r *Runner) compact(ctx context.Context, manager *contextmanager.Manager, t
 			manager.State.AutomaticFailures++
 		}
 		r.options.Logger.Error("context compaction failed", logging.Fields{"stage": "context_compaction", "status": "failed", "trigger": string(trigger), "before_tokens": before, "automatic_failures": manager.State.AutomaticFailures})
+		return round.Usage, err
+	}
+	if err := r.session.RecordUsage(round.Usage); err != nil {
 		return round.Usage, err
 	}
 	rawSummary := messageText(round.Assistant)

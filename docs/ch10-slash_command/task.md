@@ -13,6 +13,11 @@
 | 修改 | internal/command/{command,builtins,command_test}.go | 会话标题透传、格式化与 `/session list` 回归测试。 |
 | 修改 | internal/tui/{model,update,view,tui_test}.go | 本地命令文本与反馈的锚定临时展示及顺序回归测试。 |
 | 修改 | internal/conversation/store_test.go | 首条用户消息标题派生的持久化回归测试（如现有覆盖不足）。 |
+| 修改 | internal/conversation/{journal,session,store}.go 及测试 | 会话级 Token 增量记录、恢复聚合与旧 JSONL 兼容。 |
+| 修改 | internal/agent/{runner,runner_test}.go | Provider 用量归属当前会话及恢复后的压缩时机验证。 |
+| 修改 | internal/tui/{model,view,tui_test}.go | 状态栏与 `/status` 读取会话累计用量。 |
+| 修改 | internal/command/{command,builtins,command_test}.go | `/exit` 注册、退出请求边界与命令核心测试。 |
+| 修改 | internal/tui/{model,update,tui_test}.go | 空闲退出分流与任务/权限状态守卫测试。 |
 | 修改 | cmd/mewcode/{main,main_test}.go | 命令依赖装配及启动回归。 |
 | 修改 | docs/README.md | 第十章索引。 |
 
@@ -142,10 +147,39 @@
 
 **验证：** `go test ./internal/command ./internal/conversation -run 'Test.*(Session.*Title|Session.*List)' -count=1` 通过。
 
-## T10：索引更新与章节级验证
+## T10：持久化会话级 Token 用量
+
+**文件：** internal/conversation/journal.go、internal/conversation/session.go、internal/conversation/store.go、internal/conversation/{session,store}_test.go、internal/agent/runner.go、internal/agent/runner_test.go、internal/tui/model.go、internal/tui/view.go、internal/tui/tui_test.go、internal/command/command_test.go
+**依赖：** T2、T3、T5
+
+**步骤：**
+
+1. 为既有 JSONL 增加兼容的 `usage` 增量记录；校验输入、输出均为非负值，并使旧 history/plan 记录和旧 JSONL 文件继续可读。
+2. 向 `Session` 增加获取与记录累计用量的入口，保证先成功追加 Journal、后更新内存；恢复时只聚合用量行，不把它们当作对话、标题、计划或消息数。
+3. 在 Runner 成功完成普通、计划、执行或压缩的 Provider 调用后，把该调用的实际报告用量记入当前 Session；记账失败按现有任务错误路径处理，避免显示未持久化的数值。
+4. 将 TUI `TokenUsage`、`/status` 和状态栏改为读取 Session 累计用量；会话新建显示零，恢复会话显示聚合结果。
+5. 覆盖多轮及压缩用量累加、切换会话互不串值、重启恢复、旧 JSONL 默认零、无 Provider 的本地命令不变更用量；覆盖恢复本身不启动压缩或 Provider、下一条 Agent 任务仍在首次 Provider 请求前按历史内容触发既有压缩判断。
+
+**验证：** `go test ./internal/conversation ./internal/agent ./internal/command ./internal/tui -run 'Test.*(Usage|Token|Session.*Resume|Restore.*Compact)' -count=1` 通过。
+
+## T11：实现 `/exit` 本地退出命令
+
+**文件：** internal/command/command.go、internal/command/builtins.go、internal/command/command_test.go、internal/tui/model.go、internal/tui/update.go、internal/tui/tui_test.go
+**依赖：** T2、T5、T6
+
+**步骤：**
+
+1. 为命令 UI 边界增加退出请求能力；默认命令注册 `/exit`，Handler 只发出退出请求，不创建 Agent 请求或系统消息。
+2. TUI 保存本次命令的退出请求，并在 `/exit` 成功分发后返回 Bubble Tea 的退出命令；退出前不提交命令到 Session、Display Journal 或 JSONL。
+3. 覆盖 `/help` 与补全发现 `/exit`、空闲 `/exit` 返回退出命令、零 Agent/Provider 请求和零会话写入。
+4. 覆盖活跃任务、权限确认与 `Ctrl+C` 的既有优先级，确保这些状态下不会把 `/exit` 当作可立即执行的命令。
+
+**验证：** `go test ./internal/command ./internal/tui -run 'Test.*(Exit|CommandList|Completion|Permission)' -count=1` 通过。
+
+## T12：索引更新与章节级验证
 
 **文件：** docs/README.md、docs/ch10-slash_command/{spec,plan,task,checklist}.md  
-**依赖：** T1–T9
+**依赖：** T1–T11
 
 **步骤：**
 
@@ -162,16 +196,18 @@
     go vet ./...
     git diff --check
 
-期望：全部命令退出码为 0，且九个命令的注册、分流、模式切换、补全、安全日志、命令显示顺序和会话标题由自动化测试覆盖。
+期望：全部命令退出码为 0，且十个命令的注册、分流、模式切换、补全、安全日志、命令显示顺序、会话标题、会话级 Token 用量和退出行为由自动化测试覆盖。
 
 ## 执行顺序
 
     T1 → T2 ────────────┐
-    T3 ─────────────────┼→ T5 → T6 → T7 → T8 → T10
-    T4 ─────────────────┘
-           └────────────→ T9 ────────────────┘
+    T3 ─────────────────┼→ T5 → T6 → T7 → T8 ─┐
+    T4 ─────────────────┘                        ├→ T12
+           └────────────→ T9 ────────────────────┤
+                         T10 ─────────────────────┤
+                               T11 ───────────────┘
 
 - T1、T3、T4 可并行执行。
 - T2 依赖 T1。
 - T5 依赖命令、会话切换与记忆服务。
-- T6、T7、T8 按顺序接入 TUI；T9 可在 T2 后独立完成；T10 更新索引并做全量验证。
+- T6、T7、T8 按顺序接入 TUI；T9 可在 T2 后独立完成；T10 依赖会话切换、命令装配和 TUI 状态；T11 依赖命令与 TUI 分流；T12 更新索引并做全量验证。

@@ -160,10 +160,12 @@ func (m *Model) statusText() string {
 		return mode + " · permission · 等待确认 · o/s/p 允许 · d 拒绝 · Ctrl+C 取消"
 	}
 	if m.task != nil {
-		return fmt.Sprintf("%s · iteration %d · %s · tokens in:%d out:%d · Ctrl+C 取消", mode, m.current.iteration, m.current.phase, m.current.usage.InputTokens, m.current.usage.OutputTokens)
+		usage := m.TokenUsage()
+		return fmt.Sprintf("%s · iteration %d · %s · tokens in:%d out:%d · Ctrl+C 取消", mode, m.current.iteration, m.current.phase, usage.InputTokens, usage.OutputTokens)
 	}
 	if m.current.terminal != nil {
-		return fmt.Sprintf("%s · %s · %s · %d iterations · tokens in:%d out:%d · 可继续输入", mode, m.current.terminalTy, m.current.terminal.Reason, m.current.terminal.Iterations, m.current.terminal.Usage.InputTokens, m.current.terminal.Usage.OutputTokens)
+		usage := m.TokenUsage()
+		return fmt.Sprintf("%s · %s · %s · %d iterations · tokens in:%d out:%d · 可继续输入", mode, m.current.terminalTy, m.current.terminal.Reason, m.current.terminal.Iterations, usage.InputTokens, usage.OutputTokens)
 	}
 	if m.current.err != nil {
 		return mode + " · failed · " + provider.UserError(m.current.err) + " · 可继续输入"

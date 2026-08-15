@@ -13,6 +13,7 @@ type Session struct {
 	history      []provider.Message
 	display      []provider.Message
 	pendingPlans []string
+	usage        provider.Usage
 	journal      Journal
 }
 
@@ -40,6 +41,31 @@ func (s *Session) DisplaySnapshot() []provider.Message {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 	return provider.CloneMessages(s.display)
+}
+
+func (s *Session) Usage() provider.Usage {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	return s.usage
+}
+
+func (s *Session) RecordUsage(usage provider.Usage) error {
+	if usage.InputTokens < 0 || usage.OutputTokens < 0 {
+		return errors.New("usage tokens must be non-negative")
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.journal != nil {
+		journal, ok := s.journal.(UsageJournal)
+		if !ok {
+			return errors.New("journal does not support usage records")
+		}
+		if err := journal.AppendUsage(usage); err != nil {
+			return err
+		}
+	}
+	s.usage.Add(usage)
+	return nil
 }
 
 func BuildRound(user *provider.Message, assistant provider.Message, results []provider.ToolResult) ([]provider.Message, error) {

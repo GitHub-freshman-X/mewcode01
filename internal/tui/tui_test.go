@@ -75,6 +75,39 @@ func TestPlanStatusOverridesPreviousTerminal(t *testing.T) {
 	}
 }
 
+func TestStatusUsesSessionUsage(t *testing.T) {
+	session := conversation.NewSession()
+	if err := session.RecordUsage(provider.Usage{InputTokens: 21, OutputTokens: 8}); err != nil {
+		t.Fatal(err)
+	}
+	m := NewModel(nil, session)
+	m.current.usage = provider.Usage{InputTokens: 1, OutputTokens: 1}
+	if got := m.TokenUsage(); got.InputTokens != 21 || got.OutputTokens != 8 {
+		t.Fatalf("usage=%+v", got)
+	}
+	m.textarea.SetValue("/status")
+	m.Update(tea.KeyPressMsg{Text: keySubmit})
+	if view := m.View().Content; !strings.Contains(view, "tokens in:21 out:8") {
+		t.Fatalf("view=%q", view)
+	}
+}
+
+func TestExitCommandQuitsWithoutSessionWrite(t *testing.T) {
+	session := conversation.NewSession()
+	m := NewModel(nil, session)
+	m.textarea.SetValue("/exit")
+	_, cmd := m.Update(tea.KeyPressMsg{Text: keySubmit})
+	if cmd == nil {
+		t.Fatal("/exit did not return a quit command")
+	}
+	if _, ok := cmd().(tea.QuitMsg); !ok {
+		t.Fatalf("message=%T", cmd())
+	}
+	if len(session.Snapshot()) != 0 || len(session.DisplaySnapshot()) != 0 {
+		t.Fatalf("exit changed session: history=%v display=%v", session.Snapshot(), session.DisplaySnapshot())
+	}
+}
+
 func TestSystemMessageFollowsCurrentCommand(t *testing.T) {
 	m := NewModel(nil, conversation.NewSession())
 	m.current = taskView{prompt: "/do", terminalTy: agent.EventFailed, err: errors.New("no valid plan")}

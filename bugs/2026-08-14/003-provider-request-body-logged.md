@@ -25,3 +25,5 @@ OpenAI 请求日志现仅记录 provider、请求大小、消息数和工具数�
 2026-08-14 09:29 第十章全量验收与单测 `go test ./internal/provider/openai -run '^TestStreamCapturesFinalRequestPayload$' -count=1` 均稳定失败：测试仍要求日志包含 `request-canary`，实际日志只有 `message_count`、`provider`、`request_bytes`、`stage` 和 `tool_count`。该现象符合当前安全日志实现，未发现第十章 Slash Command 改动影响 Provider。待处理项是更新该过时测试，使其断言请求正文和 API key 均不会进入日志，并确认 OpenAI 包全量测试通过。
 
 2026-08-16：再次执行 `go test ./... -count=1` 时同一测试失败，输出仍只有安全元数据；其余第十章相关包均通过。本次未修改 Provider 实现或该测试，待后续独立修复。
+
+2026-08-16：会话级 Token 用量改动后的全项目回归再次仅失败于同一断言；Provider 日志仍只包含安全元数据。会话、Agent、命令与 TUI 包均通过，本次未触及 OpenAI Provider。

@@ -53,6 +53,7 @@ type Model struct {
 	completion                   []string
 	completionIndex              int
 	memoryClearPending           bool
+	exitRequested                bool
 }
 
 func NewModel(runner *agent.Runner, session *conversation.Session) *Model {
@@ -108,11 +109,12 @@ func (m *Model) hasTransientTaskView() bool {
 }
 func (m *Model) SetPlanMode(enabled bool) { m.planMode = enabled; m.RefreshStatus() }
 func (m *Model) PlanMode() bool           { return m.planMode }
+func (m *Model) RequestExit()             { m.exitRequested = true }
 func (m *Model) TokenUsage() provider.Usage {
-	if m.current.terminal != nil {
-		return m.current.terminal.Usage
+	if m.session != nil {
+		return m.session.Usage()
 	}
-	return m.current.usage
+	return provider.Usage{}
 }
 func (m *Model) RefreshStatus()                   { m.refreshContent() }
 func (m *Model) MemoryClearPending() bool         { return m.memoryClearPending }

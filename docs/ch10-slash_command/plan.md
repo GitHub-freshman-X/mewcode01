@@ -10,6 +10,8 @@
 
 本地命令会作为临时聊天条目显示：先显示用户输入的命令，再显示该命令的系统反馈。临时条目使用提交时的会话消息数作为锚点，因此后续普通对话不会把旧反馈推到最底部；它们只属于当前 TUI 视图，不写入会话、Journal 或模型请求。会话列表复用第九章已经保存的首条用户消息标题，并在命令层按 Unicode 字符边界截断为简短可辨识文本。
 
+会话级 Token 用量归属 `conversation.Session`：Agent 在 Provider 调用完成后，将输入、输出增量追加到该会话的既有 JSONL，再更新内存累计值。恢复会话时，Store 扫描同一文件并聚合用量记录；TUI 的 `/status` 和状态栏读取 Session 累计值，而非上一次任务的临时用量。会话恢复保持即时完成；下一次 Agent 任务仍由全新的上下文管理器根据恢复后的历史内容，在首次 Provider 请求前决定是否压缩，绝不以累计用量作为压缩估算锚点。
+
 ## 核心数据结构
 
 ### `command.Kind`
@@ -67,6 +69,7 @@ type UIController interface {
 	StartAgent(agent.Request) error
 	SetPlanMode(bool)
 	PlanMode() bool
+	RequestExit()
 	TokenUsage() provider.Usage
 	RefreshStatus()
 }
@@ -84,6 +87,8 @@ type Handler func(CommandContext) error
 
 `SessionService` 封装创建、列表、恢复与删除，并在成功切换时协调 TUI 与 Runner。`MemoryService` 封装既有用户级、项目级记忆的概要、列表、添加和清空。两者均只暴露本章所需操作，Handler 不接触渲染细节或文件路径。
 
+`RequestExit` 只记录本次本地命令请求退出，不暴露 Bubble Tea 类型给 `command`。TUI 在分发完成后检测该状态并返回退出命令；由于应用立即结束，`/exit` 不需要作为临时聊天条目渲染。
+
 ### TUI 状态
 
 `tui.Model` 增加当前计划模式、按会话消息位置锚定的临时展示条目、补全候选与选中索引、命令注册中心及会话/记忆运行依赖。临时条目包含展示角色（用户命令或系统反馈）、内容与锚点位置；任务仍由现有 `task` 字段追踪。活跃任务或待确认权限时维持既有输入限制。
@@ -99,6 +104,22 @@ type SessionMeta struct {
 ```
 
 会话服务将第九章 `conversation.SessionMeta` 的 `Title` 透传给命令层。`/session list` 以 `ID + 截断标题` 为主展示；消息数可保留在内部元数据中，但不再作为用户识别会话的主要信息。标题为空时显示固定占位文本，避免空白列表项。
+
+### 会话用量记录
+
+```go
+const JournalPurposeUsage JournalPurpose = "usage"
+
+type JournalRecord struct {
+	// 既有对话字段省略
+	Usage *provider.Usage `json:"usage,omitempty"`
+}
+
+func (s *Session) Usage() provider.Usage
+func (s *Session) RecordUsage(provider.Usage) error
+```
+
+`usage` 记录不含角色、正文、工具内容或模型标识，只保存非负的输入和输出 Token 增量及时间戳。旧的 history/plan 行保持原样；恢复器识别并聚合 `usage` 行，同时将它们排除在对话、标题、消息数、计划和未配对工具调用恢复之外。`RecordUsage` 先追加 Journal，成功后再更新内存累计，保证崩溃恢复时不虚增。
 
 ## 模块设计
 
@@ -121,10 +142,11 @@ type SessionMeta struct {
 - `/memory`：显示概要，并支持 `list`、`add <category> <content>`、`clear`；清空操作先显示确认提示，再由明确确认完成。
 - `/status`：显示模式、Token 用量、工具数量、记忆概要、工作目录及版本信息。
 - `/review`：构造固定的 git diff 审查请求，附加用户给出的关注点后以普通 Agent 对话提交。
+- `/exit`：空闲时请求 TUI 正常退出，不启动 Agent，也不写入会话。
 
 ### `internal/conversation` 与 `internal/memory`
 
-**职责：** 以现有第九章存储格式为基础，为命令提供受限服务入口。会话元数据继续从 Journal 的首条用户消息派生标题，不改变 JSONL 存储格式。
+**职责：** 以现有第九章存储格式为基础，为命令提供受限服务入口。会话元数据继续从 Journal 的首条用户消息派生标题；JSONL 追加兼容的用量行，用于恢复会话累计 Token。
 
 **对外接口：** 会话存储继续使用 `Create`、`List`、`Restore`、`Delete`；记忆服务新增面向命令的概要、枚举、手动写入与清空入口。
 
@@ -132,15 +154,15 @@ type SessionMeta struct {
 
 ### `internal/agent.Runner`
 
-**职责：** 在没有活跃任务时安全替换当前 Session、SessionID 以及关联的上下文结果存储。
+**职责：** 在没有活跃任务时安全替换当前 Session、SessionID 以及关联的上下文结果存储；在 Provider 调用完成后向当前 Session 记入实际报告的 Token 增量。
 
-**对外接口：** 新增会话替换方法，拒绝 nil 会话和活跃任务中的切换。
+**对外接口：** 会话替换方法拒绝 nil 会话和活跃任务中的切换。替换后立即使用恢复的 Session 用量供 TUI 展示；压缩管理器维持新建状态，等待下一次任务按恢复历史进行正常判断。
 
 **依赖：** 继续依赖 `conversation.Session` 与现有上下文管理器，不依赖命令或 TUI。
 
 ### `internal/tui`
 
-**职责：** 实现 `UIController` 与命令服务适配；在 Enter 前进行分流；维护计划模式、按提交顺序锚定的临时命令/系统条目与补全菜单；将本地命令及其结果渲染为可辨识的聊天记录。
+**职责：** 实现 `UIController` 与命令服务适配；在 Enter 前进行分流；维护计划模式、按提交顺序锚定的临时命令/系统条目与补全菜单；将本地命令及其结果渲染为可辨识的聊天记录，并展示当前 Session 的累计 Token。
 
 **对外接口：** `Run` 和 `RunWithPermissions` 扩展为接收命令运行依赖，保持应用启动层单一装配点。
 
@@ -157,6 +179,9 @@ type SessionMeta struct {
 7. `/clear` 与 `/session resume` 成功创建或恢复会话后，TUI 调用 Runner 会话替换方法，再同步更新 `Model.session` 与视图。
 8. Tab 触发 `Registry.Complete`：零候选保持输入；一项候选直接替换；多项候选显示菜单，方向键改变选择，Tab 或 Enter 写入选中项。
 9. 视图按会话持久消息与临时条目的锚点交错渲染：任务 1、命令、命令反馈、任务 2 保持该顺序。临时条目不进入会话快照，也不参与下次模型上下文构造。
+10. 每次成功完成 Provider 调用或压缩调用后，Runner 将该调用报告的用量增量交给当前 Session 持久化；计划任务同样计入其所属会话。TUI 收到事件后刷新视图，但 `/status` 和状态栏始终从 Session 累计值读取。
+11. `/session resume` 恢复历史、待执行计划和累计用量后立即切换；不创建压缩任务。下一次 Agent 任务的已有 `Manager.Decision` 在首次 Provider 请求前根据恢复的 `Session.Snapshot()` 判断是否压缩。
+12. `/exit` Handler 通过 `RequestExit` 请求退出；TUI 在命令分发后立即返回退出命令。活跃任务与权限确认状态不会进入命令分发，因此保留现有 `Ctrl+C` 处理。
 
 ## 文件组织
 
@@ -167,14 +192,14 @@ internal/command/
 ├── parser.go        — 斜杠解析
 ├── complete.go      — 前缀补全
 ├── builtins.go      — 九个命令的元数据与 Handler
-└── command_test.go  — 注册、解析、帮助、补全和分发测试
-internal/agent/runner.go       — 空闲会话替换
-internal/agent/runner_test.go  — 会话替换的并发与上下文存储测试
-internal/conversation/store.go — 既有会话元数据及首条用户消息标题派生
+└── command_test.go  — 注册、解析、帮助、补全、分发和退出请求测试
+internal/agent/runner.go       — 空闲会话替换与 Provider 用量记账
+internal/agent/runner_test.go  — 会话替换、用量记账与恢复压缩时机测试
+internal/conversation/{journal,session,store}.go — 用量 JSONL 行、会话累计与恢复聚合
 internal/memory/service.go     — 受限记忆管理入口
 internal/memory/memory_test.go — 记忆管理入口测试
-internal/tui/model.go          — 命令运行依赖、临时展示条目及 UI 状态
-internal/tui/update.go         — Enter 分流、本地命令条目归档与补全键盘交互
+internal/tui/model.go          — 命令运行依赖、临时展示条目、会话用量及 UI 状态
+internal/tui/update.go         — Enter 分流、退出请求、本地命令条目归档与补全键盘交互
 internal/tui/view.go           — 锚定命令/系统条目、补全菜单、模式状态栏
 internal/tui/run.go            — 命令依赖注入
 internal/tui/tui_test.go       — TUI 分流、模式、菜单和兼容性测试
@@ -190,8 +215,11 @@ cmd/mewcode/main_test.go       — 启动装配测试
 | 注册冲突 | 启动时建立规范化索引并返回错误 | 尽早失败，避免运行时不确定性。 |
 | 模式归属 | TUI 持久 UI 状态 + 每次请求显式 Mode | `/plan` toggle 能影响后续输入，同时不引入 Agent 全局可变模式。 |
 | `/do` 行为 | 先退出计划模式，再使用既有 `ModeDo` | 同时满足用户可见模式切换与第 4 章待执行计划语义。 |
+| `/exit` 边界 | CommandContext 请求退出，TUI 返回退出命令 | 保持命令核心不依赖 Bubble Tea，且不把退出误当成 Agent 任务或会话消息。 |
 | 本地命令与反馈 | TUI 锚定临时展示条目 | 命令与反馈可一一对应且保持交互顺序，不污染会话历史或模型上下文。 |
 | 会话标题 | 复用首条用户消息，命令层 Unicode 安全截断 | 不增加 LLM 调用、网络延迟或存储格式；长标题仍可辨识，空会话不显示空白项。 |
+| Token 归属 | Session 累计值 + JSONL 增量行 | 让 `/status`、状态栏和恢复会话使用同一真实来源，且崩溃后可恢复。 |
+| 恢复后压缩 | 下一条 Agent 任务的既有上下文估算 | 切换会话不增加延迟或 API 调用；累计账单用量不能代表当前上下文长度。 |
 | Tab 多候选 | TUI 内部菜单，方向键选择、Tab/Enter 接受 | 保持键盘优先且无需新增渲染依赖。 |
 | 会话切换 | Runner 空闲时原子替换 | 防止活跃任务向旧会话写入或跨会话串数据。 |
 | 记忆管理 | 复用第 9 章目录与 Markdown 格式 | 不创建第二套数据源或改变自动提取、治理行为。 |
@@ -209,6 +237,9 @@ cmd/mewcode/main_test.go       — 启动装配测试
 | F9 | `tui.View` 状态栏 |
 | F10、AC10 | `tui.Update` 临时命令归档、`tui.View` 锚定渲染与 TUI 回归测试 |
 | F11、N7、AC11 | `conversation.SessionMeta.Title` 透传、`command` 标题格式化与会话列表测试 |
+| F12、N8、AC12 | `conversation` 用量 Journal/恢复聚合、`agent.Runner` 增量记账、`tui` 会话级状态展示 |
+| F13、AC13 | `agent.ReplaceSession` 后的 Manager 初始化与恢复历史压缩时机回归测试 |
+| F14、AC14 | `command` 退出 Handler、`tui.Update` 退出命令与活跃状态守卫测试 |
 | N2 | 本地 Registry 操作与 Agent 请求边界测试 |
 | N4、AC9 | Dispatcher/TUI 生命周期日志及日志断言 |
 | N6 | 不新增配置，`config.example.yaml` 不改动 |

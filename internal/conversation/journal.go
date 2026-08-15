@@ -16,6 +16,7 @@ type JournalPurpose string
 const (
 	JournalPurposeHistory JournalPurpose = "history"
 	JournalPurposePlan    JournalPurpose = "plan"
+	JournalPurposeUsage   JournalPurpose = "usage"
 )
 
 type ToolUseRecord struct {
@@ -31,17 +32,27 @@ type ToolResultRecord struct {
 	IsError bool   `json:"is_error"`
 }
 
+type UsageRecord struct {
+	InputTokens  int `json:"input_tokens"`
+	OutputTokens int `json:"output_tokens"`
+}
+
 type JournalRecord struct {
 	Role        provider.Role      `json:"role"`
 	Content     string             `json:"content"`
 	ToolUses    []ToolUseRecord    `json:"tool_uses,omitempty"`
 	ToolResults []ToolResultRecord `json:"tool_results,omitempty"`
 	Purpose     JournalPurpose     `json:"purpose"`
+	Usage       *UsageRecord       `json:"usage,omitempty"`
 	Timestamp   int64              `json:"ts"`
 }
 
 type Journal interface {
 	Append(messages []provider.Message, purpose JournalPurpose) error
+}
+
+type UsageJournal interface {
+	AppendUsage(provider.Usage) error
 }
 
 type JSONLJournal struct {
@@ -104,5 +115,23 @@ func (j *JSONLJournal) Append(messages []provider.Message, purpose JournalPurpos
 	j.mu.Lock()
 	defer j.mu.Unlock()
 	_, err := j.writer.Write(output.Bytes())
+	return err
+}
+
+func (j *JSONLJournal) AppendUsage(usage provider.Usage) error {
+	if j.writer == nil {
+		return errors.New("journal writer is nil")
+	}
+	if usage.InputTokens < 0 || usage.OutputTokens < 0 {
+		return errors.New("usage tokens must be non-negative")
+	}
+	record := JournalRecord{Purpose: JournalPurposeUsage, Usage: &UsageRecord{InputTokens: usage.InputTokens, OutputTokens: usage.OutputTokens}, Timestamp: j.now().Unix()}
+	encoded, err := json.Marshal(record)
+	if err != nil {
+		return err
+	}
+	j.mu.Lock()
+	defer j.mu.Unlock()
+	_, err = j.writer.Write(append(encoded, '\n'))
 	return err
 }

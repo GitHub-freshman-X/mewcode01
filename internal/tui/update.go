@@ -81,6 +81,10 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					m.refreshContent()
 					return m, waitForAgent(m.task.Events)
 				}
+				if m.exitRequested {
+					m.exitRequested = false
+					return m, tea.Quit
+				}
 				if m.task == nil {
 					m.AddCommandMessage(input, messageStart, messageEpoch != m.systemMessageEpoch)
 					m.textarea.Reset()

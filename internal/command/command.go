@@ -36,6 +36,7 @@ type UIController interface {
 	StartAgent(agent.Request) error
 	SetPlanMode(bool)
 	PlanMode() bool
+	RequestExit()
 	TokenUsage() provider.Usage
 	RefreshStatus()
 	MemoryClearPending() bool
