@@ -49,6 +49,7 @@ type Model struct {
 	commands                     *command.Registry
 	planMode                     bool
 	systemMessages               []systemMessage
+	systemMessageEpoch           int
 	completion                   []string
 	completionIndex              int
 	memoryClearPending           bool
@@ -86,8 +87,8 @@ func (m *Model) AddSystemMessage(message string) {
 	m.refreshContent()
 }
 
-func (m *Model) AddCommandMessage(message string, start int) {
-	if start < 0 || start >= len(m.systemMessages) {
+func (m *Model) AddCommandMessage(message string, start int, reset bool) {
+	if reset || start < 0 || start > len(m.systemMessages) {
 		start = 0
 	}
 	after := 0
@@ -183,6 +184,7 @@ func (m *Model) New(context.Context) error {
 		return err
 	}
 	m.session, m.current, m.systemMessages, m.planMode = session, taskView{}, nil, false
+	m.systemMessageEpoch++
 	return nil
 }
 
@@ -199,6 +201,7 @@ func (m *Model) Resume(_ context.Context, id string) error {
 		return err
 	}
 	m.session, m.current, m.systemMessages, m.planMode = session, taskView{}, nil, false
+	m.systemMessageEpoch++
 	return nil
 }
 

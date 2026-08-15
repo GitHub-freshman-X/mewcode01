@@ -73,7 +73,7 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 			invocation := command.Parse(input)
 			if invocation.IsCommand {
-				messageStart := len(m.systemMessages)
+				messageStart, messageEpoch := len(m.systemMessages), m.systemMessageEpoch
 				err := command.Dispatch(m.commands, invocation, command.CommandContext{Context: m.ctx, UI: m, Sessions: m, Memory: m})
 				if err != nil {
 					m.AddSystemMessage("错误: " + err.Error())
@@ -82,7 +82,7 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					return m, waitForAgent(m.task.Events)
 				}
 				if m.task == nil {
-					m.AddCommandMessage(input, messageStart)
+					m.AddCommandMessage(input, messageStart, messageEpoch != m.systemMessageEpoch)
 					m.textarea.Reset()
 				}
 				m.refreshContent()

@@ -152,12 +152,32 @@ func TestLocalCommandPrecedesFeedbackAfterSessionReset(t *testing.T) {
 	m.systemMessages = []systemMessage{{content: "old feedback", after: 0}}
 	m.systemMessages = nil
 	m.AddSystemMessage("已创建新会话。")
-	m.AddCommandMessage("/session new", 1)
+	m.AddCommandMessage("/session new", 1, true)
 	view := m.View().Content
 	commandText := strings.Index(view, "/session new")
 	feedback := strings.Index(view, "已创建新会话。")
 	if commandText < 0 || feedback < 0 || commandText > feedback {
 		t.Fatalf("command does not precede feedback: %q", view)
+	}
+}
+
+func TestLocalCommandWithoutFeedbackUsesCurrentConversationAnchor(t *testing.T) {
+	session := conversation.NewSession()
+	if err := session.CommitRound(
+		&provider.Message{Role: provider.RoleUser, Blocks: []provider.ContentBlock{{Type: provider.BlockText, Text: "first user"}}},
+		provider.Message{Role: provider.RoleAssistant, Blocks: []provider.ContentBlock{{Type: provider.BlockText, Text: "first assistant"}}}, nil,
+	); err != nil {
+		t.Fatal(err)
+	}
+	m := NewModel(nil, session)
+	m.Update(tea.WindowSizeMsg{Width: 160, Height: 40})
+	m.systemMessages = []systemMessage{{content: "older feedback", after: 0}}
+	m.AddCommandMessage("/memory add user marker", len(m.systemMessages), false)
+	view := m.View().Content
+	commandText := strings.Index(view, "/memory add user marker")
+	first := strings.Index(view, "first user")
+	if commandText < 0 || first < 0 || commandText < first {
+		t.Fatalf("command used the oldest anchor: %q", view)
 	}
 }
 

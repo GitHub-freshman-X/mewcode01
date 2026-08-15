@@ -29,3 +29,5 @@
 2026-08-16：临时条目扩展为用户命令或系统反馈两种角色；纯本地命令在分发完成且未启动 Agent 时，插入本次反馈之前。新增“第一轮任务 → `/help` → 命令反馈 → 第二轮任务”回归测试，确认命令与反馈均不进入会话历史。`go test ./internal/command ./internal/conversation ./internal/tui ./internal/agent ./internal/memory ./cmd/mewcode -count=1` 已通过，待按真实 API 场景验证。
 
 2026-08-16：补充会话重置后的边界测试，确认 `/clear` 或 `/session new` 清除旧临时条目后，当前命令仍位于“已创建新会话”反馈之前；相关包测试、`go vet ./...` 与 `git diff --check` 均通过。
+
+2026-08-16：真实 API 手工测试发现成功的 `/memory add` 不产生系统反馈时，命令显示到了最早聊天记录之前。根因是会话重置与“本次没有反馈”共用 `start == len(systemMessages)` 的边界判断，后者错误复用了最早条目的锚点。修复为在会话切换时递增临时消息代次，仅当代次变化时重置插入点；新增无反馈命令锚点回归测试。`go test ./internal/command ./internal/conversation ./internal/tui ./internal/agent ./internal/memory ./cmd/mewcode -count=1`、`go vet ./...` 与 `git diff --check` 已通过，待真实 API 回归验证。
