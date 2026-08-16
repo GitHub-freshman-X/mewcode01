@@ -8,6 +8,9 @@
 - [ ] **AC2 可选模块无空占位**：未提供自定义指令、Skill、长期记忆时不输出空标题；提供后按自定义指令、已激活 Skill、长期记忆顺序追加。（验证：运行 `go test ./internal/prompt -run OptionalModules`，期望空输入无标题、非空输入顺序正确）
 - [ ] **AC3 稳定与动态分离**：仅环境日期、工作区或模式变化时，稳定系统段和稳定工具描述不变，动态系统消息变化。（验证：运行 `go test ./internal/prompt -run StableDynamicSplit`，期望 stable snapshot 不变、dynamic 内容变化）
 - [ ] **AC6 环境信息完整**：普通任务首轮请求包含工作区路径、OS、Shell、日期、任务模式和可用工具范围；缺失必填字段会返回诊断错误。（验证：运行 `go test ./internal/prompt -run 'CollectEnvironment|EnvironmentRequired'`，期望字段齐全且错误分支通过）
+- [x] **AC16 Unix Shell 优先不变**：`SHELL` 有值时，环境信息使用该值，即使同时存在 `COMSPEC` 也不改变。（验证：`go test ./internal/prompt -run 'TestCollectEnvironmentShellPriority' -count=1` 已通过）
+- [x] **AC16 Windows Shell 回退可用**：`SHELL` 缺失但 `COMSPEC` 有值时，环境信息构建成功并使用 `COMSPEC`，随后可生成 `mew.environment` 系统消息。（验证：`go test ./internal/prompt -run 'TestCollectEnvironmentCOMSPECFallback' -count=1` 已通过）
+- [x] **AC16 无平台变量不阻断请求**：`SHELL` 与 `COMSPEC` 同时缺失时，环境信息仍具有非空 Shell 描述，不返回 `prompt environment requires shell`。（验证：`go test ./internal/prompt -run 'TestCollectEnvironmentShellFallback' -count=1` 已通过）
 - [ ] **AC7 工具规则双重强化**：全局工具使用模块和各工具描述均包含关键工具规则，增强后工具定义保持输入顺序且 `Cacheable=true`。（验证：运行 `go test ./internal/prompt -run 'ToolRulesStable|EnhanceDefinitions'`，期望规则文本和顺序断言通过）
 - [ ] **AC8 模式注入频率**：同一 Agent 任务第 1 轮完整注入，间隔轮次注入提醒，其余轮次精简或不注入。（验证：运行 `go test ./internal/prompt -run ModeInjection`，期望请求序列与策略一致）
 
@@ -42,6 +45,7 @@
 - [ ] **AC15 Provider 包离线测试**：OpenAI 与 Anthropic 请求映射和 usage 解析测试无需访问真实 API 即可运行。（验证：运行 `go test ./internal/provider/...`，期望通过）
 - [ ] **AC14 Agent/TUI 回归测试**：Agent Loop、Plan Mode、Do Mode、历史隔离和 TUI 展示回归测试通过。（验证：运行 `go test ./internal/agent ./internal/tui`，期望通过）
 - [ ] **AC14 全项目测试**：第 2 章到第 5 章相关改动未破坏现有功能。（验证：运行 `go test ./...`，期望通过）
+- [x] **Release Windows 编译**：无 CGO 依赖时可从当前开发机生成 Windows 64 位发布产物。（验证：`CGO_ENABLED=0 GOOS=windows GOARCH=amd64 go build -o /private/tmp/mewcode-windows-amd64.exe ./cmd/mewcode` 已通过；验证产物已清理）
 
 ## 端到端场景
 

@@ -155,6 +155,48 @@ func TestCollectEnvironment(t *testing.T) {
 	}
 }
 
+func TestCollectEnvironmentShellPriority(t *testing.T) {
+	t.Setenv("SHELL", "/bin/test-shell")
+	t.Setenv("COMSPEC", "C:\\Windows\\System32\\cmd.exe")
+
+	env, err := CollectEnvironment(ModeAct, testRegistry(t), "/tmp/project", fixedClock{time.Now()})
+	if err != nil {
+		t.Fatalf("CollectEnvironment returned error: %v", err)
+	}
+	if env.Shell != "/bin/test-shell" {
+		t.Fatalf("Shell = %q, want SHELL value", env.Shell)
+	}
+}
+
+func TestCollectEnvironmentCOMSPECFallback(t *testing.T) {
+	t.Setenv("SHELL", "")
+	t.Setenv("COMSPEC", "C:\\Windows\\System32\\cmd.exe")
+
+	env, err := CollectEnvironment(ModeAct, testRegistry(t), "/tmp/project", fixedClock{time.Now()})
+	if err != nil {
+		t.Fatalf("CollectEnvironment returned error: %v", err)
+	}
+	if env.Shell != "C:\\Windows\\System32\\cmd.exe" {
+		t.Fatalf("Shell = %q, want COMSPEC value", env.Shell)
+	}
+	if _, err := EnvironmentMessage(env); err != nil {
+		t.Fatalf("EnvironmentMessage returned error: %v", err)
+	}
+}
+
+func TestCollectEnvironmentShellFallback(t *testing.T) {
+	t.Setenv("SHELL", "")
+	t.Setenv("COMSPEC", "")
+
+	env, err := CollectEnvironment(ModeAct, testRegistry(t), "/tmp/project", fixedClock{time.Now()})
+	if err != nil {
+		t.Fatalf("CollectEnvironment returned error: %v", err)
+	}
+	if env.Shell == "" {
+		t.Fatal("Shell fallback is empty")
+	}
+}
+
 func TestEnvironmentRequired(t *testing.T) {
 	_, err := CollectEnvironment(ModeAct, nil, "/tmp/project", fixedClock{time.Now()})
 	if err == nil || !strings.Contains(err.Error(), "tool registry") {

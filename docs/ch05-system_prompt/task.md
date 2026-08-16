@@ -27,6 +27,10 @@
 | 修改 | `internal/tui/tui_test.go` | 展示历史不含系统补充消息 |
 | 新建 | `docs/ch05-system_prompt/manual_scenarios.md` | 人工对比场景 |
 | 修改 | `docs/README.md` | ch05 文档索引补齐 |
+| 修改 | `internal/prompt/environment.go` | 跨平台 Shell 推导与安全回退 |
+| 修改 | `internal/prompt/prompt_test.go` | 缺失 `SHELL` 的 Windows 兼容性回归测试 |
+| 修改 | `docs/ch05-system_prompt/{spec,plan,task,checklist}.md` | 记录 Windows Shell 兼容性需求、设计、任务和验收 |
+| 修改 | `bugs/2026-08-16/005-windows-shell-environment-required.md` | 记录修复方案与验证结果 |
 
 ## T1: 定义 Provider 中立提示词承载类型
 
@@ -259,6 +263,30 @@
 
 **验证：** `go test ./...` 通过。
 
+## T19: 修复跨平台 Shell 环境采集
+
+**文件：** `internal/prompt/environment.go`、`internal/prompt/prompt_test.go`
+**依赖：** 无
+**步骤：**
+1. 保持 `SHELL` 为首选值，确保 Unix 现有输出不变。
+2. `SHELL` 缺失时读取 `COMSPEC`，兼容 Windows PowerShell 与 CMD 的默认环境。
+3. 两者均缺失时使用稳定、非空的环境描述回退值，不再中断 Agent 请求。
+4. 添加单元测试，分别锁定 `SHELL` 优先、`COMSPEC` 回退与双变量缺失回退。
+5. 构建环境系统消息，断言缺失 `SHELL` 时不再产生 `prompt environment requires shell`。
+
+**验证：** `go test ./internal/prompt -run 'CollectEnvironment|EnvironmentMessage' -count=1` 通过；`env -u SHELL go test ./internal/prompt -run '^TestCollectEnvironment$' -count=1` 通过。
+
+## T20: 同步缺陷记录并执行完整验证
+
+**文件：** `bugs/2026-08-16/005-windows-shell-environment-required.md`、`bugs/2026-08-16/README.md`
+**依赖：** T19
+**步骤：**
+1. 将缺陷状态更新为已修复，保留真实 Windows 模型请求验证为待办项。
+2. 写入最小复现、修复方案与已执行的自动化验证命令。
+3. 运行完整测试与 Windows 交叉编译，确认发布产物可生成。
+
+**验证：** `go test ./...` 和 `CGO_ENABLED=0 GOOS=windows GOARCH=amd64 go build ./cmd/mewcode` 通过。
+
 ## 执行顺序
 
 ```text
@@ -270,4 +298,5 @@ T10 -> T12 -> T14
 T10 -> T15
 T16 -> T17
 T1..T17 -> T18
+T19 -> T20
 ```

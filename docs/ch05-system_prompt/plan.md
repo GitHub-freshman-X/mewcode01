@@ -273,7 +273,7 @@ func ModeInjectionFor(mode Mode, iteration int, policy InjectionPolicy) ModeInje
 func CollectEnvironment(mode Mode, registry *tools.Registry, workspace string, clock Clock) (Environment, error)
 ```
 
-收集动态环境信息；缺少工作区、Shell 或工具范围时返回错误。
+收集动态环境信息；缺少工作区或工具范围时返回错误。Shell 优先取 `SHELL`，否则取 Windows 的 `COMSPEC`，两者均缺失时使用稳定回退值，确保环境描述不阻断请求。
 
 ```go
 type Clock interface {
@@ -300,6 +300,7 @@ type Clock interface {
 
 - 固定模块用静态函数返回，避免运行时顺序漂移。
 - 动态环境模块不进入 `StableSystem`，而是以 `SystemMessage{Tag:"mew.environment"}` 放入 `DynamicSystem`。
+- Shell 仅作为环境描述字段：优先使用 `SHELL`，缺失时使用 `COMSPEC`，再缺失时使用稳定回退值；不因平台特有变量缺失而终止 Agent 请求。
 - 可选模块先保留入口，不接项目指令加载、真实 Skill 或记忆系统。
 - 提示词内容使用稳定标题；正文可以中文/英文混合，但同一实现必须稳定，便于测试。
 
@@ -545,6 +546,7 @@ tui -> agent/provider display types
 | Anthropic 映射 | 工具与稳定 system block 加缓存断点，动态 system block 不缓存 | 符合 Anthropic 缓存顺序和 `cache_control` 语义；动态内容变化不会破坏稳定段。 |
 | Usage 扩展 | 在 `provider.Usage` 增加缓存读取/创建字段 | 复用第 4 章已有用量事件和 Summary 汇总，不额外设计事件流。 |
 | 环境日期 | 通过 `Clock` 注入 | 保证测试确定性，避免快照随真实日期漂移。 |
+| Shell 解析优先级 | `SHELL` → `COMSPEC` → 稳定回退值 | 保留 Unix 已有信息；兼容 Windows 默认终端；环境描述字段不应成为请求可用性的单点故障。 |
 | 人工评估 | 新增 `manual_scenarios.md` | 满足 F17，同时不扩大为自动评估系统，守住“不做的事”。 |
 
 ## Spec 覆盖检查
@@ -556,6 +558,7 @@ tui -> agent/provider display types
 - F14/F18：由 Agent 维持第 4 章历史提交、Plan/Do 逻辑和回归测试覆盖。
 - F15-F16：由 `provider.Usage` 扩展、OpenAI/Anthropic stream 解析和请求快照测试覆盖。
 - F17：由 `docs/ch05-system_prompt/manual_scenarios.md` 覆盖。
+- F19：由 `CollectEnvironment` 的跨平台 Shell 解析和离线回归测试覆盖。
 
 ## 设计风险
 

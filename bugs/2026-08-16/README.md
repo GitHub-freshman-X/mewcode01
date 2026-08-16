@@ -6,3 +6,4 @@
 | [002](002-ch10-plan-status-hidden-by-terminal-status.md) | `/plan` 切换后状态栏被上一任务终态覆盖 | 已修复，待真实 API 验证 |
 | [003](003-ch10-system-messages-render-before-current-command.md) | 命令系统反馈渲染在当前命令输出之前 | 已修复，待真实 API 验证 |
 | [004](004-ch10-session-token-usage-not-persisted.md) | 会话切换后 Token 用量未恢复 | 已修复，待真实 API 验证 |
+| [005](005-windows-shell-environment-required.md) | Windows 启动时错误要求 Unix `SHELL` 环境变量 | 已修复，待真实 Windows API 验证 |

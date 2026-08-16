@@ -34,7 +34,10 @@ func CollectEnvironment(mode Mode, registry *tools.Registry, workspace string, c
 	}
 	shell := strings.TrimSpace(os.Getenv("SHELL"))
 	if shell == "" {
-		return Environment{}, errors.New("prompt environment requires shell")
+		shell = strings.TrimSpace(os.Getenv("COMSPEC"))
+	}
+	if shell == "" {
+		shell = "unknown"
 	}
 	defs := registry.Definitions()
 	if len(defs) == 0 {
