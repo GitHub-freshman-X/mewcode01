@@ -1,41 +1,134 @@
 # MewCode
 
-MewCode 是一个用 Go 1.25 构建的全屏终端 Agent。它支持 Anthropic Messages API、OpenAI Responses API、流式输出、多轮上下文、工具调用和 Claude Extended Thinking。
+MewCode 是一个使用 Go 构建的全屏终端 AI Agent。它可通过 Anthropic Messages API 或 OpenAI Responses API 进行流式多轮对话，并让模型在受权限控制的工作区内读取、搜索和修改文件、执行命令、调用 MCP 工具。
 
-## Agent Loop
+当前项目以章节方式从零构建 Agent。README 说明当前已实现的用户可见能力；每章的详细边界、设计与验收标准请见 [`docs/`](docs/README.md)。
 
-普通输入会启动 Agent Loop：模型可连续读取、搜索、修改文件并执行命令，直到返回最终回答。循环在最终回答、用户取消、模型流错误、连续 3 次未知工具，或达到 `agent.max_iterations` 时停止；迭代上限默认 20。
+## 已实现能力
 
-- `/plan <任务>`：仅开放读文件、找文件和搜代码；成功产出的计划按顺序追加到当前会话的待执行列表，不会覆盖已有计划。
-- `/do`：把全部待执行计划按追加顺序交给模型并恢复完整工具。计划之间存在重复或冲突时由模型结合工作区自行判断，不会预先丢弃任何计划。
+| 章节 | 能力 |
+|---|---|
+| [基础支撑（ch00）](docs/ch00/01-logging/spec.md) | 结构化日志、项目 `.env` 加载、日志文件按日期归档与调用位置记录。 |
+| [第 2 章：对话](docs/ch02-chat/spec.md) | 全屏 TUI、Anthropic/OpenAI Provider、SSE 流式输出、多轮对话与 Claude Extended Thinking。 |
+| [第 3 章：工具](docs/ch03-tools/spec.md) | 读、写、编辑文件，执行命令，查找文件和搜索代码；工具结果回灌模型上下文。 |
+| [第 4 章：Agent Loop](docs/ch04-loop/spec.md) | 多步工具循环、停止边界，以及 `/plan` 和 `/do` 工作流。 |
+| [第 5 章：系统提示词](docs/ch05-system_prompt/spec.md) | 分层结构化系统指令、运行时上下文注入和缓存相关观测。 |
+| [第 6 章：权限](docs/ch06-permissions/spec.md) | 工作区路径沙箱、危险操作拦截、规则优先级和人在回路确认。 |
+| [第 7 章：MCP](docs/ch07-mcp/spec.md) | stdio 与 HTTP MCP 服务的配置、工具发现、调用及生命周期管理。 |
+| [第 8 章：上下文](docs/ch08-context/spec.md) | 工具结果预算、会话摘要压缩、`/compact` 与上下文恢复。 |
+| [第 9 章：记忆与会话](docs/ch09-memory/spec.md) | JSONL 会话持久化、跨会话指令和记忆加载、自动记忆提取与治理。 |
+| [第 10 章：斜杠命令](docs/ch10-slash_command/spec.md) | 命令注册、解析、补全与十个内置命令。 |
 
-计划不会跨进程持久化。`/do` 正常完成后清空本次执行的计划；取消、失败、达到迭代上限或未知工具停止时保留全部待执行计划，之后可以再次执行。没有待执行计划时，`/do` 不会调用模型。
+## 快速开始
 
-Plan Mode 的只读提示、探索回复和工具结果仅保存在当前规划任务的临时上下文中，不会进入后续 `/do` 的模型历史；TUI 仍会保留并展示最终计划。`/do` 会获得写文件、编辑文件和执行命令等完整工具能力。
+### 前置条件
 
-## 构建与运行
+- Go 1.25 或更高版本
+- 可访问所选模型服务的网络和 API Key
+- 支持 ANSI 的现代终端
+
+获取源码后，首先配置一份配置文件，模版为.mewcode/config.example.yaml，至少配置protocol、model、base_url、api_key这几个字段，然后在项目根目录执行：
 
 ```sh
 go build -o mewcode ./cmd/mewcode
-./mewcode
-./mewcode --config /path/to/config.yaml
+./mewcode --config ./mewcode/config.yaml
 ```
 
-未指定 `--config` 时，默认读取 `~/Library/Application Support/mewcode/config.yaml`。`--config` 指向的文件会完整替代默认主配置。
+Windows PowerShell：
 
-复制 `config.example.yaml` 后设置 `protocol`、`model`、`base_url`、`api_key`。`mcp_servers` 也在同一个 `config.yaml` 顶层配置。`max_tokens` 可省略，默认 4096；`agent.max_iterations` 可省略，默认 20。Anthropic 可启用 `thinking`；`budget_tokens` 至少为 1024，并且必须小于 `max_tokens`。OpenAI 不支持该配置。
+```powershell
+go build -o mewcode.exe ./cmd/mewcode
+.\mewcode.exe --config ./mewcode/config.yaml
+```
 
-权限规则独立保存，并在每次启动时合并三层：`~/Library/Application Support/mewcode/permissions.yaml`、`<项目根>/.mewcode/permissions.yaml` 与 `<项目根>/.mewcode/permissions.local.yaml`。优先级从高到低为本地级、项目级、用户级；缺失任一文件视为空规则。
+`--config` 指定的文件会完整替代默认主配置，不会与默认文件合并。
 
-## 操作
+## 配置
 
-- `Enter`：发送消息
-- `/plan <任务>`：只读探索并追加待执行计划
-- `/do`：执行当前会话的全部待执行计划
-- `Page Up` / `Page Down`：滚动历史
-- `Ctrl+T`：展开或折叠 thinking
-- `Ctrl+C`：生成中取消当前回复；空闲时退出
+默认主配置由 Go 的 `os.UserConfigDir()` 决定：
 
-## API Key 安全
+| 系统 | 默认位置 |
+|---|---|
+| macOS | `~/Library/Application Support/mewcode/config.yaml` |
+| Linux | `$XDG_CONFIG_HOME/mewcode/config.yaml`；未设置时通常为 `~/.config/mewcode/config.yaml` |
+| Windows | `%AppData%\mewcode\config.yaml` |
 
-API Key 以明文保存在 YAML 中。请限制配置文件权限（例如 Unix 上使用 `chmod 600`），不要把配置或密钥提交到版本控制。错误信息和界面不会主动显示 `api_key` 的值。
+可复制项目中的 [`.mewcode/config.example.yaml`](.mewcode/config.example.yaml) 到上述位置，再替换模型和密钥。最小配置如下：
+
+```yaml
+protocol: openai # 或 anthropic
+model: your-model-name
+base_url: https://api.example.com
+api_key: replace-with-your-api-key
+```
+
+常用可选项：
+
+- `max_tokens`：单次模型响应上限，默认 `4096`。
+- `thinking.enabled` 与 `thinking.budget_tokens`：仅 Anthropic 支持；预算至少为 `1024`，且必须小于 `max_tokens`。
+- `agent.max_iterations`：Agent Loop 上限，默认 `20`。
+- `agent.context`：上下文窗口、摘要和工具结果预算。
+- `permissions.mode`：没有规则命中时的默认权限模式。
+- `mcp_servers`：配置 stdio 或 HTTP MCP 服务。stdio 服务可填写 `command`、`args`、`env`；HTTP 服务可填写 `url`、`headers`。
+
+OpenAI Responses API 不支持 `thinking` 配置。配置字段会被严格校验，未知字段或无效值会使程序在启动前失败。
+
+## 使用
+
+### 基本操作
+
+- `Enter`：提交输入。
+- `Page Up` / `Page Down`：滚动消息历史。
+- `Tab`：补全斜杠命令。
+- `Ctrl+T`：展开或折叠 Claude thinking 内容。
+- `Ctrl+C`：生成中取消当前任务；空闲时退出。
+
+### 斜杠命令
+
+| 命令 | 用途 |
+|---|---|
+| `/help [命令]` | 显示命令帮助（别名：`/h`）。 |
+| `/compact` | 请求压缩当前上下文。 |
+| `/clear` | 新建并切换会话。 |
+| `/plan [需求]` | 切换计划模式，或在计划模式下提交需求。 |
+| `/do` | 执行当前待执行计划。 |
+| `/session [list\|new\|resume <id>\|delete <id>]` | 管理会话（别名：`/s`）。 |
+| `/memory [list\|add <类别> <内容>\|clear]` | 管理记忆（别名：`/m`）。 |
+| `/status` | 查看当前状态和会话 Token 用量。 |
+| `/review [关注点]` | 让 Agent 审查当前 Git diff（别名：`/r`）。 |
+| `/exit` | 空闲时退出 MewCode。 |
+
+`/plan` 模式仅提供只读探索能力；`/do` 恢复完整工具权限并执行当前会话中累积的计划。普通文本输入会启动 Agent Loop，模型可以在权限规则和交互确认的约束内持续调用工具，直到产出最终回答或到达停止边界。
+
+## 本地文件、权限与安全
+
+- 项目根目录的 `.env` 会在启动时加载；已存在于系统环境中的同名变量优先，不会被 `.env` 覆盖。
+- 权限规则每次启动合并三层：`~/.mewcode/permissions.yaml`、`<项目根>/.mewcode/permissions.yaml` 和 `<项目根>/.mewcode/permissions.local.yaml`。优先级从高到低为本地级、项目级、用户级；缺失文件视为空规则。
+- 项目级会话保存在 `<项目根>/.mewcode/sessions/`；项目级记忆保存在 `<项目根>/.mewcode/memory/`。
+- 用户级指令文件为 `<用户配置目录>/mewcode/MEWCODE.md`，项目级指令文件为 `<项目根>/.mewcode/MEWCODE.md`。用户级记忆保存在 `<用户配置目录>/mewcode/memory/`。
+- API Key 以明文保存在 YAML 中。请限制配置文件权限（Unix 可使用 `chmod 600`），并且不要将配置、`.env` 或密钥提交到版本控制。
+
+## 跨平台构建
+
+项目使用 Go 原生交叉编译，无需特定 Shell。以下命令从项目根目录执行：
+
+```sh
+# macOS 或 Linux 当前平台构建
+go build -o mewcode ./cmd/mewcode
+
+# 为 Windows 构建（在 macOS/Linux shell 中执行）
+GOOS=windows GOARCH=amd64 go build -o mewcode.exe ./cmd/mewcode
+
+# 为 macOS 或 Linux 构建（在 PowerShell 中执行）
+$env:GOOS = "darwin" # Linux 使用 "linux"
+$env:GOARCH = "amd64"
+go build -o mewcode ./cmd/mewcode
+```
+
+运行时仍需在目标系统准备该系统的主配置文件，并保证其中配置的 MCP 子进程或 HTTP 服务在目标环境可用。
+
+## 文档与问题记录
+
+- [章节文档索引](docs/README.md)
+- [Bug 记录索引](bugs/README.md)
+- [贡献与开发约束](AGENTS.md)
