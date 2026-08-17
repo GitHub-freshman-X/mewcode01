@@ -12,3 +12,4 @@ logs/
 .worktrees/
 .env
 superpowers/
+.DS_Store
