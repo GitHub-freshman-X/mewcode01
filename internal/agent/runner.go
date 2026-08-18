@@ -59,7 +59,7 @@ func (r *Runner) Start(ctx context.Context, req Request) (*Task, error) {
 			return nil, fmt.Errorf("unknown skill %q", req.Skill.Name)
 		}
 		if skill.Mode == skills.ModeFork {
-			return nil, errors.New("fork skills are not implemented")
+			return r.startFork(ctx, req)
 		}
 		if _, err := r.options.Skills.Activate(req.Skill.Name, req.Skill.Args); err != nil {
 			return nil, err
@@ -80,6 +80,108 @@ func (r *Runner) Start(ctx context.Context, req Request) (*Task, error) {
 	events := make(chan Event, 64)
 	go r.run(taskCtx, req.Mode, prepared, events)
 	return &Task{Events: events, Cancel: cancel}, nil
+}
+
+func (r *Runner) startFork(ctx context.Context, req Request) (*Task, error) {
+	snapshot, err := r.options.Skills.SnapshotWithActivation(req.Skill.Name, req.Skill.Args)
+	if err != nil {
+		return nil, err
+	}
+	skill := snapshot.Catalog.Skills[req.Skill.Name]
+	forkSession := conversation.NewSession()
+	switch skill.Context {
+	case skills.ContextFull:
+		forkSession.ReplaceHistory(r.session.Snapshot())
+	case skills.ContextRecent:
+		history := r.session.Snapshot()
+		if len(history) > 5 {
+			history = history[len(history)-5:]
+		}
+		forkSession.ReplaceHistory(history)
+	case skills.ContextNone:
+	default:
+		return nil, fmt.Errorf("invalid fork context %q", skill.Context)
+	}
+
+	names := r.registry.Names()
+	filtered := make([]string, 0, len(names))
+	for _, name := range names {
+		if name != skills.LoadToolName {
+			filtered = append(filtered, name)
+		}
+	}
+	registry, err := r.registry.Subset(filtered, nil)
+	if err != nil {
+		return nil, err
+	}
+	options := r.options
+	options.Skills = skills.NewManagerFromSnapshot(snapshot)
+	options.SessionStore = nil
+	options.SessionID = ""
+	options.Memory = nil
+	forkRunner := NewRunner(r.provider, forkSession, registry, r.executor, options)
+
+	r.mu.Lock()
+	if r.active {
+		r.mu.Unlock()
+		return nil, errors.New("an agent task is already active")
+	}
+	r.active = true
+	r.mu.Unlock()
+	taskCtx, cancel := context.WithCancel(ctx)
+	events := make(chan Event, 64)
+	go func() {
+		defer close(events)
+		defer func() { r.mu.Lock(); r.active = false; r.mu.Unlock() }()
+		inner, err := forkRunner.Start(taskCtx, Request{Mode: req.Mode, Prompt: req.Prompt})
+		if err != nil {
+			events <- Event{Type: EventFailed, Phase: PhaseFinishing, Err: err}
+			return
+		}
+		var terminal Event
+		for event := range inner.Events {
+			if isTerminal(event.Type) {
+				terminal = event
+			}
+		}
+		if terminal.Summary != nil {
+			if err := r.session.RecordUsage(terminal.Summary.Usage); err != nil {
+				events <- Event{Type: EventFailed, Phase: PhaseFinishing, Summary: terminal.Summary, Err: err}
+				return
+			}
+		}
+		if terminal.Type == EventCompleted {
+			summary := forkSummary(forkSession.DisplaySnapshot())
+			if err := r.session.CommitRound(&provider.Message{Role: provider.RoleUser, Blocks: []provider.ContentBlock{{Type: provider.BlockText, Text: skillInvocationLabel(req.Skill)}}}, provider.Message{Role: provider.RoleAssistant, Blocks: []provider.ContentBlock{{Type: provider.BlockText, Text: summary}}}, nil); err != nil {
+				events <- Event{Type: EventFailed, Phase: PhaseFinishing, Summary: terminal.Summary, Err: err}
+				return
+			}
+			terminal.Text = summary
+		}
+		events <- terminal
+	}()
+	return &Task{Events: events, Cancel: cancel}, nil
+}
+
+func skillInvocationLabel(invocation *SkillInvocation) string {
+	if invocation == nil {
+		return "/skill"
+	}
+	if strings.TrimSpace(invocation.Args) == "" {
+		return "/" + invocation.Name
+	}
+	return "/" + invocation.Name + " " + strings.TrimSpace(invocation.Args)
+}
+
+func forkSummary(messages []provider.Message) string {
+	for i := len(messages) - 1; i >= 0; i-- {
+		if messages[i].Role == provider.RoleAssistant {
+			if text := messageText(messages[i]); text != "" {
+				return text
+			}
+		}
+	}
+	return "Skill 执行完成，但未生成可回流的摘要。"
 }
 
 // ReplaceSession atomically moves an idle runner to a persisted session.

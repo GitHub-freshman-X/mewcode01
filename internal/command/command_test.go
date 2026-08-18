@@ -84,6 +84,9 @@ func TestDispatchLocalAndPrompt(t *testing.T) {
 	if err := Dispatch(registry, Parse("/review concurrency"), ctx); err != nil || len(u.requests) != 1 || u.requests[0].Skill == nil || u.requests[0].Skill.Name != "review" || u.requests[0].Skill.Args != "concurrency" {
 		t.Fatalf("review=%+v err=%v", u.requests, err)
 	}
+	if got := u.requests[0].Prompt; got != "/review concurrency" {
+		t.Fatalf("review prompt=%q", got)
+	}
 	if err := Dispatch(registry, Parse("/plan task"), ctx); err != nil || !u.plan || len(u.requests) != 2 || u.requests[1].Mode != agent.ModePlan {
 		t.Fatalf("plan=%+v mode=%v err=%v", u.requests, u.plan, err)
 	}

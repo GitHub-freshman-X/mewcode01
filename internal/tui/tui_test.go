@@ -266,6 +266,26 @@ func TestViewAgentEventPartialUsage(t *testing.T) {
 	}
 }
 
+func TestViewDoesNotDuplicatePersistedToolOutputFromActiveTask(t *testing.T) {
+	session := conversation.NewSession()
+	call := provider.ToolCall{ID: "call-1", Name: "read_file", Arguments: []byte(`{"path":"README.md"}`)}
+	result := provider.ToolResult{CallID: "call-1", Name: "read_file", Content: "contents"}
+	if err := session.CommitRound(&provider.Message{Role: provider.RoleUser, Blocks: []provider.ContentBlock{{Type: provider.BlockText, Text: "inspect"}}}, provider.Message{Role: provider.RoleAssistant, Blocks: []provider.ContentBlock{{Type: provider.BlockToolCall, ToolCall: &call}}}, []provider.ToolResult{result}); err != nil {
+		t.Fatal(err)
+	}
+	m := NewModel(nil, session)
+	m.task = &agent.Task{}
+	m.current = taskView{prompt: "inspect", toolCalls: []provider.ToolCall{call}, toolResult: []provider.ToolResult{result}}
+	m.refreshContent()
+	view := m.View().Content
+	if got := strings.Count(view, "工具调用: read_file"); got != 1 {
+		t.Fatalf("tool calls=%d view=%q", got, view)
+	}
+	if got := strings.Count(view, "工具结果: read_file 成功"); got != 1 {
+		t.Fatalf("tool results=%d view=%q", got, view)
+	}
+}
+
 func TestDisplayHistoryShowsPlanWithoutModelHistory(t *testing.T) {
 	session := conversation.NewSession()
 	user := provider.Message{Role: provider.RoleUser, Blocks: []provider.ContentBlock{{Type: provider.BlockText, Text: "/plan create hello.txt"}}}

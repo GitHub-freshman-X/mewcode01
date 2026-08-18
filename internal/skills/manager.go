@@ -31,6 +31,21 @@ func (m *Manager) Snapshot() Snapshot {
 	return Snapshot{Catalog: cloneCatalog(m.catalog), Activations: append([]Activation(nil), m.activations...)}
 }
 
+// SnapshotWithActivation returns an isolated runtime view without mutating the
+// manager's session-scoped activation state.
+func (m *Manager) SnapshotWithActivation(name, args string) (Snapshot, error) {
+	snapshot := m.Snapshot()
+	if _, ok := snapshot.Catalog.Skills[strings.TrimSpace(name)]; !ok {
+		return Snapshot{}, fmt.Errorf("unknown skill %q", name)
+	}
+	snapshot.Activations = append(snapshot.Activations, Activation{Name: strings.TrimSpace(name), Args: args})
+	return snapshot, nil
+}
+
+func NewManagerFromSnapshot(snapshot Snapshot) *Manager {
+	return &Manager{catalog: cloneCatalog(snapshot.Catalog), activations: append([]Activation(nil), snapshot.Activations...)}
+}
+
 func (m *Manager) Activate(name, args string) (Skill, error) {
 	if m == nil {
 		return Skill{}, fmt.Errorf("skill manager is not configured")

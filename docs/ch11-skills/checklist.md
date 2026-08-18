@@ -33,7 +33,7 @@
 ## 执行模式与会话语义
 
 - [ ] inline Skill 使用主会话历史，执行过程和结果按既有 Agent Loop 写入主历史。（验证：显式 inline 调用后检查主 Session history 和 display。）
-- [ ] fork Skill 的临时执行不会把中间用户消息、工具调用、工具结果或回复写入主历史；完成后主历史只收到最终摘要。（验证：执行 fork Skill 后比较临时调用序列与主 Session history。）
+- [x] fork Skill 的临时执行不会把中间用户消息、工具调用、工具结果或回复写入主历史；完成后主历史只收到最终摘要。（验证：`go test ./internal/agent -run TestRunnerForkSkillReturnsOnlyFinalSummaryToMainSession -count=1`，2026-08-18 通过。）
 - [ ] fork 的 `full`、`recent`、`none` 分别传入完整历史、最近五条消息和空历史；其 Provider Token 用量仍计入主会话。（验证：预置超过五条的会话并检查 fork 首次请求和会话 usage。）
 - [ ] fork 取消或失败时不向主历史写入伪摘要，并保持现有取消/错误显示语义。（验证：脚本 Provider 返回错误或取消任务，检查主 Session。）
 - [ ] 新建、恢复或 `/clear` 之后已激活 Skill 不再注入；发现的 Skill 命令仍可再次激活。（验证：激活 Skill 后切换会话，检查下一请求与 `/help`。）

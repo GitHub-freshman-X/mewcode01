@@ -18,6 +18,7 @@ import (
 	"github.com/GitHub-freshman-X/mewcode01/internal/permissions"
 	"github.com/GitHub-freshman-X/mewcode01/internal/prompt"
 	"github.com/GitHub-freshman-X/mewcode01/internal/provider"
+	"github.com/GitHub-freshman-X/mewcode01/internal/skills"
 	"github.com/GitHub-freshman-X/mewcode01/internal/tools"
 )
 
@@ -107,6 +108,40 @@ func TestRunnerFinalAnswer(t *testing.T) {
 	}
 	if got := session.Usage(); got.InputTokens != 10 || got.OutputTokens != 4 {
 		t.Fatalf("usage=%+v", got)
+	}
+}
+
+func TestRunnerForkSkillReturnsOnlyFinalSummaryToMainSession(t *testing.T) {
+	project := t.TempDir()
+	if err := os.WriteFile(filepath.Join(project, "review.md"), []byte("---\nname: review\ndescription: Review changes independently.\nmode: fork\ncontext: none\n---\nReview the current changes."), 0600); err != nil {
+		t.Fatal(err)
+	}
+	manager, err := skills.NewManager(skills.DiscoverOptions{ProjectDir: project})
+	if err != nil {
+		t.Fatal(err)
+	}
+	p := &scriptedProvider{rounds: []scriptedRound{textRound("review summary", provider.Usage{InputTokens: 7, OutputTokens: 3})}}
+	runner, session := testRunner(t, p, Options{Skills: manager})
+	if err := session.CommitRound(&provider.Message{Role: provider.RoleUser, Blocks: []provider.ContentBlock{{Type: provider.BlockText, Text: "prior request"}}}, provider.Message{Role: provider.RoleAssistant, Blocks: []provider.ContentBlock{{Type: provider.BlockText, Text: "prior answer"}}}, nil); err != nil {
+		t.Fatal(err)
+	}
+	task, err := runner.Start(context.Background(), Request{Mode: ModeAct, Prompt: "Execute the requested skill.", Skill: &SkillInvocation{Name: "review"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	events := drainTask(t, task)
+	if events[len(events)-1].Type != EventCompleted {
+		t.Fatalf("events=%+v", events)
+	}
+	if len(p.requests) != 1 || len(p.requests[0].Messages) != 1 {
+		t.Fatalf("fork request=%+v", p.requests)
+	}
+	history := session.Snapshot()
+	if len(history) != 4 || messageText(history[2]) != "/review" || messageText(history[3]) != "review summary" {
+		t.Fatalf("history=%+v", history)
+	}
+	if usage := session.Usage(); usage.InputTokens != 7 || usage.OutputTokens != 3 {
+		t.Fatalf("usage=%+v", usage)
 	}
 }
 

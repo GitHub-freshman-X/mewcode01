@@ -3,3 +3,5 @@
 | 编号 | 标题 | 状态 |
 |---|---|---|
 | [001](001-ch11-help-omits-skill-commands.md) | `/help` 未显示第十一章注册的内置 Skill 命令 | 已修复，自动化验证通过 |
+| [002](002-ch11-fork-skill-rejected.md) | 已注册的 `fork` Skill 无法执行 | 待处理 |
+| [003](003-tui-active-task-duplicates-tool-output.md) | 活跃任务与会话历史重复渲染工具输出 | 已定位，待修复 |

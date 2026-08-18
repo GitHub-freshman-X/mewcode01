@@ -24,6 +24,7 @@ func (m *Model) refreshContent() {
 	if m.session != nil {
 		messages = m.session.DisplaySnapshot()
 	}
+	persistedCalls, persistedResults := displayedToolIDs(messages)
 	renderSystemMessages(&b, m.systemMessages, 0)
 	for i, message := range messages {
 		renderMessage(&b, message, false, m.thinkingExpanded)
@@ -51,9 +52,15 @@ func (m *Model) refreshContent() {
 			renderMessage(&b, provider.Message{Role: provider.RoleAssistant, Blocks: []provider.ContentBlock{{Type: provider.BlockText, Text: text}}}, m.task != nil, false)
 		}
 		for _, call := range m.current.toolCalls {
+			if _, ok := persistedCalls[call.ID]; ok {
+				continue
+			}
 			fmt.Fprintf(&b, "工具调用: %s\n", call.Name)
 		}
 		for _, result := range m.current.toolResult {
+			if _, ok := persistedResults[result.CallID]; ok {
+				continue
+			}
 			status := "成功"
 			if result.IsError {
 				status = "失败"
@@ -92,6 +99,22 @@ func (m *Model) refreshContent() {
 		m.viewport.GotoBottom()
 		m.autoFollow = true
 	}
+}
+
+func displayedToolIDs(messages []provider.Message) (map[string]struct{}, map[string]struct{}) {
+	calls := make(map[string]struct{})
+	results := make(map[string]struct{})
+	for _, message := range messages {
+		for _, block := range message.Blocks {
+			if block.ToolCall != nil && block.ToolCall.ID != "" {
+				calls[block.ToolCall.ID] = struct{}{}
+			}
+			if block.ToolResult != nil && block.ToolResult.CallID != "" {
+				results[block.ToolResult.CallID] = struct{}{}
+			}
+		}
+	}
+	return calls, results
 }
 
 func renderSystemMessages(b *strings.Builder, messages []systemMessage, after int) {

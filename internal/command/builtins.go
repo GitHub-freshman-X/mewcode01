@@ -34,7 +34,11 @@ func SkillCommands(directory []skills.Metadata) []Command {
 			if ctx.UI == nil {
 				return fmt.Errorf("command UI is not configured")
 			}
-			return ctx.UI.StartAgent(agent.Request{Mode: agent.ModeAct, Prompt: "Execute the requested skill.", Skill: &agent.SkillInvocation{Name: metadata.Name, Args: ctx.Args}})
+			prompt := "/" + metadata.Name
+			if args := strings.TrimSpace(ctx.Args); args != "" {
+				prompt += " " + args
+			}
+			return ctx.UI.StartAgent(agent.Request{Mode: agent.ModeAct, Prompt: prompt, Skill: &agent.SkillInvocation{Name: metadata.Name, Args: ctx.Args}})
 		}})
 	}
 	return commands
