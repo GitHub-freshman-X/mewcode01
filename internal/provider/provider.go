@@ -8,6 +8,7 @@ type ThinkingOptions struct {
 }
 
 type ChatRequest struct {
+	Model     string
 	Prompt    PromptBundle
 	Messages  []Message
 	MaxTokens int

@@ -59,8 +59,53 @@ func (r *Registry) Register(tool Tool) error {
 }
 
 func (r *Registry) Get(name string) (Tool, bool) {
+	if r == nil {
+		return nil, false
+	}
 	tool, ok := r.tools[name]
 	return tool, ok
+}
+
+func (r *Registry) Names() []string {
+	if r == nil {
+		return nil
+	}
+	names := make([]string, 0, len(r.tools))
+	for name := range r.tools {
+		names = append(names, name)
+	}
+	sort.Strings(names)
+	return names
+}
+
+// Subset returns a registry containing allowed names. An empty allowed list
+// preserves all tools; required names are always retained.
+func (r *Registry) Subset(allowed, required []string) (*Registry, error) {
+	if r == nil {
+		return nil, errors.New("tool registry is nil")
+	}
+	selected := make(map[string]struct{}, len(allowed)+len(required))
+	if len(allowed) == 0 {
+		for name := range r.tools {
+			selected[name] = struct{}{}
+		}
+	} else {
+		for _, name := range allowed {
+			selected[name] = struct{}{}
+		}
+	}
+	for _, name := range required {
+		selected[name] = struct{}{}
+	}
+	filtered := NewRegistry()
+	for name := range selected {
+		tool, ok := r.tools[name]
+		if !ok {
+			return nil, fmt.Errorf("tool %q is not registered", name)
+		}
+		filtered.tools[name] = tool
+	}
+	return filtered, nil
 }
 
 func (r *Registry) FilterBySafety(safety Safety) *Registry {

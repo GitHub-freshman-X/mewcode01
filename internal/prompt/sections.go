@@ -67,9 +67,17 @@ func optionalModules(options OptionalModules) []Module {
 			Content:  joinLines(options.CustomInstructions),
 		},
 		{
+			Key:      ModuleAvailableSkills,
+			Title:    "## 可用 Skill",
+			Priority: 85,
+			Stable:   true,
+			Optional: true,
+			Content:  joinLines(options.AvailableSkills),
+		},
+		{
 			Key:      ModuleSkills,
 			Title:    "## 已激活 Skill",
-			Priority: 90,
+			Priority: 110,
 			Stable:   true,
 			Optional: true,
 			Content:  joinLines(options.ActiveSkills),

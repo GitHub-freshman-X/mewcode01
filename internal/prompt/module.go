@@ -8,17 +8,18 @@ import (
 type ModuleKey string
 
 const (
-	ModuleIdentity    ModuleKey = "identity"
-	ModuleSystemRules ModuleKey = "system_rules"
-	ModuleTaskMode    ModuleKey = "task_mode"
-	ModuleAction      ModuleKey = "action"
-	ModuleToolUse     ModuleKey = "tool_use"
-	ModuleTone        ModuleKey = "tone"
-	ModuleOutput      ModuleKey = "output"
-	ModuleEnvironment ModuleKey = "environment"
-	ModuleCustom      ModuleKey = "custom"
-	ModuleSkills      ModuleKey = "skills"
-	ModuleMemory      ModuleKey = "memory"
+	ModuleIdentity        ModuleKey = "identity"
+	ModuleSystemRules     ModuleKey = "system_rules"
+	ModuleTaskMode        ModuleKey = "task_mode"
+	ModuleAction          ModuleKey = "action"
+	ModuleToolUse         ModuleKey = "tool_use"
+	ModuleTone            ModuleKey = "tone"
+	ModuleOutput          ModuleKey = "output"
+	ModuleEnvironment     ModuleKey = "environment"
+	ModuleCustom          ModuleKey = "custom"
+	ModuleAvailableSkills ModuleKey = "available_skills"
+	ModuleSkills          ModuleKey = "skills"
+	ModuleMemory          ModuleKey = "memory"
 )
 
 type Module struct {

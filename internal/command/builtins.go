@@ -7,6 +7,7 @@ import (
 
 	"github.com/GitHub-freshman-X/mewcode01/internal/agent"
 	"github.com/GitHub-freshman-X/mewcode01/internal/logging"
+	"github.com/GitHub-freshman-X/mewcode01/internal/skills"
 )
 
 const sessionTitleLimit = 48
@@ -22,8 +23,39 @@ func DefaultCommands() []Command {
 		{Name: "session", Aliases: []string{"s"}, Description: "管理会话", Usage: "/session [list|new|resume <id>|delete <id>]", ArgPrompt: "用法: /session resume <id>", Kind: KindLocal, Handler: sessionCommand},
 		{Name: "memory", Aliases: []string{"m"}, Description: "管理记忆", Usage: "/memory [list|add <类别> <内容>|clear]", ArgPrompt: "用法: /memory add <类别> <内容>", Kind: KindLocal, Handler: memoryCommand},
 		{Name: "status", Description: "显示当前状态", Usage: "/status", Kind: KindLocal, Handler: statusCommand},
-		{Name: "review", Aliases: []string{"r"}, Description: "审查当前 git diff", Usage: "/review [关注点]", Kind: KindPrompt, Handler: reviewCommand},
 	}
+}
+
+func SkillCommands(directory []skills.Metadata) []Command {
+	commands := []Command{{Name: "skills", Description: "管理 Skill", Usage: "/skills reload", Kind: KindLocal, Handler: skillsCommand}}
+	for _, metadata := range directory {
+		metadata := metadata
+		commands = append(commands, Command{Name: metadata.Name, Description: metadata.Description, Usage: "/" + metadata.Name + " [参数]", Kind: KindPrompt, Handler: func(ctx CommandContext) error {
+			if ctx.UI == nil {
+				return fmt.Errorf("command UI is not configured")
+			}
+			return ctx.UI.StartAgent(agent.Request{Mode: agent.ModeAct, Prompt: "Execute the requested skill.", Skill: &agent.SkillInvocation{Name: metadata.Name, Args: ctx.Args}})
+		}})
+	}
+	return commands
+}
+
+func skillsCommand(ctx CommandContext) error {
+	if strings.TrimSpace(ctx.Args) != "reload" {
+		ctx.systemf("用法: /skills reload")
+		return nil
+	}
+	if ctx.Skills == nil {
+		return fmt.Errorf("skill service is not configured")
+	}
+	if err := ctx.Skills.ReloadSkills(); err != nil {
+		return err
+	}
+	if refresher, ok := ctx.UI.(interface{ RefreshCommands() }); ok {
+		refresher.RefreshCommands()
+	}
+	ctx.systemf("Skill 已刷新。")
+	return nil
 }
 
 func Dispatch(registry *Registry, invocation Invocation, ctx CommandContext) error {
@@ -222,15 +254,5 @@ func statusCommand(ctx CommandContext) error {
 	}
 	ctx.systemf("[%s] tokens in:%d out:%d", mode, usage.InputTokens, usage.OutputTokens)
 	return nil
-}
-func reviewCommand(ctx CommandContext) error {
-	if ctx.UI == nil {
-		return fmt.Errorf("command UI is not configured")
-	}
-	prompt := "Review the current git diff. Identify correctness, security, and regression risks. Provide findings first."
-	if ctx.Args != "" {
-		prompt += " Focus on: " + ctx.Args
-	}
-	return ctx.UI.StartAgent(agent.Request{Mode: agent.ModeAct, Prompt: prompt})
 }
 func DefaultRegistry() *Registry { r, _ := NewRegistry(DefaultCommands()...); return r }

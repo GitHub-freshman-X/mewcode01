@@ -12,6 +12,7 @@ type BuildContext struct {
 
 type OptionalModules struct {
 	CustomInstructions []string
+	AvailableSkills    []string
 	ActiveSkills       []string
 	LongTermMemory     []string
 }

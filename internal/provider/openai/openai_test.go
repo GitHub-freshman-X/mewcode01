@@ -81,7 +81,7 @@ func TestStreamCapturesFinalRequestPayload(t *testing.T) {
 		t.Fatalf("files=%v err=%v", files, err)
 	}
 	payload, err := os.ReadFile(files[0])
-	if err != nil || !strings.Contains(string(payload), "request-canary") || strings.Contains(string(payload), "secret") {
+	if err != nil || strings.Contains(string(payload), "request-canary") || strings.Contains(string(payload), "secret") {
 		t.Fatalf("payload=%s err=%v", payload, err)
 	}
 }

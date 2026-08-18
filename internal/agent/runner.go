@@ -14,6 +14,7 @@ import (
 	"github.com/GitHub-freshman-X/mewcode01/internal/memory"
 	"github.com/GitHub-freshman-X/mewcode01/internal/prompt"
 	"github.com/GitHub-freshman-X/mewcode01/internal/provider"
+	"github.com/GitHub-freshman-X/mewcode01/internal/skills"
 	"github.com/GitHub-freshman-X/mewcode01/internal/tools"
 )
 
@@ -31,6 +32,13 @@ type Runner struct {
 
 func NewRunner(p provider.Provider, session *conversation.Session, registry *tools.Registry, executor *tools.Executor, options Options) *Runner {
 	opts := options.normalized()
+	if opts.Skills != nil && registry != nil {
+		if copy, err := registry.Subset(nil, nil); err == nil {
+			if err := copy.Register(skills.NewLoadTool(opts.Skills)); err == nil {
+				registry = copy
+			}
+		}
+	}
 	var store *contextmanager.ResultStore
 	if opts.Workspace != "" && opts.SessionID != "" && session != nil {
 		store, _ = contextmanager.NewResultStore(filepath.Join(opts.Workspace, ".mewcode", "context"), opts.SessionID)
@@ -41,6 +49,21 @@ func NewRunner(p provider.Provider, session *conversation.Session, registry *too
 func (r *Runner) Start(ctx context.Context, req Request) (*Task, error) {
 	if r == nil || r.provider == nil || r.executor == nil {
 		return nil, errors.New("agent runner is not configured")
+	}
+	if req.Skill != nil {
+		if r.options.Skills == nil {
+			return nil, errors.New("skill manager is not configured")
+		}
+		skill, ok := r.options.Skills.Skill(req.Skill.Name)
+		if !ok {
+			return nil, fmt.Errorf("unknown skill %q", req.Skill.Name)
+		}
+		if skill.Mode == skills.ModeFork {
+			return nil, errors.New("fork skills are not implemented")
+		}
+		if _, err := r.options.Skills.Activate(req.Skill.Name, req.Skill.Args); err != nil {
+			return nil, err
+		}
 	}
 	prepared, err := prepareRequest(req, r.session, r.registry)
 	if err != nil {
@@ -102,6 +125,26 @@ func (r *Runner) MemoryService() *memory.Service {
 		return nil
 	}
 	return r.options.Memory
+}
+
+func (r *Runner) SkillDirectory() []skills.Metadata {
+	if r == nil || r.options.Skills == nil {
+		return nil
+	}
+	return r.options.Skills.Directory()
+}
+
+func (r *Runner) ReloadSkills() error {
+	if r == nil || r.options.Skills == nil {
+		return errors.New("skill manager is not configured")
+	}
+	return r.options.Skills.Reload()
+}
+
+func (r *Runner) ClearSkillActivations() {
+	if r != nil && r.options.Skills != nil {
+		r.options.Skills.ClearActivations()
+	}
 }
 
 func (r *Runner) run(ctx context.Context, mode Mode, prepared preparedRequest, events chan<- Event) {
@@ -186,7 +229,27 @@ func (r *Runner) run(ctx context.Context, mode Mode, prepared preparedRequest, e
 			roundUser = &user
 		}
 		promptMode := toPromptMode(mode)
-		environment, err := prompt.CollectEnvironment(promptMode, prepared.registry, r.options.Workspace, r.options.Clock)
+		visibleRegistry := prepared.registry
+		modules := r.options.OptionalModules
+		model := ""
+		if r.options.Skills != nil {
+			runtime, runtimeErr := skills.RuntimeFor(r.options.Skills.Snapshot())
+			if runtimeErr != nil {
+				summary := &Summary{Reason: StopStreamError, Iterations: iterations - 1, Usage: total, Partial: hasPartial}
+				terminal(Event{Type: EventFailed, Iteration: iterations, Phase: PhaseFinishing, Summary: summary, Err: runtimeErr})
+				return
+			}
+			visibleRegistry, runtimeErr = prepared.registry.Subset(runtime.AllowedTools, []string{skills.LoadToolName})
+			if runtimeErr != nil {
+				summary := &Summary{Reason: StopStreamError, Iterations: iterations - 1, Usage: total, Partial: hasPartial}
+				terminal(Event{Type: EventFailed, Iteration: iterations, Phase: PhaseFinishing, Summary: summary, Err: runtimeErr})
+				return
+			}
+			modules.AvailableSkills = skills.DirectoryPrompt(r.options.Skills.Directory())
+			modules.ActiveSkills = append(modules.ActiveSkills, runtime.ActivePrompts...)
+			model = runtime.Model
+		}
+		environment, err := prompt.CollectEnvironment(promptMode, visibleRegistry, r.options.Workspace, r.options.Clock)
 		if err != nil {
 			summary := &Summary{Reason: StopStreamError, Iterations: iterations - 1, Usage: total, Partial: hasPartial}
 			terminal(Event{Type: EventFailed, Iteration: iterations, Phase: PhaseFinishing, Summary: summary, Err: err})
@@ -197,7 +260,7 @@ func (r *Runner) run(ctx context.Context, mode Mode, prepared preparedRequest, e
 			Mode:            promptMode,
 			Iteration:       iterations,
 			InjectionPolicy: r.options.Injection,
-			OptionalModules: r.options.OptionalModules,
+			OptionalModules: modules,
 		})
 		if err != nil {
 			summary := &Summary{Reason: StopStreamError, Iterations: iterations - 1, Usage: total, Partial: hasPartial}
@@ -209,7 +272,7 @@ func (r *Runner) run(ctx context.Context, mode Mode, prepared preparedRequest, e
 		for {
 			roundCtx, cancelRound := context.WithCancel(ctx)
 			stream, done := r.provider.Stream(roundCtx, provider.ChatRequest{
-				Prompt:   bundle,
+				Model: model, Prompt: bundle,
 				Messages: messages, MaxTokens: r.options.MaxTokens, Thinking: r.options.Thinking,
 				Tools: definitions,
 			})
@@ -297,7 +360,7 @@ func (r *Runner) run(ctx context.Context, mode Mode, prepared preparedRequest, e
 			terminal(cancelledEvent(iterations-1, total, hasPartial))
 			return
 		}
-		scheduler := NewScheduler(prepared.registry, r.executor, r.options.Permissions, r.options.Confirmer)
+		scheduler := NewScheduler(visibleRegistry, r.executor, r.options.Permissions, r.options.Confirmer)
 		results, err := scheduler.Execute(ctx, round.ToolCalls, func(event Event) bool {
 			event.Iteration = iterations
 			return emit(event)
@@ -331,7 +394,7 @@ func (r *Runner) run(ctx context.Context, mode Mode, prepared preparedRequest, e
 		}
 		unknownLimit := false
 		for _, call := range round.ToolCalls {
-			if _, ok := prepared.registry.Get(call.Name); ok {
+			if _, ok := visibleRegistry.Get(call.Name); ok {
 				unknownCount = 0
 			} else {
 				unknownCount++

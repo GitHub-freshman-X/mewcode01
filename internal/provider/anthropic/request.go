@@ -55,6 +55,9 @@ type requestTool struct {
 }
 
 func buildRequest(model string, req provider.ChatRequest) (requestBody, error) {
+	if strings.TrimSpace(req.Model) != "" {
+		model = req.Model
+	}
 	body := requestBody{Model: model, MaxTokens: req.MaxTokens, Stream: true}
 	if req.Thinking.Enabled {
 		body.Thinking = &thinkingConfig{Type: "enabled", BudgetTokens: req.Thinking.BudgetTokens}

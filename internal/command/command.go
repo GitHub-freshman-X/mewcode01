@@ -7,6 +7,7 @@ import (
 	"github.com/GitHub-freshman-X/mewcode01/internal/agent"
 	"github.com/GitHub-freshman-X/mewcode01/internal/logging"
 	"github.com/GitHub-freshman-X/mewcode01/internal/provider"
+	"github.com/GitHub-freshman-X/mewcode01/internal/skills"
 )
 
 type Kind string
@@ -72,11 +73,17 @@ type MemoryService interface {
 	Clear() error
 }
 
+type SkillService interface {
+	ReloadSkills() error
+	SkillDirectory() []skills.Metadata
+}
+
 type CommandContext struct {
 	Context  context.Context
 	UI       UIController
 	Sessions SessionService
 	Memory   MemoryService
+	Skills   SkillService
 	Logger   *logging.Logger
 	Args     string
 }

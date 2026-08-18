@@ -11,6 +11,7 @@ import (
 	"github.com/GitHub-freshman-X/mewcode01/internal/permissions"
 	"github.com/GitHub-freshman-X/mewcode01/internal/prompt"
 	"github.com/GitHub-freshman-X/mewcode01/internal/provider"
+	"github.com/GitHub-freshman-X/mewcode01/internal/skills"
 )
 
 type Mode string
@@ -25,6 +26,12 @@ const (
 type Request struct {
 	Mode   Mode
 	Prompt string
+	Skill  *SkillInvocation
+}
+
+type SkillInvocation struct {
+	Name string
+	Args string
 }
 
 const (
@@ -47,6 +54,7 @@ type Options struct {
 	Confirmer       PermissionBridge
 	Context         contextmanager.Config
 	Logger          *logging.Logger
+	Skills          *skills.Manager
 }
 
 type PermissionBridge interface {

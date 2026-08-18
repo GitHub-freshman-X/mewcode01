@@ -35,6 +35,9 @@ type toolObject struct {
 }
 
 func buildRequest(model string, req provider.ChatRequest) (requestBody, error) {
+	if strings.TrimSpace(req.Model) != "" {
+		model = req.Model
+	}
 	body := requestBody{Model: model, MaxOutputTokens: req.MaxTokens, Stream: true}
 	for _, tool := range req.Tools {
 		body.Tools = append(body.Tools, toolObject{Type: "function", Name: tool.Name, Description: tool.Description, Parameters: tool.Schema})

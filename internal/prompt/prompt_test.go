@@ -118,10 +118,10 @@ func TestOptionalModules(t *testing.T) {
 	if got, want := modules[len(modules)-3].Key, ModuleCustom; got != want {
 		t.Fatalf("first optional key = %q, want %q", got, want)
 	}
-	if got, want := modules[len(modules)-2].Key, ModuleSkills; got != want {
+	if got, want := modules[len(modules)-2].Key, ModuleMemory; got != want {
 		t.Fatalf("second optional key = %q, want %q", got, want)
 	}
-	if got, want := modules[len(modules)-1].Key, ModuleMemory; got != want {
+	if got, want := modules[len(modules)-1].Key, ModuleSkills; got != want {
 		t.Fatalf("third optional key = %q, want %q", got, want)
 	}
 	if !strings.Contains(withOptions.StableSystem, "custom one") ||

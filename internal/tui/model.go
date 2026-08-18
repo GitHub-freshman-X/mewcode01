@@ -72,8 +72,19 @@ func NewModelWithPermissions(runner *agent.Runner, session *conversation.Session
 	vp := viewport.New(viewport.WithWidth(80), viewport.WithHeight(16))
 	vp.SoftWrap = true
 	m := &Model{runner: runner, session: session, permissionBridge: bridge, textarea: input, viewport: vp, width: 80, height: 20, autoFollow: true, ctx: context.Background(), commands: command.DefaultRegistry()}
+	m.RefreshCommands()
 	m.refreshContent()
 	return m
+}
+
+func (m *Model) RefreshCommands() {
+	if m.runner == nil {
+		return
+	}
+	commands := append(command.DefaultCommands(), command.SkillCommands(m.runner.SkillDirectory())...)
+	if registry, err := command.NewRegistry(commands...); err == nil {
+		m.commands = registry
+	}
 }
 
 func (m *Model) AddSystemMessage(message string) {
@@ -185,6 +196,7 @@ func (m *Model) New(context.Context) error {
 	if err := m.runner.ReplaceSession(session, meta.ID); err != nil {
 		return err
 	}
+	m.runner.ClearSkillActivations()
 	m.session, m.current, m.systemMessages, m.planMode = session, taskView{}, nil, false
 	m.systemMessageEpoch++
 	return nil
@@ -202,6 +214,7 @@ func (m *Model) Resume(_ context.Context, id string) error {
 	if err := m.runner.ReplaceSession(session, meta.ID); err != nil {
 		return err
 	}
+	m.runner.ClearSkillActivations()
 	m.session, m.current, m.systemMessages, m.planMode = session, taskView{}, nil, false
 	m.systemMessageEpoch++
 	return nil

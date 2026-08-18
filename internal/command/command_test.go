@@ -7,6 +7,7 @@ import (
 
 	"github.com/GitHub-freshman-X/mewcode01/internal/agent"
 	"github.com/GitHub-freshman-X/mewcode01/internal/provider"
+	"github.com/GitHub-freshman-X/mewcode01/internal/skills"
 )
 
 func TestRegistryRejectsConflicts(t *testing.T) {
@@ -69,13 +70,18 @@ func (s fakeSessions) Delete(string) error                  { return nil }
 func TestDispatchLocalAndPrompt(t *testing.T) {
 	u := &fakeUI{}
 	ctx := CommandContext{Context: context.Background(), UI: u}
-	if err := Dispatch(DefaultRegistry(), Parse("/help"), ctx); err != nil || len(u.messages) != 1 || len(u.requests) != 0 {
+	commands := append(DefaultCommands(), SkillCommands([]skills.Metadata{skills.Builtins()[1].Metadata})...)
+	registry, err := NewRegistry(commands...)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := Dispatch(registry, Parse("/help"), ctx); err != nil || len(u.messages) != 1 || len(u.requests) != 0 {
 		t.Fatalf("help messages=%v requests=%v err=%v", u.messages, u.requests, err)
 	}
-	if err := Dispatch(DefaultRegistry(), Parse("/review concurrency"), ctx); err != nil || len(u.requests) != 1 || u.requests[0].Mode != agent.ModeAct || !strings.Contains(u.requests[0].Prompt, "concurrency") {
+	if err := Dispatch(registry, Parse("/review concurrency"), ctx); err != nil || len(u.requests) != 1 || u.requests[0].Skill == nil || u.requests[0].Skill.Name != "review" || u.requests[0].Skill.Args != "concurrency" {
 		t.Fatalf("review=%+v err=%v", u.requests, err)
 	}
-	if err := Dispatch(DefaultRegistry(), Parse("/plan task"), ctx); err != nil || !u.plan || len(u.requests) != 2 || u.requests[1].Mode != agent.ModePlan {
+	if err := Dispatch(registry, Parse("/plan task"), ctx); err != nil || !u.plan || len(u.requests) != 2 || u.requests[1].Mode != agent.ModePlan {
 		t.Fatalf("plan=%+v mode=%v err=%v", u.requests, u.plan, err)
 	}
 }

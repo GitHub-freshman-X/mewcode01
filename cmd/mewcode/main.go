@@ -25,6 +25,7 @@ import (
 	"github.com/GitHub-freshman-X/mewcode01/internal/prompt"
 	"github.com/GitHub-freshman-X/mewcode01/internal/provider"
 	"github.com/GitHub-freshman-X/mewcode01/internal/provider/factory"
+	"github.com/GitHub-freshman-X/mewcode01/internal/skills"
 	"github.com/GitHub-freshman-X/mewcode01/internal/tools"
 	"github.com/GitHub-freshman-X/mewcode01/internal/tui"
 )
@@ -139,6 +140,11 @@ func run(args []string, stderr io.Writer) int {
 		}
 	}()
 	manager.ConnectAndRegister(context.Background(), registry, cfg.MCPServers)
+	skillManager, err := skills.NewManager(skills.DiscoverOptions{ProjectDir: filepath.Join(root, ".mewcode", "skills"), UserDir: filepath.Join(configRoot, "mewcode", "skills"), ToolNames: registry.Names()})
+	if err != nil {
+		fmt.Fprintln(stderr, "skills:", err)
+		return 1
+	}
 	paths, err := permissionFilePaths(root)
 	if err != nil {
 		fmt.Fprintln(stderr, err)
@@ -173,6 +179,7 @@ func run(args []string, stderr io.Writer) int {
 		Confirmer:       bridge,
 		Context:         agentContextConfig(cfg.Agent.Context),
 		Logger:          logger,
+		Skills:          skillManager,
 		OptionalModules: prompt.OptionalModules{CustomInstructions: nonEmpty(customInstructions), LongTermMemory: memoryIndexes},
 		Memory: memory.NewService(memoryPaths, memory.ServiceOptions{
 			Caller: providerMemoryCaller{provider: p}, Sessions: memorySessionLister{store: sessionStore}, Logger: logger,
