@@ -128,11 +128,11 @@ EOF
 
 通过条件：新会话仍可从 `/help` 看到 `/read-alpha`，但不会继承上一会话的已激活 SOP 或参数。重复 `/session new`、`/session resume <id>` 时也应遵循同一规则。
 
-## 场景 F：fork 独立审查
+## 场景 F：fork 独立执行
 
-在 fixture 中初始化一个 Git 变更后执行 `/review`。完成实现后通过条件：fork 请求按 `context: none` 不携带主会话消息；主会话只追加最终审查摘要，Token 用量仍增加；取消或失败不得生成伪摘要。
+在 fixture 中新增 `mode: fork, context: none` 的 `isolated-review` Skill 并执行。完成实现后通过条件：fork 请求不携带主会话消息；主会话只追加最终审查摘要，Token 用量仍增加；取消或失败不得生成伪摘要。
 
-通过条件：不会出现“fork skills are not implemented”；中间工具调用和回复不会写入主会话；完成后主会话只显示 `/review` 与最终审查摘要。
+通过条件：不会出现“fork skills are not implemented”；中间工具调用和回复不会写入主会话；完成后主会话只显示 `/isolated-review` 与最终审查摘要。内置 `/review` 默认使用 inline，以保留当前对话中的需求与偏好。
 
 ## 结果记录模板
 

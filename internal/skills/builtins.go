@@ -10,7 +10,7 @@ func Builtins() []Skill {
 分析当前工作区变更，拟定准确、简洁的英文 Conventional Commit message。先检查状态和 diff，避免提交密钥、凭据或无关文件。根据用户补充要求调整提交范围与信息：{{args}}`,
 		},
 		{
-			Metadata: Metadata{Name: "review", Description: "独立审查当前代码变更并报告可操作问题。", Mode: ModeFork, Context: ContextNone},
+			Metadata: Metadata{Name: "review", Description: "结合当前对话审查代码变更并报告可操作问题。", Mode: ModeInline},
 			Path:     "builtin:review",
 			Body: `# 代码审查
 

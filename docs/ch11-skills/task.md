@@ -32,7 +32,7 @@
 
 1. 定义 Skill、Metadata、Catalog、Activation、Snapshot、Runtime、执行模式及历史范围类型与默认值。
 2. 定义名称、模式和历史范围的合法取值校验。
-3. 将 `commit`、`review`、`test` 样板以最低优先级内置来源提供，正文使用可读的 SOP，元信息包含名称和说明。
+3. 将 `commit`、`review`、`test` 样板以最低优先级内置来源提供，正文使用可读的 SOP，元信息包含名称和说明；三个内置样板均采用 inline，特别是 `review` 必须保留当前对话中的需求和偏好。
 4. 确保内置样板不依赖工作区文件且不包含密钥、用户参数或运行时结果。
 
 **验证：** `go test ./internal/skills` 编译通过；在既有 `internal/agent/runner_test.go` 中断言三个样板被发现。

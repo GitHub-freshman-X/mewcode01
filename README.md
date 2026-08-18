@@ -95,7 +95,7 @@ OpenAI Responses API 不支持 `thinking` 配置。配置字段会被严格校�
 | `/session [list\|new\|resume <id>\|delete <id>]` | 管理会话（别名：`/s`）。 |
 | `/memory [list\|add <类别> <内容>\|clear]` | 管理记忆（别名：`/m`）。 |
 | `/status` | 查看当前状态和会话 Token 用量。 |
-| `/review [关注点]` | 让 Agent 审查当前 Git diff（别名：`/r`）。 |
+| `/review [关注点]` | 让 Agent 结合当前对话中的需求与偏好审查当前 Git diff（别名：`/r`）。 |
 | `/exit` | 空闲时退出 MewCode。 |
 
 `/plan` 模式仅提供只读探索能力；`/do` 恢复完整工具权限并执行当前会话中累积的计划。普通文本输入会启动 Agent Loop，模型可以在权限规则和交互确认的约束内持续调用工具，直到产出最终回答或到达停止边界。

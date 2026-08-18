@@ -8,7 +8,7 @@
 
 `LoadSkill` 是由 Skill Manager 适配为 `tools.Tool` 的系统级工具。它被固定添加到每一轮工具视图，执行时激活指定 Skill 并返回安全的名称、模式与说明；下一轮模型请求才看到完整 SOP。该顺序避免在同一轮内改变已发送的 prompt 与工具定义。
 
-命令层从静态默认命令改为“内置命令 + 当前 Skill 命令”的可替换注册表。TUI 持有 Skill 服务，`/skills reload` 调用原子刷新并替换命令表；`/commit` 等 Skill 命令构造带 Skill 名称和参数的 Agent 请求。创建、恢复或清空会话时清除激活状态，不影响已发现的 Skill。
+命令层从静态默认命令改为“内置命令 + 当前 Skill 命令”的可替换注册表。TUI 持有 Skill 服务，`/skills reload` 调用原子刷新并替换命令表；`/commit`、`/review`、`/test` 默认以 inline 方式构造带 Skill 名称和参数的 Agent 请求，以保留已讨论的需求与偏好。创建、恢复或清空会话时清除激活状态，不影响已发现的 Skill。
 
 fork 模式由 Runner 建立临时、独立的会话快照执行。它不复用主会话，也不向主会话写入执行轮次；完成后 Runner 将最终文本整理为一个摘要回写主会话。历史范围决定临时会话的初始消息集：`full` 使用主历史完整快照，`recent` 使用最近五条消息，`none` 使用空历史。
 
@@ -159,7 +159,7 @@ type SkillInvocation struct {
 
 **职责：** 在所有本地工具和 MCP 工具注册完成后创建 Skill Manager，传入完整工具目录和项目/用户路径；将其注入 Runner 和 TUI。通过 `embed` 或稳定的内置来源提供 `commit`、`review`、`test` 三项样板。
 
-**文档：** 根 `README.md` 新增 Skill 目录、frontmatter、触发方式、`/skills reload` 和样板说明；`.mewcode/config.example.yaml` 无本章新增配置项，补充说明 Skill 路径与无需配置的默认行为；`docs/README.md` 增加 ch11 索引。
+**文档：** 根 `README.md` 新增 Skill 目录、frontmatter、触发方式、`/skills reload` 和样板说明，并说明内置 `/review` 默认 inline；`.mewcode/config.example.yaml` 无本章新增配置项，补充说明 Skill 路径与无需配置的默认行为；`docs/README.md` 增加 ch11 索引。
 
 ## 模块交互
 

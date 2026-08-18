@@ -145,6 +145,15 @@ func TestRunnerForkSkillReturnsOnlyFinalSummaryToMainSession(t *testing.T) {
 	}
 }
 
+func TestBuiltinReviewUsesInlineMode(t *testing.T) {
+	for _, skill := range skills.Builtins() {
+		if skill.Name == "review" && skill.Mode == skills.ModeInline {
+			return
+		}
+	}
+	t.Fatal("review builtin should use inline mode")
+}
+
 func TestRunnerInjectsOptionalModulesIntoFirstPrompt(t *testing.T) {
 	p := &scriptedProvider{rounds: []scriptedRound{textRound("done", provider.Usage{})}}
 	runner, _ := testRunner(t, p, Options{OptionalModules: prompt.OptionalModules{

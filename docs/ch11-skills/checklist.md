@@ -49,4 +49,4 @@
 
 - [ ] 自动加载：启动后输入“帮我提交当前变更”，模型先看到轻量目录、调用 `load_skill("commit")`，下一轮按 commit SOP 继续，未激活 Skill 正文不出现。（验证：脚本 Provider 记录完整请求序列。）
 - [ ] 显式调用与刷新：在项目级目录新增带 `{{args}}` 的 inline Skill，执行 `/skills reload` 后输入 `/skill-name 额外要求`；下一请求出现替换后的 SOP。将文件改为非法后再次刷新，旧命令和已激活 SOP 仍可用。（验证：TUI 集成测试或手工场景记录。）
-- [ ] 独立审查：执行 `mode: fork, context: none` 的 review Skill；独立请求不包含主历史，主会话最终仅新增审查摘要，Token 用量增加。（验证：预置主会话并比较请求及 Session history。）
+- [ ] 独立执行：执行 `mode: fork, context: none` 的自定义 Skill；独立请求不包含主历史，主会话最终仅新增摘要，Token 用量增加。内置 `/review` 默认使用 inline。（验证：预置主会话并比较请求及 Session history。）
