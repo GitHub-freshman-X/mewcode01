@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"reflect"
+	"regexp"
 	"strings"
 	"testing"
 	"time"
@@ -18,6 +19,10 @@ import (
 )
 
 type tuiScriptedProvider struct{}
+
+var ansiEscape = regexp.MustCompile(`\x1b\[[0-9;]*m`)
+
+func stripANSI(value string) string { return ansiEscape.ReplaceAllString(value, "") }
 
 func (tuiScriptedProvider) Stream(_ context.Context, _ provider.ChatRequest) (<-chan provider.StreamEvent, <-chan error) {
 	events := make(chan provider.StreamEvent, 3)
@@ -113,7 +118,7 @@ func TestSystemMessageFollowsCurrentCommand(t *testing.T) {
 	m.current = taskView{prompt: "/do", terminalTy: agent.EventFailed, err: errors.New("no valid plan")}
 	m.systemMessages = []systemMessage{{content: "错误: no valid plan", after: -1}}
 	m.refreshContent()
-	view := m.View().Content
+	view := stripANSI(m.View().Content)
 	if strings.Index(view, "/do") > strings.Index(view, "错误: no valid plan") {
 		t.Fatalf("system message precedes command: %q", view)
 	}
@@ -136,7 +141,7 @@ func TestSystemMessageStaysBetweenConversationTurns(t *testing.T) {
 		t.Fatal(err)
 	}
 	m.refreshContent()
-	view := m.View().Content
+	view := stripANSI(m.View().Content)
 	first := strings.Index(view, "first assistant")
 	feedback := strings.Index(view, "command feedback")
 	second := strings.Index(view, "second user")
@@ -167,7 +172,7 @@ func TestLocalCommandAndFeedbackStayBetweenConversationTurns(t *testing.T) {
 		t.Fatal(err)
 	}
 	m.refreshContent()
-	view := m.View().Content
+	view := stripANSI(m.View().Content)
 	first := strings.Index(view, "first assistant")
 	commandText := strings.Index(view, "\n/help")
 	feedback := strings.Index(view, "可用命令:")
@@ -283,6 +288,185 @@ func TestViewDoesNotDuplicatePersistedToolOutputFromActiveTask(t *testing.T) {
 	}
 	if got := strings.Count(view, "工具结果: read_file 成功"); got != 1 {
 		t.Fatalf("tool results=%d view=%q", got, view)
+	}
+}
+
+func TestMessageBackgroundStyles(t *testing.T) {
+	var b strings.Builder
+	renderMessage(&b, provider.Message{Role: provider.RoleUser, Blocks: []provider.ContentBlock{{Type: provider.BlockText, Text: "question"}}}, false, false)
+	renderMessage(&b, provider.Message{Role: provider.RoleAssistant, Blocks: []provider.ContentBlock{
+		{Type: provider.BlockText, Text: "answer"},
+		{Type: provider.BlockThinking, Text: "reasoning"},
+		{Type: provider.BlockToolCall, ToolCall: &provider.ToolCall{Name: "read_file"}},
+	}}, false, true)
+	renderMessage(&b, provider.Message{Role: provider.RoleUser, Blocks: []provider.ContentBlock{
+		{Type: provider.BlockToolResult, ToolResult: &provider.ToolResult{Name: "read_file", Content: "ok"}},
+		{Type: provider.BlockToolResult, ToolResult: &provider.ToolResult{Name: "write_file", Content: "denied", IsError: true}},
+	}}, false, false)
+	renderMessage(&b, provider.Message{Role: provider.RoleAssistant, Blocks: []provider.ContentBlock{{Type: provider.BlockText, Text: "final answer"}}}, false, false)
+	content := b.String()
+	for _, expected := range []string{
+		userStyle.Render("你"),
+		userMessageStyle.Render("question"),
+		assistantProgressStyle.Render("MewCode"),
+		assistantProgressMsgStyle.Render("answer"),
+		thinkingStyle.Render("思考\nreasoning"),
+		toolCallStyle.Render("工具调用: read_file"),
+		userStyle.Render("你"),
+		toolResultStyle.Render("工具结果: read_file 成功\nok"),
+		toolErrorStyle.Render("工具结果: write_file 失败\ndenied"),
+		assistantStyle.Render("MewCode"),
+		assistantMsgStyle.Render("final answer"),
+	} {
+		if !strings.Contains(content, expected) {
+			t.Fatalf("message style is missing %q from %q", expected, content)
+		}
+	}
+	if userMessageStyle.Render("question") == toolResultStyle.Render("ok") || assistantMsgStyle.Render("final answer") == toolResultStyle.Render("ok") {
+		t.Fatal("message categories do not use the expected styles")
+	}
+}
+
+func TestSystemMessageAndErrorUseBackgroundStyles(t *testing.T) {
+	m := NewModel(nil, conversation.NewSession())
+	m.AddSystemMessage("feedback")
+	if view := m.renderCurrentContent(); !strings.Contains(view, assistantMsgStyle.Render("feedback")) {
+		t.Fatalf("system message lacks assistant background: %q", view)
+	}
+	m.current = taskView{terminalTy: agent.EventFailed, err: errors.New("boom")}
+	if view := m.renderCurrentContent(); !strings.Contains(view, errorStyle.Render("错误: "+provider.UserError(m.current.err))) {
+		t.Fatalf("error lacks background: %q", view)
+	}
+}
+
+func TestActiveMessageBackgroundStyles(t *testing.T) {
+	m := NewModel(nil, conversation.NewSession())
+	m.task = &agent.Task{}
+	m.current = taskView{
+		prompt:     "question",
+		text:       "partial answer",
+		toolCalls:  []provider.ToolCall{{Name: "read_file"}},
+		toolResult: []provider.ToolResult{{Name: "read_file", Content: "ok"}},
+	}
+	view := m.renderCurrentContent()
+	for _, expected := range []string{
+		userMessageStyle.Render("question"),
+		assistantProgressMsgStyle.Render("partial answer"),
+		toolCallStyle.Render("工具调用: read_file"),
+		toolResultStyle.Render("工具结果: read_file 成功"),
+	} {
+		if !strings.Contains(view, expected) {
+			t.Fatalf("active message style is missing %q from %q", expected, view)
+		}
+	}
+}
+
+func TestClearPreservesDisplayAndStartsNewSessionBoundary(t *testing.T) {
+	m, previous := newPersistentTUIModel(t)
+	commitTUIRound(t, previous, "old user", "old assistant")
+	m.textarea.SetValue("/clear")
+	m.Update(tea.KeyPressMsg{Text: keySubmit})
+
+	view := stripANSI(m.View().Content)
+	boundary := "会话开始 · " + m.runner.SessionID() + " · （空会话）"
+	if old, marker, commandText := strings.Index(view, "old assistant"), strings.Index(view, boundary), strings.Index(view, "/clear"); old < 0 || marker < 0 || commandText < 0 || !(old < marker && marker < commandText) {
+		t.Fatalf("clear boundary order is wrong: %q", view)
+	}
+	if len(previous.Snapshot()) != 2 || len(m.session.Snapshot()) != 0 || len(m.session.DisplaySnapshot()) != 0 {
+		t.Fatalf("session display leaked into history: previous=%d current=%d display=%d", len(previous.Snapshot()), len(m.session.Snapshot()), len(m.session.DisplaySnapshot()))
+	}
+}
+
+func TestSessionNewPreservesDisplayAndStartsNewSessionBoundary(t *testing.T) {
+	m, previous := newPersistentTUIModel(t)
+	commitTUIRound(t, previous, "old user", "old assistant")
+	m.textarea.SetValue("/session new")
+	m.Update(tea.KeyPressMsg{Text: keySubmit})
+
+	view := stripANSI(m.View().Content)
+	boundary := "会话开始 · " + m.runner.SessionID() + " · （空会话）"
+	if old, marker, commandText := strings.Index(view, "old assistant"), strings.Index(view, boundary), strings.Index(view, "/session new"); old < 0 || marker < 0 || commandText < 0 || !(old < marker && marker < commandText) {
+		t.Fatalf("session new boundary order is wrong: %q", view)
+	}
+	if len(previous.Snapshot()) != 2 || len(m.session.Snapshot()) != 0 {
+		t.Fatalf("session switch changed history: previous=%d current=%d", len(previous.Snapshot()), len(m.session.Snapshot()))
+	}
+}
+
+func TestConsecutiveSessionSwitchesKeepEveryBoundary(t *testing.T) {
+	m, previous := newPersistentTUIModel(t)
+	m.Update(tea.WindowSizeMsg{Width: 160, Height: 200})
+	commitTUIRound(t, previous, "first user", "first assistant")
+	m.textarea.SetValue("/clear")
+	m.Update(tea.KeyPressMsg{Text: keySubmit})
+	firstNewID := m.runner.SessionID()
+	commitTUIRound(t, m.session, "second user", "second assistant")
+	m.textarea.SetValue("/clear")
+	m.Update(tea.KeyPressMsg{Text: keySubmit})
+
+	view := stripANSI(m.View().Content)
+	firstBoundary := "会话开始 · " + firstNewID + " · （空会话）"
+	secondBoundary := "会话开始 · " + m.runner.SessionID() + " · （空会话）"
+	if first, firstMarker, second, secondMarker := strings.Index(view, "first assistant"), strings.Index(view, firstBoundary), strings.Index(view, "second assistant"), strings.Index(view, secondBoundary); first < 0 || firstMarker < 0 || second < 0 || secondMarker < 0 || !(first < firstMarker && firstMarker < second && second < secondMarker) {
+		t.Fatalf("consecutive boundaries are missing or out of order: %q", view)
+	}
+}
+
+func TestSessionResumePreservesDisplayAndStartsSessionBoundary(t *testing.T) {
+	m, previous := newPersistentTUIModel(t)
+	commitTUIRound(t, previous, "old user", "old assistant")
+	store := m.runner.SessionStore()
+	restored, meta, err := store.Create()
+	if err != nil {
+		t.Fatal(err)
+	}
+	commitTUIRound(t, restored, "restored user", "restored assistant")
+	m.textarea.SetValue("/session resume " + meta.ID)
+	m.Update(tea.KeyPressMsg{Text: keySubmit})
+
+	view := stripANSI(m.View().Content)
+	boundary := "会话开始 · " + meta.ID + " · restored user"
+	if old, marker, restoredText := strings.Index(view, "old assistant"), strings.Index(view, boundary), strings.Index(view, "restored assistant"); old < 0 || marker < 0 || restoredText < 0 || !(old < marker && marker < restoredText) {
+		t.Fatalf("session resume boundary order is wrong: %q", view)
+	}
+	if len(previous.Snapshot()) != 2 || len(m.session.Snapshot()) != 2 || len(m.session.DisplaySnapshot()) != 2 {
+		t.Fatalf("session boundary leaked into history: previous=%d current=%d display=%d", len(previous.Snapshot()), len(m.session.Snapshot()), len(m.session.DisplaySnapshot()))
+	}
+}
+
+func TestFailedSessionResumeDoesNotCreateBoundary(t *testing.T) {
+	m, previous := newPersistentTUIModel(t)
+	commitTUIRound(t, previous, "old user", "old assistant")
+	if err := m.Resume(context.Background(), "invalid"); err == nil {
+		t.Fatal("invalid session ID was accepted")
+	}
+	if m.session != previous || len(m.historySegments) != 0 || m.sessionBoundary != nil {
+		t.Fatalf("failed resume changed display state: session=%p previous=%p history=%v boundary=%+v", m.session, previous, m.historySegments, m.sessionBoundary)
+	}
+}
+
+func newPersistentTUIModel(t *testing.T) (*Model, *conversation.Session) {
+	t.Helper()
+	store := conversation.NewSessionStore(t.TempDir())
+	session, meta, err := store.Create()
+	if err != nil {
+		t.Fatal(err)
+	}
+	registry, err := tools.NewDefaultRegistry(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	runner := agent.NewRunner(tuiScriptedProvider{}, session, registry, tools.NewExecutor(time.Second), agent.Options{SessionStore: store, SessionID: meta.ID})
+	return NewModel(runner, session), session
+}
+
+func commitTUIRound(t *testing.T, session *conversation.Session, user, assistant string) {
+	t.Helper()
+	if err := session.CommitRound(
+		&provider.Message{Role: provider.RoleUser, Blocks: []provider.ContentBlock{{Type: provider.BlockText, Text: user}}},
+		provider.Message{Role: provider.RoleAssistant, Blocks: []provider.ContentBlock{{Type: provider.BlockText, Text: assistant}}}, nil,
+	); err != nil {
+		t.Fatal(err)
 	}
 }
 

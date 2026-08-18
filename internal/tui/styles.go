@@ -6,12 +6,32 @@ import (
 )
 
 var (
-	userStyle      = lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("12"))
-	assistantStyle = lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("10"))
-	thinkingStyle  = lipgloss.NewStyle().Foreground(lipgloss.Color("8")).Italic(true)
-	errorStyle     = lipgloss.NewStyle().Foreground(lipgloss.Color("9"))
-	statusStyle    = lipgloss.NewStyle().Foreground(lipgloss.Color("8"))
+	userStyle                 = lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("15")).Background(lipgloss.Color("24"))
+	userMessageStyle          = lipgloss.NewStyle().Foreground(lipgloss.Color("15")).Background(lipgloss.Color("24"))
+	assistantStyle            = lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("15")).Background(lipgloss.Color("28"))
+	assistantMsgStyle         = lipgloss.NewStyle().Foreground(lipgloss.Color("15")).Background(lipgloss.Color("28"))
+	assistantProgressStyle    = assistantStyle
+	assistantProgressMsgStyle = assistantMsgStyle
+	thinkingStyle             = lipgloss.NewStyle().Foreground(lipgloss.Color("15")).Background(lipgloss.Color("238")).Italic(true)
+	toolCallStyle             = lipgloss.NewStyle().Foreground(lipgloss.Color("15")).Background(lipgloss.Color("237"))
+	toolResultStyle           = lipgloss.NewStyle().Foreground(lipgloss.Color("15")).Background(lipgloss.Color("236"))
+	toolErrorStyle            = lipgloss.NewStyle().Foreground(lipgloss.Color("15")).Background(lipgloss.Color("52"))
+	errorStyle                = lipgloss.NewStyle().Foreground(lipgloss.Color("15")).Background(lipgloss.Color("52"))
+	sessionMarkerStyle        = lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("0")).Background(lipgloss.Color("14"))
+	statusStyle               = lipgloss.NewStyle().Foreground(lipgloss.Color("8"))
 )
+
+func displaySessionTitle(title string) string {
+	const limit = 48
+	if title == "" {
+		return "（空会话）"
+	}
+	runes := []rune(title)
+	if len(runes) <= limit {
+		return title
+	}
+	return string(runes[:limit]) + "…"
+}
 
 func inputStyles() textarea.Styles {
 	styles := textarea.DefaultDarkStyles()

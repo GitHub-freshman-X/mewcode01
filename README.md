@@ -82,6 +82,7 @@ OpenAI Responses API 不支持 `thinking` 配置。配置字段会被严格校�
 - `Tab`：补全斜杠命令。
 - `Ctrl+T`：展开或折叠 Claude thinking 内容。
 - `Ctrl+C`：生成中取消当前任务；空闲时退出。
+- 消息区以背景色区分用户消息、最终答复及思考和工具过程；执行 `/clear`、`/session new` 或 `/session resume` 后会显示带会话 ID 与标题的分隔条，方便在同一终端的滚动历史中定位会话起点。
 
 ### 斜杠命令
 

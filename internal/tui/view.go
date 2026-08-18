@@ -20,6 +20,26 @@ func (m *Model) View() tea.View {
 func (m *Model) refreshContent() {
 	wasBottom := m.viewport.AtBottom()
 	var b strings.Builder
+	for _, segment := range m.historySegments {
+		if segment.content != "" {
+			fmt.Fprintln(&b, segment.content)
+			b.WriteString("\n")
+		}
+	}
+	if m.sessionBoundary != nil {
+		fmt.Fprintln(&b, renderSessionBoundary(*m.sessionBoundary))
+		b.WriteString("\n")
+	}
+	b.WriteString(m.renderCurrentContent())
+	m.viewport.SetContent(strings.TrimRight(b.String(), "\n"))
+	if m.autoFollow || wasBottom {
+		m.viewport.GotoBottom()
+		m.autoFollow = true
+	}
+}
+
+func (m *Model) renderCurrentContent() string {
+	var b strings.Builder
 	var messages []provider.Message
 	if m.session != nil {
 		messages = m.session.DisplaySnapshot()
@@ -55,7 +75,7 @@ func (m *Model) refreshContent() {
 			if _, ok := persistedCalls[call.ID]; ok {
 				continue
 			}
-			fmt.Fprintf(&b, "工具调用: %s\n", call.Name)
+			fmt.Fprintln(&b, toolCallStyle.Render("工具调用: "+call.Name))
 		}
 		for _, result := range m.current.toolResult {
 			if _, ok := persistedResults[result.CallID]; ok {
@@ -65,17 +85,21 @@ func (m *Model) refreshContent() {
 			if result.IsError {
 				status = "失败"
 			}
-			fmt.Fprintf(&b, "工具结果: %s %s\n", result.Name, status)
+			style := toolResultStyle
+			if result.IsError {
+				style = toolErrorStyle
+			}
+			fmt.Fprintln(&b, style.Render(fmt.Sprintf("工具结果: %s %s", result.Name, status)))
 		}
 		for _, compaction := range m.current.compactions {
 			if compaction.Error != "" {
-				fmt.Fprintf(&b, "上下文压缩: %s 失败: %s\n", compaction.Trigger, compaction.Error)
+				fmt.Fprintln(&b, toolErrorStyle.Render(fmt.Sprintf("上下文压缩: %s 失败: %s", compaction.Trigger, compaction.Error)))
 				continue
 			}
 			if compaction.BeforeTokens != 0 || compaction.AfterTokens != 0 {
-				fmt.Fprintf(&b, "上下文压缩: %s %d -> %d tokens\n", compaction.Trigger, compaction.BeforeTokens, compaction.AfterTokens)
+				fmt.Fprintln(&b, toolCallStyle.Render(fmt.Sprintf("上下文压缩: %s %d -> %d tokens", compaction.Trigger, compaction.BeforeTokens, compaction.AfterTokens)))
 			} else if len(compaction.Persisted) > 0 {
-				fmt.Fprintf(&b, "上下文压缩: 工具结果已持久化 %d 项\n", len(compaction.Persisted))
+				fmt.Fprintln(&b, toolCallStyle.Render(fmt.Sprintf("上下文压缩: 工具结果已持久化 %d 项", len(compaction.Persisted))))
 			}
 		}
 		if m.current.err != nil {
@@ -94,11 +118,7 @@ func (m *Model) refreshContent() {
 		}
 		fmt.Fprintln(&b, "操作: o 本次允许 · s 本会话允许 · p 永久允许 · d 拒绝 · Ctrl+C 取消")
 	}
-	m.viewport.SetContent(strings.TrimRight(b.String(), "\n"))
-	if m.autoFollow || wasBottom {
-		m.viewport.GotoBottom()
-		m.autoFollow = true
-	}
+	return strings.TrimRight(b.String(), "\n")
 }
 
 func displayedToolIDs(messages []provider.Message) (map[string]struct{}, map[string]struct{}) {
@@ -124,7 +144,7 @@ func renderSystemMessages(b *strings.Builder, messages []systemMessage, after in
 				renderMessage(b, provider.Message{Role: provider.RoleUser, Blocks: []provider.ContentBlock{{Type: provider.BlockText, Text: message.content}}}, false, false)
 				continue
 			}
-			fmt.Fprintf(b, "%s\n%s\n\n", assistantStyle.Render("系统"), message.content)
+			fmt.Fprintf(b, "%s\n%s\n\n", assistantStyle.Render("系统"), assistantMsgStyle.Render(message.content))
 		}
 	}
 }
@@ -134,15 +154,20 @@ func renderMessage(b *strings.Builder, message provider.Message, active, expande
 		return
 	}
 	label := userStyle.Render("你")
+	textStyle := userMessageStyle
 	if message.Role == provider.RoleAssistant {
-		label = assistantStyle.Render("MewCode")
+		if active || messageHasToolCall(message) {
+			label, textStyle = assistantProgressStyle.Render("MewCode"), assistantProgressMsgStyle
+		} else {
+			label, textStyle = assistantStyle.Render("MewCode"), assistantMsgStyle
+		}
 	}
 	fmt.Fprintf(b, "%s\n", label)
 	for _, block := range message.Blocks {
 		switch block.Type {
 		case provider.BlockText:
 			if block.Text != "" {
-				fmt.Fprintln(b, block.Text)
+				fmt.Fprintln(b, textStyle.Render(block.Text))
 			}
 		case provider.BlockThinking:
 			if block.Text == "" {
@@ -155,7 +180,7 @@ func renderMessage(b *strings.Builder, message provider.Message, active, expande
 			}
 		case provider.BlockToolCall:
 			if block.ToolCall != nil {
-				fmt.Fprintf(b, "工具调用: %s\n", block.ToolCall.Name)
+				fmt.Fprintln(b, toolCallStyle.Render("工具调用: "+block.ToolCall.Name))
 			}
 		case provider.BlockToolResult:
 			if block.ToolResult != nil {
@@ -167,11 +192,28 @@ func renderMessage(b *strings.Builder, message provider.Message, active, expande
 				if truncated {
 					content += "..."
 				}
-				fmt.Fprintf(b, "工具结果: %s %s\n%s\n", block.ToolResult.Name, status, content)
+				style := toolResultStyle
+				if block.ToolResult.IsError {
+					style = toolErrorStyle
+				}
+				fmt.Fprintln(b, style.Render(fmt.Sprintf("工具结果: %s %s\n%s", block.ToolResult.Name, status, content)))
 			}
 		}
 	}
 	b.WriteString("\n")
+}
+
+func messageHasToolCall(message provider.Message) bool {
+	for _, block := range message.Blocks {
+		if block.Type == provider.BlockToolCall && block.ToolCall != nil {
+			return true
+		}
+	}
+	return false
+}
+
+func renderSessionBoundary(boundary sessionBoundary) string {
+	return sessionMarkerStyle.Render(fmt.Sprintf("会话开始 · %s · %s", boundary.id, displaySessionTitle(boundary.title)))
 }
 
 func (m *Model) statusText() string {

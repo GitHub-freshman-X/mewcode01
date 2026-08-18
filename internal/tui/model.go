@@ -34,6 +34,13 @@ type systemMessage struct {
 	role    provider.Role
 }
 
+type displaySegment struct{ content string }
+
+type sessionBoundary struct {
+	id    string
+	title string
+}
+
 type Model struct {
 	runner                       *agent.Runner
 	session                      *conversation.Session
@@ -50,6 +57,8 @@ type Model struct {
 	planMode                     bool
 	systemMessages               []systemMessage
 	systemMessageEpoch           int
+	historySegments              []displaySegment
+	sessionBoundary              *sessionBoundary
 	completion                   []string
 	completionIndex              int
 	memoryClearPending           bool
@@ -196,9 +205,11 @@ func (m *Model) New(context.Context) error {
 	if err := m.runner.ReplaceSession(session, meta.ID); err != nil {
 		return err
 	}
+	m.archiveCurrentDisplay()
 	m.runner.ClearSkillActivations()
 	m.session, m.current, m.systemMessages, m.planMode = session, taskView{}, nil, false
 	m.systemMessageEpoch++
+	m.beginSessionDisplay(meta.ID, meta.Title)
 	return nil
 }
 
@@ -214,10 +225,29 @@ func (m *Model) Resume(_ context.Context, id string) error {
 	if err := m.runner.ReplaceSession(session, meta.ID); err != nil {
 		return err
 	}
+	m.archiveCurrentDisplay()
 	m.runner.ClearSkillActivations()
 	m.session, m.current, m.systemMessages, m.planMode = session, taskView{}, nil, false
 	m.systemMessageEpoch++
+	m.beginSessionDisplay(meta.ID, meta.Title)
 	return nil
+}
+
+func (m *Model) archiveCurrentDisplay() {
+	var content strings.Builder
+	if m.sessionBoundary != nil {
+		fmt.Fprintln(&content, renderSessionBoundary(*m.sessionBoundary))
+		content.WriteString("\n")
+	}
+	content.WriteString(m.renderCurrentContent())
+	value := strings.TrimSpace(content.String())
+	if value != "" {
+		m.historySegments = append(m.historySegments, displaySegment{content: value})
+	}
+}
+
+func (m *Model) beginSessionDisplay(id, title string) {
+	m.sessionBoundary = &sessionBoundary{id: id, title: title}
 }
 
 func (m *Model) Delete(id string) error {
