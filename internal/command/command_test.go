@@ -78,6 +78,9 @@ func TestDispatchLocalAndPrompt(t *testing.T) {
 	if err := Dispatch(registry, Parse("/help"), ctx); err != nil || len(u.messages) != 1 || len(u.requests) != 0 {
 		t.Fatalf("help messages=%v requests=%v err=%v", u.messages, u.requests, err)
 	}
+	if !strings.Contains(u.messages[0], "/review — 独立审查当前代码变更并报告可操作问题。") {
+		t.Fatalf("help=%q", u.messages[0])
+	}
 	if err := Dispatch(registry, Parse("/review concurrency"), ctx); err != nil || len(u.requests) != 1 || u.requests[0].Skill == nil || u.requests[0].Skill.Name != "review" || u.requests[0].Skill.Args != "concurrency" {
 		t.Fatalf("review=%+v err=%v", u.requests, err)
 	}

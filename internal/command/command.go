@@ -81,6 +81,7 @@ type SkillService interface {
 type CommandContext struct {
 	Context  context.Context
 	UI       UIController
+	Registry *Registry
 	Sessions SessionService
 	Memory   MemoryService
 	Skills   SkillService

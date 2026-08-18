@@ -76,7 +76,7 @@ func Dispatch(registry *Registry, invocation Invocation, ctx CommandContext) err
 		return nil
 	}
 	started := time.Now()
-	err := command.Handler(CommandContext{Context: ctx.Context, UI: ctx.UI, Sessions: ctx.Sessions, Memory: ctx.Memory, Logger: ctx.Logger, Args: invocation.Args})
+	err := command.Handler(CommandContext{Context: ctx.Context, UI: ctx.UI, Registry: registry, Sessions: ctx.Sessions, Memory: ctx.Memory, Skills: ctx.Skills, Logger: ctx.Logger, Args: invocation.Args})
 	if ctx.Logger != nil {
 		status := "completed"
 		if err != nil {
@@ -103,11 +103,15 @@ func helpList(registry *Registry) string {
 	return strings.TrimSpace(b.String())
 }
 func helpCommand(ctx CommandContext) error {
+	registry := ctx.Registry
+	if registry == nil {
+		registry = DefaultRegistry()
+	}
 	if ctx.Args == "" {
-		ctx.systemf("可用命令:\n%s", helpList(DefaultRegistry()))
+		ctx.systemf("可用命令:\n%s", helpList(registry))
 		return nil
 	}
-	c, ok := DefaultRegistry().Find(ctx.Args)
+	c, ok := registry.Find(ctx.Args)
 	if !ok {
 		ctx.systemf("未知命令 /%s", ctx.Args)
 		return nil
