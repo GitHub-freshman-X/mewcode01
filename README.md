@@ -18,6 +18,7 @@ MewCode 是一个使用 Go 构建的全屏终端 AI Agent。它可通过 Anthrop
 | [第 8 章：上下文](docs/ch08-context/spec.md) | 工具结果预算、会话摘要压缩、`/compact` 与上下文恢复。 |
 | [第 9 章：记忆与会话](docs/ch09-memory/spec.md) | JSONL 会话持久化、跨会话指令和记忆加载、自动记忆提取与治理。 |
 | [第 10 章：斜杠命令](docs/ch10-slash_command/spec.md) | 命令注册、解析、补全与十个内置命令。 |
+| [第 11 章：Skill](docs/ch11-skills/spec.md) | 项目级和用户级 Skill 发现、按需加载、动态命令、工具白名单及 inline/fork 执行模式。 |
 
 ## 快速开始
 
@@ -97,9 +98,36 @@ OpenAI Responses API 不支持 `thinking` 配置。配置字段会被严格校�
 | `/memory [list\|add <类别> <内容>\|clear]` | 管理记忆（别名：`/m`）。 |
 | `/status` | 查看当前状态和会话 Token 用量。 |
 | `/review [关注点]` | 让 Agent 结合当前对话中的需求与偏好审查当前 Git diff（别名：`/r`）。 |
+| `/skills reload` | 重新扫描 Skill，并更新可用的 Skill 命令。 |
+| `/commit [要求]` | 使用内置 Git 提交流程分析当前变更并创建提交。 |
+| `/test [要求]` | 使用内置测试流程识别并运行与当前变更相关的验证。 |
 | `/exit` | 空闲时退出 MewCode。 |
 
 `/plan` 模式仅提供只读探索能力；`/do` 恢复完整工具权限并执行当前会话中累积的计划。普通文本输入会启动 Agent Loop，模型可以在权限规则和交互确认的约束内持续调用工具，直到产出最终回答或到达停止边界。
+
+### Skill
+
+Skill 将可复用的 AI 操作流程保存为 Markdown 文件。启动时 MewCode 会从以下目录发现 Skill；同名时项目级定义优先于用户级定义，也可覆盖内置 Skill：
+
+- 项目级：`<项目根>/.mewcode/skills/`
+- 用户级：`<用户配置目录>/mewcode/skills/`
+
+Skill 可以是上述目录中的单个 Markdown 文件，或一个包含 `SKILL.md` 入口文件的子目录。目录中的模板、示例、脚本和参考资料可由 Skill 流程按需使用，但不会在发现阶段加载。入口文件使用 YAML frontmatter，正文是提供给模型的操作流程：
+
+```markdown
+---
+name: review-api
+description: 审查 API 变更并报告可操作问题。
+mode: inline
+tools: [read_file, search_code]
+---
+
+检查本次 API 变更，重点关注兼容性和错误处理。
+```
+
+`name` 只能包含小写字母、数字和连字符；`description` 必填。`mode` 默认为 `inline`，共享当前对话；设为 `fork` 时在独立对话执行，完成后只向主对话回流摘要。fork Skill 可用 `context: full`、`recent` 或 `none` 控制带入的主对话历史。`tools` 是可选白名单，只会缩小模型可见的工具范围，不会提升权限。正文中的 `{{args}}` 会在通过 `/skill-name 参数` 显式调用时替换为参数。
+
+MewCode 内置 `commit`、`review` 和 `test` 三个 inline Skill；已发现的任意 Skill 也会自动成为同名斜杠命令，并支持 `/help` 与 Tab 补全。普通对话中，模型会先看到 Skill 名称与说明，必要时通过 `load_skill` 按需加载完整流程。新增、修改或删除本地 Skill 后执行 `/skills reload`；若刷新失败，先前可用的 Skill、命令和已激活状态会保持不变。执行 `/clear` 或切换会话会清除已激活的 Skill。
 
 ## 本地文件、权限与安全
 

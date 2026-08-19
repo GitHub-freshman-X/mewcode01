@@ -59,6 +59,7 @@ func (c *Client) Stream(ctx context.Context, input provider.ChatRequest) (<-chan
 			return
 		}
 		c.logger.Info("provider request", logging.Fields{"stage": "provider_request", "provider": "openai", "request_bytes": len(payload), "message_count": len(body.Input), "tool_count": len(body.Tools)})
+		// c.logger.Info("provider request", logging.Fields{"stage": "provider_request", "provider": "openai", "request_bytes": len(payload), "tool_count": len(body.Tools), "message": body.Input})
 		req, err := http.NewRequestWithContext(ctx, http.MethodPost, c.endpoint, bytes.NewReader(payload))
 		if err != nil {
 			done <- requestErr("create OpenAI request", err)
