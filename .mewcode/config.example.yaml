@@ -22,6 +22,39 @@ agent:
 permissions:
   mode: default
 
+# Hook 规则也可写在项目级 .mewcode/config.yaml 或本地级
+# .mewcode/config.local.yaml；三者按用户、项目、本地顺序追加。
+# hooks:
+#   - id: format-go
+#     event: post_tool_use
+#     if: 'tool == "write_file" && args.path ~= "*.go"'
+#     action:
+#       type: command
+#       command: 'gofmt -w "$FILE_PATH"'
+#       timeout: 10s
+#   - id: block-dangerous-rm
+#     event: pre_tool_use
+#     if: 'tool == "run_command" && args.command =~ /rm\\s+-rf\\s+\\//'
+#     action:
+#       type: command
+#       command: "echo 'dangerous command rejected'"
+#     reject: true
+#   - id: project-context
+#     event: session_start
+#     action:
+#       type: prompt
+#       message: "先阅读 ARCHITECTURE.md，再开始工作。"
+#     once: true
+#   - id: notify-file-change
+#     event: post_tool_use
+#     if: 'tool == "write_file"'
+#     action:
+#       type: http
+#       url: "https://example.invalid/hooks/mewcode"
+#       method: POST
+#       body: '{"file":"$FILE_PATH"}'
+#     async: true
+
 # MCP Server 可配置在此用户级文件，项目级 .mewcode/config.yaml 的同名条目会完整覆盖它。
 # 发现后的远端工具名固定为 <server>__<tool>，并默认需要权限确认。
 mcp_servers:

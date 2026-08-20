@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/GitHub-freshman-X/mewcode01/internal/agent"
+	"github.com/GitHub-freshman-X/mewcode01/internal/hooks"
 	"github.com/GitHub-freshman-X/mewcode01/internal/logging"
 	"github.com/GitHub-freshman-X/mewcode01/internal/skills"
 )
@@ -80,7 +81,10 @@ func Dispatch(registry *Registry, invocation Invocation, ctx CommandContext) err
 		return nil
 	}
 	started := time.Now()
-	err := command.Handler(CommandContext{Context: ctx.Context, UI: ctx.UI, Registry: registry, Sessions: ctx.Sessions, Memory: ctx.Memory, Skills: ctx.Skills, Logger: ctx.Logger, Args: invocation.Args})
+	err := command.Handler(CommandContext{Context: ctx.Context, UI: ctx.UI, Registry: registry, Sessions: ctx.Sessions, Memory: ctx.Memory, Skills: ctx.Skills, Logger: ctx.Logger, Hooks: ctx.Hooks, Args: invocation.Args})
+	if ctx.Hooks != nil {
+		ctx.Hooks.Run(ctx.Context, hooks.EventCommandExecute, hooks.Context{Message: "/" + command.Name + " " + invocation.Args})
+	}
 	if ctx.Logger != nil {
 		status := "completed"
 		if err != nil {

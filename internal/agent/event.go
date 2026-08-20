@@ -6,6 +6,7 @@ import (
 
 	contextmanager "github.com/GitHub-freshman-X/mewcode01/internal/context"
 	"github.com/GitHub-freshman-X/mewcode01/internal/conversation"
+	"github.com/GitHub-freshman-X/mewcode01/internal/hooks"
 	"github.com/GitHub-freshman-X/mewcode01/internal/logging"
 	"github.com/GitHub-freshman-X/mewcode01/internal/memory"
 	"github.com/GitHub-freshman-X/mewcode01/internal/permissions"
@@ -55,6 +56,7 @@ type Options struct {
 	Context         contextmanager.Config
 	Logger          *logging.Logger
 	Skills          *skills.Manager
+	Hooks           *hooks.Engine
 }
 
 type PermissionBridge interface {

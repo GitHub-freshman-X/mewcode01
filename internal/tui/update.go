@@ -74,7 +74,7 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			invocation := command.Parse(input)
 			if invocation.IsCommand {
 				messageStart, messageEpoch := len(m.systemMessages), m.systemMessageEpoch
-				err := command.Dispatch(m.commands, invocation, command.CommandContext{Context: m.ctx, UI: m, Sessions: m, Memory: m, Skills: m.runner})
+				err := command.Dispatch(m.commands, invocation, command.CommandContext{Context: m.ctx, UI: m, Sessions: m, Memory: m, Skills: m.runner, Hooks: m.runner.Hooks()})
 				if err != nil {
 					m.AddSystemMessage("错误: " + err.Error())
 				} else if m.task != nil {

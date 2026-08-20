@@ -17,6 +17,7 @@ import (
 	contextmanager "github.com/GitHub-freshman-X/mewcode01/internal/context"
 	"github.com/GitHub-freshman-X/mewcode01/internal/conversation"
 	"github.com/GitHub-freshman-X/mewcode01/internal/envfile"
+	"github.com/GitHub-freshman-X/mewcode01/internal/hooks"
 	"github.com/GitHub-freshman-X/mewcode01/internal/instructions"
 	"github.com/GitHub-freshman-X/mewcode01/internal/logging"
 	"github.com/GitHub-freshman-X/mewcode01/internal/mcp"
@@ -145,6 +146,19 @@ func run(args []string, stderr io.Writer) int {
 		fmt.Fprintln(stderr, "skills:", err)
 		return 1
 	}
+	hookPaths, err := hooks.DefaultFilePaths(root)
+	if err != nil {
+		fmt.Fprintln(stderr, err)
+		return 1
+	}
+	hookRules, err := hooks.LoadRuleSet(hookPaths)
+	if err != nil {
+		fmt.Fprintln(stderr, err)
+		return 1
+	}
+	hookEngine := hooks.NewEngine(hookRules, hooks.Executor{HTTPClient: newHTTPClient()}, logger)
+	hookEngine.Run(context.Background(), hooks.EventStartup, hooks.Context{})
+	defer hookEngine.Run(context.Background(), hooks.EventShutdown, hooks.Context{})
 	paths, err := permissionFilePaths(root)
 	if err != nil {
 		fmt.Fprintln(stderr, err)
@@ -180,6 +194,7 @@ func run(args []string, stderr io.Writer) int {
 		Context:         agentContextConfig(cfg.Agent.Context),
 		Logger:          logger,
 		Skills:          skillManager,
+		Hooks:           hookEngine,
 		OptionalModules: prompt.OptionalModules{CustomInstructions: nonEmpty(customInstructions), LongTermMemory: memoryIndexes},
 		Memory: memory.NewService(memoryPaths, memory.ServiceOptions{
 			Caller: providerMemoryCaller{provider: p}, Sessions: memorySessionLister{store: sessionStore}, Logger: logger,

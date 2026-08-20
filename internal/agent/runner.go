@@ -10,6 +10,7 @@ import (
 
 	contextmanager "github.com/GitHub-freshman-X/mewcode01/internal/context"
 	"github.com/GitHub-freshman-X/mewcode01/internal/conversation"
+	"github.com/GitHub-freshman-X/mewcode01/internal/hooks"
 	"github.com/GitHub-freshman-X/mewcode01/internal/logging"
 	"github.com/GitHub-freshman-X/mewcode01/internal/memory"
 	"github.com/GitHub-freshman-X/mewcode01/internal/prompt"
@@ -25,6 +26,7 @@ type Runner struct {
 	executor *tools.Executor
 	options  Options
 	context  *contextmanager.Manager
+	hooks    *hookNotifications
 
 	mu     sync.Mutex
 	active bool
@@ -43,7 +45,11 @@ func NewRunner(p provider.Provider, session *conversation.Session, registry *too
 	if opts.Workspace != "" && opts.SessionID != "" && session != nil {
 		store, _ = contextmanager.NewResultStore(filepath.Join(opts.Workspace, ".mewcode", "context"), opts.SessionID)
 	}
-	return &Runner{provider: p, session: session, registry: registry, executor: executor, options: opts, context: contextmanager.NewManager(opts.Context, store)}
+	notifications := &hookNotifications{}
+	if opts.Hooks != nil {
+		opts.Hooks.SetPromptSink(notifications)
+	}
+	return &Runner{provider: p, session: session, registry: registry, executor: executor, options: opts, context: contextmanager.NewManager(opts.Context, store), hooks: notifications}
 }
 
 func (r *Runner) Start(ctx context.Context, req Request) (*Task, error) {
@@ -236,6 +242,13 @@ func (r *Runner) SkillDirectory() []skills.Metadata {
 	return r.options.Skills.Directory()
 }
 
+func (r *Runner) Hooks() *hooks.Engine {
+	if r == nil {
+		return nil
+	}
+	return r.options.Hooks
+}
+
 func (r *Runner) ReloadSkills() error {
 	if r == nil || r.options.Skills == nil {
 		return errors.New("skill manager is not configured")
@@ -260,7 +273,14 @@ func (r *Runner) run(ctx context.Context, mode Mode, prepared preparedRequest, e
 			return false
 		}
 	}
-	terminal := func(event Event) { events <- event }
+	terminal := func(event Event) {
+		if event.Type == EventFailed && event.Err != nil {
+			r.runHooks(ctx, hooks.EventError, hooks.Context{Error: event.Err.Error()})
+		}
+		events <- event
+	}
+	r.runHooks(ctx, hooks.EventSessionStart, hooks.Context{Message: prepared.prompt})
+	defer r.runHooks(context.Background(), hooks.EventSessionEnd, hooks.Context{})
 	user := provider.Message{Role: provider.RoleUser, Blocks: []provider.ContentBlock{{Type: provider.BlockText, Text: prepared.prompt}}}
 	var planHistory *taskHistory
 	manager := r.context
@@ -308,11 +328,13 @@ func (r *Runner) run(ctx context.Context, mode Mode, prepared preparedRequest, e
 
 	for iterations < r.options.MaxIterations {
 		iterations++
+		r.runHooks(ctx, hooks.EventTurnStart, hooks.Context{Message: prepared.prompt})
 		if !emit(Event{Type: EventProgress, Iteration: iterations, Phase: PhaseCallingModel}) {
 			terminal(cancelledEvent(iterations-1, total, hasPartial))
 			return
 		}
 		messages := modelSnapshot()
+		messages = append(messages, r.hookMessages()...)
 		if trigger, ok := manager.Decision(messages, false); ok {
 			usage, err := r.compact(ctx, manager, trigger, iterations, modelSnapshot, replaceHistory, emit)
 			total.Add(usage)
@@ -373,9 +395,12 @@ func (r *Runner) run(ctx context.Context, mode Mode, prepared preparedRequest, e
 		var round roundResult
 		for {
 			roundCtx, cancelRound := context.WithCancel(ctx)
+			r.runHooks(roundCtx, hooks.EventPreSend, hooks.Context{Message: prepared.prompt})
+			requestMessages := append([]provider.Message(nil), messages...)
+			requestMessages = append(requestMessages, r.hookMessages()...)
 			stream, done := r.provider.Stream(roundCtx, provider.ChatRequest{
 				Model: model, Prompt: bundle,
-				Messages: messages, MaxTokens: r.options.MaxTokens, Thinking: r.options.Thinking,
+				Messages: requestMessages, MaxTokens: r.options.MaxTokens, Thinking: r.options.Thinking,
 				Tools: definitions,
 			})
 			if !emit(Event{Type: EventProgress, Iteration: iterations, Phase: PhaseStreaming}) {
@@ -419,6 +444,7 @@ func (r *Runner) run(ctx context.Context, mode Mode, prepared preparedRequest, e
 			return
 		}
 		total.Add(round.Usage)
+		r.runHooks(ctx, hooks.EventPostReceive, hooks.Context{})
 		if err := r.session.RecordUsage(round.Usage); err != nil {
 			summary := &Summary{Reason: StopStreamError, Iterations: iterations, Usage: total}
 			terminal(Event{Type: EventFailed, Iteration: iterations, Phase: PhaseFinishing, Summary: summary, Err: err})
@@ -426,6 +452,7 @@ func (r *Runner) run(ctx context.Context, mode Mode, prepared preparedRequest, e
 		}
 		manager.RecordUsage(round.Usage, messages)
 		if len(round.ToolCalls) == 0 {
+			r.runHooks(ctx, hooks.EventTurnEnd, hooks.Context{})
 			text := messageText(round.Assistant)
 			if mode == ModePlan && text == "" {
 				summary := &Summary{Reason: StopStreamError, Iterations: iterations - 1, Usage: total}
@@ -463,6 +490,7 @@ func (r *Runner) run(ctx context.Context, mode Mode, prepared preparedRequest, e
 			return
 		}
 		scheduler := NewScheduler(visibleRegistry, r.executor, r.options.Permissions, r.options.Confirmer)
+		scheduler.Hooks = r.options.Hooks
 		results, err := scheduler.Execute(ctx, round.ToolCalls, func(event Event) bool {
 			event.Iteration = iterations
 			return emit(event)
@@ -494,6 +522,7 @@ func (r *Runner) run(ctx context.Context, mode Mode, prepared preparedRequest, e
 			terminal(Event{Type: EventFailed, Iteration: iterations, Phase: PhaseFinishing, Summary: summary, Err: err})
 			return
 		}
+		r.runHooks(ctx, hooks.EventTurnEnd, hooks.Context{})
 		unknownLimit := false
 		for _, call := range round.ToolCalls {
 			if _, ok := visibleRegistry.Get(call.Name); ok {
@@ -515,6 +544,40 @@ func (r *Runner) run(ctx context.Context, mode Mode, prepared preparedRequest, e
 			terminal(Event{Type: EventStopped, Iteration: iterations, Phase: PhaseFinishing, Summary: summary})
 			return
 		}
+	}
+}
+
+type hookNotifications struct {
+	mu       sync.Mutex
+	messages []string
+}
+
+func (n *hookNotifications) AddHookNotification(message string) {
+	if n == nil || strings.TrimSpace(message) == "" {
+		return
+	}
+	n.mu.Lock()
+	defer n.mu.Unlock()
+	n.messages = append(n.messages, message)
+}
+
+func (r *Runner) hookMessages() []provider.Message {
+	if r.hooks == nil {
+		return nil
+	}
+	r.hooks.mu.Lock()
+	defer r.hooks.mu.Unlock()
+	messages := make([]provider.Message, 0, len(r.hooks.messages))
+	for _, notification := range r.hooks.messages {
+		messages = append(messages, provider.Message{Role: provider.RoleUser, Blocks: []provider.ContentBlock{{Type: provider.BlockText, Text: "<hook-notification>\n" + notification + "\n</hook-notification>"}}})
+	}
+	r.hooks.messages = nil
+	return messages
+}
+
+func (r *Runner) runHooks(ctx context.Context, event hooks.Event, hookCtx hooks.Context) {
+	if r.options.Hooks != nil {
+		r.options.Hooks.Run(ctx, event, hookCtx)
 	}
 }
 
@@ -549,6 +612,7 @@ func isContextTooLongError(err error) bool {
 }
 
 func (r *Runner) compact(ctx context.Context, manager *contextmanager.Manager, trigger contextmanager.Trigger, iteration int, snapshot func() []provider.Message, replace func([]provider.Message), emit func(Event) bool) (provider.Usage, error) {
+	r.runHooks(ctx, hooks.EventCompact, hooks.Context{})
 	messages := snapshot()
 	before := manager.Estimate(messages)
 	r.options.Logger.Info("context compaction started", logging.Fields{"stage": "context_compaction", "status": "started", "trigger": string(trigger), "before_tokens": before, "automatic_failures": manager.State.AutomaticFailures})

@@ -5,6 +5,7 @@ import (
 	"fmt"
 
 	"github.com/GitHub-freshman-X/mewcode01/internal/agent"
+	"github.com/GitHub-freshman-X/mewcode01/internal/hooks"
 	"github.com/GitHub-freshman-X/mewcode01/internal/logging"
 	"github.com/GitHub-freshman-X/mewcode01/internal/provider"
 	"github.com/GitHub-freshman-X/mewcode01/internal/skills"
@@ -86,6 +87,7 @@ type CommandContext struct {
 	Memory   MemoryService
 	Skills   SkillService
 	Logger   *logging.Logger
+	Hooks    *hooks.Engine
 	Args     string
 }
 

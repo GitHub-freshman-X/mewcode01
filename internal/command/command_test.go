@@ -6,6 +6,7 @@ import (
 	"testing"
 
 	"github.com/GitHub-freshman-X/mewcode01/internal/agent"
+	"github.com/GitHub-freshman-X/mewcode01/internal/hooks"
 	"github.com/GitHub-freshman-X/mewcode01/internal/provider"
 	"github.com/GitHub-freshman-X/mewcode01/internal/skills"
 )
@@ -91,6 +92,25 @@ func TestDispatchLocalAndPrompt(t *testing.T) {
 		t.Fatalf("plan=%+v mode=%v err=%v", u.requests, u.plan, err)
 	}
 }
+
+func TestDispatchEmitsCommandHook(t *testing.T) {
+	sink := &hookSink{}
+	engine := hooks.NewEngine([]hooks.Rule{{ID: "command", Event: hooks.EventCommandExecute, Action: hooks.Action{Type: hooks.ActionPrompt, Message: "$MESSAGE"}}}, hooks.Executor{PromptSink: sink}, nil)
+	registry, err := NewRegistry(Command{Name: "one", Handler: func(CommandContext) error { return nil }})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := Dispatch(registry, Parse("/one value"), CommandContext{Context: context.Background(), Hooks: engine}); err != nil {
+		t.Fatal(err)
+	}
+	if len(sink.messages) != 1 || sink.messages[0] != "/one value" {
+		t.Fatalf("messages=%v", sink.messages)
+	}
+}
+
+type hookSink struct{ messages []string }
+
+func (s *hookSink) AddHookNotification(message string) { s.messages = append(s.messages, message) }
 
 func TestExitCommandRequestsExitWithoutAgent(t *testing.T) {
 	u := &fakeUI{}

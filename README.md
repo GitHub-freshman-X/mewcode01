@@ -19,6 +19,7 @@ MewCode 是一个使用 Go 构建的全屏终端 AI Agent。它可通过 Anthrop
 | [第 9 章：记忆与会话](docs/ch09-memory/spec.md) | JSONL 会话持久化、跨会话指令和记忆加载、自动记忆提取与治理。 |
 | [第 10 章：斜杠命令](docs/ch10-slash_command/spec.md) | 命令注册、解析、补全与十个内置命令。 |
 | [第 11 章：Skill](docs/ch11-skills/spec.md) | 项目级和用户级 Skill 发现、按需加载、动态命令、工具白名单及 inline/fork 执行模式。 |
+| [第 12 章：Hook](docs/ch12-hook/spec.md) | 生命周期事件自动化、条件匹配、动作执行与工具调用前拦截。 |
 
 ## 快速开始
 
@@ -71,6 +72,7 @@ api_key: replace-with-your-api-key
 - `agent.context`：上下文窗口、摘要和工具结果预算。
 - `permissions.mode`：没有规则命中时的默认权限模式。
 - `mcp_servers`：配置 stdio 或 HTTP MCP 服务。stdio 服务可填写 `command`、`args`、`env`；HTTP 服务可填写 `url`、`headers`。
+- `hooks`：在 `~/.mewcode/config.yaml`、`<项目>/.mewcode/config.yaml` 或 `<项目>/.mewcode/config.local.yaml` 中声明生命周期自动化规则；规则按用户、项目、本地顺序追加。每条规则包含 `event`、可选 `if` 和 `action`。条件可用 `==`、`!=`、`=~`、`~=` 与单一的 `&&` 或 `||` 组合；动作中可使用 `$EVENT`、`$TOOL_NAME`、`$FILE_PATH`、`$MESSAGE`、`$ERROR`、`$TOOL_ARGS.<名称>`。`pre_tool_use` 可通过 `reject: true` 拦截工具调用，且不能设置 `async: true`。可用动作是 `command`、`prompt`、`http`、`agent`；`command.timeout` 控制最长运行时间，`agent` 当前只保留后续运行时对接点。
 
 OpenAI Responses API 不支持 `thinking` 配置。配置字段会被严格校验，未知字段或无效值会使程序在启动前失败。
 

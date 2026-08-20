@@ -13,6 +13,7 @@ import (
 
 	contextmanager "github.com/GitHub-freshman-X/mewcode01/internal/context"
 	"github.com/GitHub-freshman-X/mewcode01/internal/conversation"
+	"github.com/GitHub-freshman-X/mewcode01/internal/hooks"
 	"github.com/GitHub-freshman-X/mewcode01/internal/logging"
 	"github.com/GitHub-freshman-X/mewcode01/internal/memory"
 	"github.com/GitHub-freshman-X/mewcode01/internal/permissions"
@@ -108,6 +109,20 @@ func TestRunnerFinalAnswer(t *testing.T) {
 	}
 	if got := session.Usage(); got.InputTokens != 10 || got.OutputTokens != 4 {
 		t.Fatalf("usage=%+v", got)
+	}
+}
+
+func TestRunnerInjectsSessionPromptHook(t *testing.T) {
+	p := &scriptedProvider{rounds: []scriptedRound{textRound("done", provider.Usage{})}}
+	engine := hooks.NewEngine([]hooks.Rule{{ID: "context", Event: hooks.EventSessionStart, Action: hooks.Action{Type: hooks.ActionPrompt, Message: "read ARCHITECTURE.md"}}}, hooks.Executor{}, nil)
+	runner, _ := testRunner(t, p, Options{Hooks: engine})
+	task, err := runner.Start(context.Background(), Request{Mode: ModeAct, Prompt: "work"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	drainTask(t, task)
+	if len(p.requests) != 1 || len(p.requests[0].Messages) < 2 || messageText(p.requests[0].Messages[0]) != "<hook-notification>\nread ARCHITECTURE.md\n</hook-notification>" {
+		t.Fatalf("request=%+v", p.requests)
 	}
 }
 

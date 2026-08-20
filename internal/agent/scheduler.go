@@ -2,9 +2,11 @@ package agent
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"sync"
 
+	"github.com/GitHub-freshman-X/mewcode01/internal/hooks"
 	"github.com/GitHub-freshman-X/mewcode01/internal/permissions"
 	"github.com/GitHub-freshman-X/mewcode01/internal/provider"
 	"github.com/GitHub-freshman-X/mewcode01/internal/tools"
@@ -15,6 +17,7 @@ type Scheduler struct {
 	executor  *tools.Executor
 	gate      *permissions.Engine
 	confirmer PermissionBridge
+	Hooks     *hooks.Engine
 }
 
 type scheduledCall struct {
@@ -105,12 +108,22 @@ func (s *Scheduler) Execute(ctx context.Context, calls []provider.ToolCall, emit
 }
 
 func (s *Scheduler) executePermitted(ctx context.Context, call provider.ToolCall, emit func(Event) bool) (provider.ToolResult, error) {
+	if s.Hooks != nil {
+		var args map[string]any
+		_ = json.Unmarshal(call.Arguments, &args)
+		result, rejected := s.Hooks.RunPreTool(ctx, hooks.Context{Tool: call.Name, Args: args})
+		if rejected {
+			payload := tools.Failure(call.Name, tools.ErrorPermission, "tool call rejected by hook", map[string]any{"stage": "hook", "rule_id": result.RuleID, "reason": result.Output})
+			s.Hooks.Run(ctx, hooks.EventPostToolUse, hookContext(call))
+			return provider.ToolResult{CallID: call.ID, Name: call.Name, Content: payload.JSON(), IsError: true}, nil
+		}
+	}
 	if s.gate == nil {
-		return s.executor.Execute(ctx, s.registry, call), nil
+		return s.executeAndNotify(ctx, call), nil
 	}
 	tool, ok := s.registry.Get(call.Name)
 	if !ok {
-		return s.executor.Execute(ctx, s.registry, call), nil
+		return s.executeAndNotify(ctx, call), nil
 	}
 	decision, err := s.gate.Decide(ctx, call, tool)
 	if err != nil {
@@ -121,10 +134,13 @@ func (s *Scheduler) executePermitted(ctx context.Context, call provider.ToolCall
 	}
 	switch decision.Action {
 	case permissions.ActionAllow:
-		return s.executor.Execute(ctx, s.registry, call), nil
+		return s.executeAndNotify(ctx, call), nil
 	case permissions.ActionDeny:
 		return permissions.DeniedToolResult(call, decision), nil
 	case permissions.ActionAsk:
+		if s.Hooks != nil {
+			s.Hooks.Run(ctx, hooks.EventPermissionRequest, hookContext(call))
+		}
 		if s.confirmer == nil {
 			return permissions.DeniedToolResult(call, decision), nil
 		}
@@ -157,8 +173,31 @@ func (s *Scheduler) executePermitted(ctx context.Context, call provider.ToolCall
 		if err := s.gate.ApplyConfirmation(confirmation); err != nil {
 			return provider.ToolResult{}, err
 		}
-		return s.executor.Execute(ctx, s.registry, call), nil
+		return s.executeAndNotify(ctx, call), nil
 	default:
 		return provider.ToolResult{}, errors.New("unknown permission decision")
 	}
+}
+
+func (s *Scheduler) executeAndNotify(ctx context.Context, call provider.ToolCall) provider.ToolResult {
+	result := s.executor.Execute(ctx, s.registry, call)
+	if s.Hooks == nil {
+		return result
+	}
+	hookCtx := hookContext(call)
+	s.Hooks.Run(ctx, hooks.EventPostToolUse, hookCtx)
+	switch call.Name {
+	case "write_file", "edit_file":
+		s.Hooks.Run(ctx, hooks.EventFileChange, hookCtx)
+	case "run_command":
+		s.Hooks.Run(ctx, hooks.EventCommandExecute, hookCtx)
+	}
+	return result
+}
+
+func hookContext(call provider.ToolCall) hooks.Context {
+	var args map[string]any
+	_ = json.Unmarshal(call.Arguments, &args)
+	path, _ := args["path"].(string)
+	return hooks.Context{Tool: call.Name, Args: args, FilePath: path}
 }

@@ -3,10 +3,12 @@ package agent
 import (
 	"context"
 	"encoding/json"
+	"strings"
 	"sync/atomic"
 	"testing"
 	"time"
 
+	"github.com/GitHub-freshman-X/mewcode01/internal/hooks"
 	"github.com/GitHub-freshman-X/mewcode01/internal/permissions"
 	"github.com/GitHub-freshman-X/mewcode01/internal/provider"
 	"github.com/GitHub-freshman-X/mewcode01/internal/tools"
@@ -270,6 +272,25 @@ func TestSchedulerPermissionMultiToolOrder(t *testing.T) {
 		t.Fatalf("unexpected results order: %+v", results)
 	}
 }
+
+func TestSchedulerHookRejectDoesNotExecute(t *testing.T) {
+	registry := tools.NewRegistry()
+	var executed atomic.Int32
+	if err := registry.Register(countingTool{name: "write", safety: tools.SafetySideEffect, count: &executed}); err != nil {
+		t.Fatal(err)
+	}
+	engine := hooks.NewEngine([]hooks.Rule{{ID: "block", Event: hooks.EventPreToolUse, Action: hooks.Action{Type: hooks.ActionPrompt, Message: "blocked"}, Reject: true}}, hooks.Executor{PromptSink: hookTestSink{}}, nil)
+	scheduler := NewScheduler(registry, tools.NewExecutor(time.Second), nil, nil)
+	scheduler.Hooks = engine
+	results, err := scheduler.Execute(context.Background(), []provider.ToolCall{{ID: "1", Name: "write", Arguments: []byte(`{}`)}}, func(Event) bool { return true })
+	if err != nil || executed.Load() != 0 || len(results) != 1 || !results[0].IsError || !strings.Contains(results[0].Content, "hook") {
+		t.Fatalf("err=%v executed=%d results=%+v", err, executed.Load(), results)
+	}
+}
+
+type hookTestSink struct{}
+
+func (hookTestSink) AddHookNotification(string) {}
 
 func mustAgentRule(t *testing.T, key string, effect permissions.Effect, scope permissions.Scope) permissions.Rule {
 	t.Helper()
