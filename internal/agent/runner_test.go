@@ -126,6 +126,37 @@ func TestRunnerInjectsSessionPromptHook(t *testing.T) {
 	}
 }
 
+func TestRunnerRejectsRunCommandWithPreToolHook(t *testing.T) {
+	p := &scriptedProvider{rounds: []scriptedRound{
+		toolRound(provider.ToolCall{ID: "blocked", Name: "run_command", Arguments: []byte(`{"command":"printf","args":["HOOK-BLOCK-7c2a"]}`)}),
+		textRound("explained hook rejection", provider.Usage{}),
+	}}
+	condition, err := hooks.ParseCondition(`tool == "run_command" && args.args =~ /HOOK-BLOCK-7c2a/`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	engine := hooks.NewEngine([]hooks.Rule{{ID: "block-fixture-command", Event: hooks.EventPreToolUse, Condition: condition, Action: hooks.Action{Type: hooks.ActionPrompt, Message: "HOOK-BLOCKED-REASON-7c2a"}, Reject: true}}, hooks.Executor{}, nil)
+	runner, _ := testRunner(t, p, Options{Hooks: engine})
+	task, err := runner.Start(context.Background(), Request{Mode: ModeAct, Prompt: "run the blocked command"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	events := drainTask(t, task)
+	var result *provider.ToolResult
+	for i := range events {
+		if events[i].Type == EventToolResult {
+			result = events[i].ToolResult
+			break
+		}
+	}
+	if result == nil || !result.IsError || !strings.Contains(result.Content, "HOOK-BLOCKED-REASON-7c2a") {
+		t.Fatalf("tool result=%+v", result)
+	}
+	if len(p.requests) != 2 || !strings.Contains(allMessageText(p.requests[1].Messages), "HOOK-BLOCKED-REASON-7c2a") {
+		t.Fatalf("requests=%+v", p.requests)
+	}
+}
+
 func TestRunnerForkSkillReturnsOnlyFinalSummaryToMainSession(t *testing.T) {
 	project := t.TempDir()
 	if err := os.WriteFile(filepath.Join(project, "review.md"), []byte("---\nname: review\ndescription: Review changes independently.\nmode: fork\ncontext: none\n---\nReview the current changes."), 0600); err != nil {

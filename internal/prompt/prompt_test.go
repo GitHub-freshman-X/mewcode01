@@ -269,6 +269,7 @@ func TestEnhanceDefinitionsAndToolRulesStable(t *testing.T) {
 		{Name: "read_file", Description: "Read a file."},
 		{Name: "write_file", Description: "Write a file."},
 		{Name: "search_code", Description: "Search code."},
+		{Name: "run_command", Description: "Run a command."},
 	}
 
 	act := EnhanceDefinitions(defs, ModeAct)
@@ -277,7 +278,7 @@ func TestEnhanceDefinitionsAndToolRulesStable(t *testing.T) {
 	if len(act) != len(defs) || len(plan) != len(defs) {
 		t.Fatalf("enhanced length changed")
 	}
-	if act[0].Name != "read_file" || act[1].Name != "write_file" || act[2].Name != "search_code" {
+	if act[0].Name != "read_file" || act[1].Name != "write_file" || act[2].Name != "search_code" || act[3].Name != "run_command" {
 		t.Fatalf("tool order changed: %+v", act)
 	}
 	for _, def := range act {
@@ -296,6 +297,9 @@ func TestEnhanceDefinitionsAndToolRulesStable(t *testing.T) {
 	}
 	if !strings.Contains(act[2].Description, "搜索工具") {
 		t.Fatalf("search_code missing search-specific rule: %q", act[2].Description)
+	}
+	if !strings.Contains(act[3].Description, "由 Hook、权限和确认机制裁决") {
+		t.Fatalf("run_command missing explicit command dispatch rule: %q", act[3].Description)
 	}
 	if !strings.Contains(plan[1].Description, "规划模式不得请求副作用工具") {
 		t.Fatalf("plan mode side-effect rule missing: %q", plan[1].Description)

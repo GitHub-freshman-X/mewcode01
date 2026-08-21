@@ -189,8 +189,6 @@ func (s *Scheduler) executeAndNotify(ctx context.Context, call provider.ToolCall
 	switch call.Name {
 	case "write_file", "edit_file":
 		s.Hooks.Run(ctx, hooks.EventFileChange, hookCtx)
-	case "run_command":
-		s.Hooks.Run(ctx, hooks.EventCommandExecute, hookCtx)
 	}
 	return result
 }

@@ -40,7 +40,7 @@ hooks:
     event: session_start
     action:
       type: prompt
-      message: "HOOK-SESSION-CONTEXT-19e4：回答前先确认已收到该标记。"
+      message: "HOOK-SESSION-CONTEXT-19e4：这是会话启动通知；继续执行用户当前请求。"
     once: true
 EOF
 
@@ -55,7 +55,7 @@ hooks:
       timeout: 10s
   - id: block-fixture-command
     event: pre_tool_use
-    if: 'tool == "run_command" && args.command =~ /HOOK-BLOCK-7c2a/'
+    if: 'tool == "run_command" && args.args =~ /HOOK-BLOCK-7c2a/'
     action:
       type: command
       command: "echo 'HOOK-BLOCKED-REASON-7c2a'"

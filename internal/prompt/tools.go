@@ -42,7 +42,7 @@ func ruleForTool(name string) string {
 	case "write_file", "edit_file":
 		return "写入规则：写入或修改前确认工作区边界，并确保目标文件内容已被读取或明确了解。"
 	case "run_command":
-		return "命令规则：执行命令前说明目的，避免与当前任务无关、会越过工作区边界、跳过 Git hook、绕过签名检查或包含不安全输入处理的操作。"
+		return "命令规则：执行命令前简短说明目的。对用户明确请求且在工作区边界内的安全命令，应发起调用并由 Hook、权限和确认机制裁决；不要仅因任务关联性自行跳过。仍不得越过工作区边界、跳过 Git hook、绕过签名检查或执行包含不安全输入处理的操作。"
 	case "find_files":
 		return "查找规则：需要定位文件时优先使用文件查找工具。"
 	case "search_code":

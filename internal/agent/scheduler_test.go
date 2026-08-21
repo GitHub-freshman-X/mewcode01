@@ -288,9 +288,35 @@ func TestSchedulerHookRejectDoesNotExecute(t *testing.T) {
 	}
 }
 
+func TestSchedulerRunCommandDoesNotEmitSlashCommandHook(t *testing.T) {
+	registry := tools.NewRegistry()
+	var executed atomic.Int32
+	if err := registry.Register(countingTool{name: "run_command", safety: tools.SafetySideEffect, count: &executed}); err != nil {
+		t.Fatal(err)
+	}
+	sink := &recordingHookSink{}
+	engine := hooks.NewEngine([]hooks.Rule{{ID: "slash-only", Event: hooks.EventCommandExecute, Action: hooks.Action{Type: hooks.ActionPrompt, Message: "slash notification"}}}, hooks.Executor{PromptSink: sink}, nil)
+	scheduler := NewScheduler(registry, tools.NewExecutor(time.Second), nil, nil)
+	scheduler.Hooks = engine
+
+	results, err := scheduler.Execute(context.Background(), []provider.ToolCall{{ID: "1", Name: "run_command", Arguments: []byte(`{"command":"printf","args":["ok"]}`)}}, func(Event) bool { return true })
+	if err != nil || executed.Load() != 1 || len(results) != 1 || results[0].IsError {
+		t.Fatalf("err=%v executed=%d results=%+v", err, executed.Load(), results)
+	}
+	if len(sink.messages) != 0 {
+		t.Fatalf("run_command emitted command_execute hook messages=%q", sink.messages)
+	}
+}
+
 type hookTestSink struct{}
 
 func (hookTestSink) AddHookNotification(string) {}
+
+type recordingHookSink struct{ messages []string }
+
+func (s *recordingHookSink) AddHookNotification(message string) {
+	s.messages = append(s.messages, message)
+}
 
 func mustAgentRule(t *testing.T, key string, effect permissions.Effect, scope permissions.Scope) permissions.Rule {
 	t.Helper()
