@@ -73,6 +73,7 @@ api_key: replace-with-your-api-key
 | `max_tokens` | 单次模型响应上限，默认 `4096`。 |
 | `thinking.enabled` / `thinking.budget_tokens` | 仅 Anthropic；预算至少 `1024` 且小于 `max_tokens`。OpenAI 配置中不要设置 `thinking`。 |
 | `agent.max_iterations` | 单个 Agent 任务最多循环次数，默认 `20`。 |
+| `agent.enable_verification_agent` | 是否加载内置 `Verification` 子 Agent，默认 `false`。 |
 | `agent.context` | 上下文窗口、摘要预留、安全余量，以及单工具结果和单消息结果预算。完整字段与默认值见模板。 |
 | `permissions.mode` | 无规则命中时的权限策略：`strict`、`default`（默认）或 `relaxed`。 |
 | `mcp_servers` | MCP 服务映射；`stdio` 使用 `command`、`args`、`env`，`http` 使用 `url`、`headers`。值中的 `${VAR}` 会从环境变量展开。 |
@@ -88,6 +89,7 @@ api_key: replace-with-your-api-key
 - `Tab`：补全斜杠命令。
 - `Ctrl+T`：展开或折叠 Claude thinking。
 - `Ctrl+C`：生成期间取消当前任务；空闲时退出。
+- `Esc`：当前台子 Agent 运行时，将其转入后台。
 
 ### 斜杠命令
 
@@ -113,6 +115,7 @@ api_key: replace-with-your-api-key
 | 记忆 | `<用户配置目录>/mewcode/memory/` | `<项目根>/.mewcode/memory/` |
 | 会话与大工具结果 | — | `<项目根>/.mewcode/sessions/`、`<项目根>/.mewcode/context/` |
 | Skill | `<用户配置目录>/mewcode/skills/` | `<项目根>/.mewcode/skills/` |
+| SubAgent 定义 | `<用户配置目录>/mewcode/agents/` | `<项目根>/.mewcode/agents/` |
 | 权限规则 | `<用户配置目录>/mewcode/permissions.yaml` | `<项目根>/.mewcode/permissions.yaml` |
 | Hook | `<用户配置目录>/mewcode/config.yaml` | `<项目根>/.mewcode/config.yaml` |
 
@@ -131,7 +134,13 @@ tools: [read_file, search_code]
 
 `name` 只能使用小写字母、数字与连字符；`mode` 默认为 `inline`，也可为隔离会话执行的 `fork`。`tools` 只能缩小模型可见工具范围，不能提升权限。修改本地 Skill 后执行 `/skills reload`。
 
-Hook 配置可在用户主配置或项目 `.mewcode/config.yaml` 的 `hooks` 顶层字段中声明；规则按“用户、项目”顺序追加。支持 `command`、`prompt`、`http`、`agent` 动作，其中 `agent` 目前仅为已校验的运行时占位。`pre_tool_use` 可使用 `reject: true` 拦截真实工具调用，且不能设置 `async: true`。完整示例见 [配置模板](.mewcode/config.example.yaml) 与 [Hook Spec](docs/ch12-hook/spec.md)。
+Hook 配置可在用户主配置或项目 `.mewcode/config.yaml` 的 `hooks` 顶层字段中声明；规则按“用户、项目”顺序追加。支持 `command`、`prompt`、`http`、`agent` 动作；`agent` 动作会以后台 `general-purpose` 子 Agent 执行。`pre_tool_use` 可使用 `reject: true` 拦截真实工具调用，且不能设置 `async: true`。完整示例见 [配置模板](.mewcode/config.example.yaml) 与 [Hook Spec](docs/ch12-hook/spec.md)。
+
+### SubAgent
+
+主 Agent 可通过固定的 `agent` 工具委派子任务。定义式子 Agent 从上表的用户级、项目级目录发现；同名定义按项目级、用户级、内置级、插件级的顺序覆盖。定义文件使用 YAML frontmatter（`name`、`description`、`tools`、`disallowedTools`、`model`、`maxTurns`、`permissionMode`）和 Markdown 操作说明。
+
+内置 `Explore`、`Plan`、`general-purpose` 始终可用；`Verification` 需设置 `agent.enable_verification_agent: true`。定义式子 Agent 使用独立对话和权限记录；未指定 `subagent_type` 的 Fork 子 Agent 继承父对话并始终后台运行。显式后台、运行 120 秒自动后台及按 `Esc` 都会创建或接管进程内任务，完成结果以通知回传主对话。后台任务不会跨会话持久化，且暂不支持 `isolation: worktree`、Fork 再 Fork 或后台任务再派生子 Agent。
 
 ## 权限与安全
 

@@ -9,6 +9,7 @@ thinking:
   budget_tokens: 2048
 agent:
   max_iterations: 20
+  enable_verification_agent: false
   context:
     window_tokens: 200000
     summary_output_tokens: 20000

@@ -51,8 +51,9 @@ type MCPServerConfig struct {
 }
 
 type AgentConfig struct {
-	MaxIterations int           `yaml:"max_iterations,omitempty"`
-	Context       ContextConfig `yaml:"context,omitempty"`
+	MaxIterations           int           `yaml:"max_iterations,omitempty"`
+	EnableVerificationAgent bool          `yaml:"enable_verification_agent,omitempty"`
+	Context                 ContextConfig `yaml:"context,omitempty"`
 }
 
 type ContextConfig struct {

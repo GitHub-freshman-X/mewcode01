@@ -12,6 +12,7 @@ import (
 	"github.com/GitHub-freshman-X/mewcode01/internal/command"
 	"github.com/GitHub-freshman-X/mewcode01/internal/conversation"
 	"github.com/GitHub-freshman-X/mewcode01/internal/provider"
+	"github.com/GitHub-freshman-X/mewcode01/internal/subagent"
 )
 
 type taskView struct {
@@ -64,6 +65,7 @@ type Model struct {
 	memoryClearPending           bool
 	showStartupCatBanner         bool
 	exitRequested                bool
+	subAgentNotifications        <-chan subagent.TaskNotification
 }
 
 func NewModel(runner *agent.Runner, session *conversation.Session) *Model {
@@ -82,6 +84,9 @@ func NewModelWithPermissions(runner *agent.Runner, session *conversation.Session
 	vp := viewport.New(viewport.WithWidth(80), viewport.WithHeight(16))
 	vp.SoftWrap = true
 	m := &Model{runner: runner, session: session, permissionBridge: bridge, textarea: input, viewport: vp, width: 80, height: 20, autoFollow: true, ctx: context.Background(), commands: command.DefaultRegistry(), showStartupCatBanner: true}
+	if runner != nil {
+		m.subAgentNotifications = runner.SubscribeSubAgentTasks()
+	}
 	m.RefreshCommands()
 	m.refreshContent()
 	return m

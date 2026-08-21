@@ -16,20 +16,25 @@ import (
 	"github.com/GitHub-freshman-X/mewcode01/internal/prompt"
 	"github.com/GitHub-freshman-X/mewcode01/internal/provider"
 	"github.com/GitHub-freshman-X/mewcode01/internal/skills"
+	"github.com/GitHub-freshman-X/mewcode01/internal/subagent"
 	"github.com/GitHub-freshman-X/mewcode01/internal/tools"
 )
 
 type Runner struct {
-	provider provider.Provider
-	session  *conversation.Session
-	registry *tools.Registry
-	executor *tools.Executor
-	options  Options
-	context  *contextmanager.Manager
-	hooks    *hookNotifications
+	provider      provider.Provider
+	session       *conversation.Session
+	registry      *tools.Registry
+	executor      *tools.Executor
+	options       Options
+	context       *contextmanager.Manager
+	hooks         *hookNotifications
+	notifications *taskNotifications
 
 	mu     sync.Mutex
 	active bool
+
+	promptMu     sync.RWMutex
+	latestPrompt string
 }
 
 func NewRunner(p provider.Provider, session *conversation.Session, registry *tools.Registry, executor *tools.Executor, options Options) *Runner {
@@ -46,10 +51,22 @@ func NewRunner(p provider.Provider, session *conversation.Session, registry *too
 		store, _ = contextmanager.NewResultStore(filepath.Join(opts.Workspace, ".mewcode", "context"), opts.SessionID)
 	}
 	notifications := &hookNotifications{}
+	taskQueue := &taskNotifications{}
 	if opts.Hooks != nil {
 		opts.Hooks.SetPromptSink(notifications)
 	}
-	return &Runner{provider: p, session: session, registry: registry, executor: executor, options: opts, context: contextmanager.NewManager(opts.Context, store), hooks: notifications}
+	runner := &Runner{provider: p, session: session, registry: registry, executor: executor, options: opts, context: contextmanager.NewManager(opts.Context, store), hooks: notifications, notifications: taskQueue}
+	if opts.SubAgents != nil && opts.SubAgents.Tasks != nil {
+		updates, _ := opts.SubAgents.Tasks.Subscribe()
+		go func() {
+			for update := range updates {
+				if update.Task.Status == subagent.TaskCompleted || update.Task.Status == subagent.TaskFailed || update.Task.Status == subagent.TaskCancelled {
+					runner.notifications.Add(update.Task)
+				}
+			}
+		}()
+	}
+	return runner
 }
 
 func (r *Runner) Start(ctx context.Context, req Request) (*Task, error) {
@@ -262,6 +279,43 @@ func (r *Runner) ClearSkillActivations() {
 	}
 }
 
+func (r *Runner) rememberSystemPrompt(value string) {
+	if r == nil || value == "" {
+		return
+	}
+	r.promptMu.Lock()
+	r.latestPrompt = value
+	r.promptMu.Unlock()
+}
+
+func (r *Runner) lastSystemPrompt() string {
+	if r == nil {
+		return ""
+	}
+	r.promptMu.RLock()
+	defer r.promptMu.RUnlock()
+	return r.latestPrompt
+}
+
+func (r *Runner) SubscribeSubAgentTasks() <-chan subagent.TaskNotification {
+	if r == nil || r.options.SubAgents == nil || r.options.SubAgents.Tasks == nil {
+		return nil
+	}
+	updates, _ := r.options.SubAgents.Tasks.Subscribe()
+	return updates
+}
+
+func (r *Runner) HasForegroundSubAgent() bool {
+	return r != nil && r.options.SubAgents != nil && r.options.SubAgents.HasForeground(r)
+}
+
+func (r *Runner) BackgroundForegroundSubAgent() bool {
+	if r == nil || r.options.SubAgents == nil {
+		return false
+	}
+	return r.options.SubAgents.BackgroundForeground(r)
+}
+
 func (r *Runner) run(ctx context.Context, mode Mode, prepared preparedRequest, events chan<- Event) {
 	defer close(events)
 	defer func() { r.mu.Lock(); r.active = false; r.mu.Unlock() }()
@@ -334,6 +388,7 @@ func (r *Runner) run(ctx context.Context, mode Mode, prepared preparedRequest, e
 			return
 		}
 		messages := modelSnapshot()
+		messages = append(messages, r.taskMessages()...)
 		messages = append(messages, r.hookMessages()...)
 		if trigger, ok := manager.Decision(messages, false); ok {
 			usage, err := r.compact(ctx, manager, trigger, iterations, modelSnapshot, replaceHistory, emit)
@@ -355,7 +410,7 @@ func (r *Runner) run(ctx context.Context, mode Mode, prepared preparedRequest, e
 		promptMode := toPromptMode(mode)
 		visibleRegistry := prepared.registry
 		modules := r.options.OptionalModules
-		model := ""
+		model := r.options.Model
 		if r.options.Skills != nil {
 			runtime, runtimeErr := skills.RuntimeFor(r.options.Skills.Snapshot())
 			if runtimeErr != nil {
@@ -391,6 +446,10 @@ func (r *Runner) run(ctx context.Context, mode Mode, prepared preparedRequest, e
 			terminal(Event{Type: EventFailed, Iteration: iterations, Phase: PhaseFinishing, Summary: summary, Err: err})
 			return
 		}
+		if r.options.SystemPrompt != "" {
+			bundle.StableSystem = r.options.SystemPrompt
+		}
+		r.rememberSystemPrompt(bundle.StableSystem)
 		definitions := prompt.EnhanceDefinitions(prepared.registry.Definitions(), promptMode)
 		var round roundResult
 		for {
@@ -491,7 +550,14 @@ func (r *Runner) run(ctx context.Context, mode Mode, prepared preparedRequest, e
 		}
 		scheduler := NewScheduler(visibleRegistry, r.executor, r.options.Permissions, r.options.Confirmer)
 		scheduler.Hooks = r.options.Hooks
-		results, err := scheduler.Execute(ctx, round.ToolCalls, func(event Event) bool {
+		scheduleCtx := ctx
+		if r.options.SubAgents != nil {
+			scheduleCtx = tools.WithSubAgentHost(scheduleCtx, runnerSubAgentHost{runner: r, runtime: r.options.SubAgents})
+			if isForkSource(ctx) {
+				scheduleCtx = withForkSource(scheduleCtx)
+			}
+		}
+		results, err := scheduler.Execute(scheduleCtx, round.ToolCalls, func(event Event) bool {
 			event.Iteration = iterations
 			return emit(event)
 		})
@@ -561,6 +627,41 @@ func (n *hookNotifications) AddHookNotification(message string) {
 	n.messages = append(n.messages, message)
 }
 
+type taskNotifications struct {
+	mu    sync.Mutex
+	tasks []subagent.TaskInfo
+}
+
+func (n *taskNotifications) Add(task subagent.TaskInfo) {
+	if n == nil {
+		return
+	}
+	n.mu.Lock()
+	n.tasks = append(n.tasks, task)
+	n.mu.Unlock()
+}
+
+func (r *Runner) taskMessages() []provider.Message {
+	if r == nil || r.notifications == nil {
+		return nil
+	}
+	r.notifications.mu.Lock()
+	tasks := append([]subagent.TaskInfo(nil), r.notifications.tasks...)
+	r.notifications.tasks = nil
+	r.notifications.mu.Unlock()
+	messages := make([]provider.Message, 0, len(tasks))
+	for _, task := range tasks {
+		status := string(task.Status)
+		result := task.Result
+		if result == "" {
+			result = task.Failure
+		}
+		text := fmt.Sprintf("<task-notification>\nid: %s\nname: %s\nstatus: %s\nresult: %s\ntokens_in: %d\ntokens_out: %d\n</task-notification>", task.ID, task.Name, status, result, task.Usage.InputTokens, task.Usage.OutputTokens)
+		messages = append(messages, provider.Message{Role: provider.RoleUser, Blocks: []provider.ContentBlock{{Type: provider.BlockText, Text: text}}})
+	}
+	return messages
+}
+
 func (r *Runner) hookMessages() []provider.Message {
 	if r.hooks == nil {
 		return nil
@@ -576,9 +677,13 @@ func (r *Runner) hookMessages() []provider.Message {
 }
 
 func (r *Runner) runHooks(ctx context.Context, event hooks.Event, hookCtx hooks.Context) {
-	if r.options.Hooks != nil {
-		r.options.Hooks.Run(ctx, event, hookCtx)
+	if r.options.Hooks == nil {
+		return
 	}
+	if r.options.SubAgents != nil {
+		ctx = tools.WithSubAgentHost(ctx, runnerSubAgentHost{runner: r, runtime: r.options.SubAgents})
+	}
+	r.options.Hooks.Run(ctx, event, hookCtx)
 }
 
 func (r *Runner) startMemoryTasks(mode Mode) {

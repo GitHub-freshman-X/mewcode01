@@ -81,6 +81,15 @@ func NewRuleStore(rules RuleSet) *RuleStore {
 	}
 }
 
+func (s *RuleStore) Snapshot() RuleSet {
+	if s == nil {
+		return RuleSet{}
+	}
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	return RuleSet{Session: append([]Rule(nil), s.session...), Project: append([]Rule(nil), s.project...), User: append([]Rule(nil), s.user...)}
+}
+
 func (s *RuleStore) AddSessionRule(rule Rule) {
 	if s == nil {
 		return

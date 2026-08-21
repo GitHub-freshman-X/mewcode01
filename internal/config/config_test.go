@@ -36,6 +36,18 @@ func TestLoadAndDefaults(t *testing.T) {
 	}
 }
 
+func TestEnableVerificationAgentConfig(t *testing.T) {
+	base := "protocol: openai\nmodel: test\nbase_url: http://localhost\napi_key: fake\n"
+	defaults, err := Load(writeConfig(t, base))
+	if err != nil || defaults.Agent.EnableVerificationAgent {
+		t.Fatalf("default config=%+v err=%v", defaults.Agent, err)
+	}
+	enabled, err := Load(writeConfig(t, base+"agent:\n  enable_verification_agent: true\n"))
+	if err != nil || !enabled.Agent.EnableVerificationAgent {
+		t.Fatalf("enabled config=%+v err=%v", enabled.Agent, err)
+	}
+}
+
 func TestContextConfigDefaultsAndOverrides(t *testing.T) {
 	base := "protocol: openai\nmodel: test\nbase_url: http://localhost\napi_key: fake\n"
 	defaults, err := Load(writeConfig(t, base))

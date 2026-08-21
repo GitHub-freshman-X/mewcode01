@@ -43,7 +43,7 @@ func Load(path string) (Config, error) {
 	if err := loader.Load(&raw); err != nil {
 		return Config{}, fmt.Errorf("config: parse YAML: %w", err)
 	}
-	cfg := Config{Protocol: raw.Protocol, Model: raw.Model, BaseURL: raw.BaseURL, APIKey: raw.APIKey, Thinking: raw.Thinking, Agent: AgentConfig{MaxIterations: raw.Agent.MaxIterations}, Permissions: raw.Permissions, MCPServers: raw.MCPServers, MaxTokens: DefaultMaxTokens}
+	cfg := Config{Protocol: raw.Protocol, Model: raw.Model, BaseURL: raw.BaseURL, APIKey: raw.APIKey, Thinking: raw.Thinking, Agent: AgentConfig{MaxIterations: raw.Agent.MaxIterations, EnableVerificationAgent: raw.Agent.EnableVerificationAgent}, Permissions: raw.Permissions, MCPServers: raw.MCPServers, MaxTokens: DefaultMaxTokens}
 	cfg.applyDefaults()
 	raw.Agent.Context.apply(&cfg.Agent.Context)
 	if raw.MaxTokens != nil {
@@ -56,8 +56,9 @@ func Load(path string) (Config, error) {
 }
 
 type rawAgentConfig struct {
-	MaxIterations int              `yaml:"max_iterations,omitempty"`
-	Context       rawContextConfig `yaml:"context,omitempty"`
+	MaxIterations           int              `yaml:"max_iterations,omitempty"`
+	EnableVerificationAgent bool             `yaml:"enable_verification_agent,omitempty"`
+	Context                 rawContextConfig `yaml:"context,omitempty"`
 }
 
 type rawContextConfig struct {

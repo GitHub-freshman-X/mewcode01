@@ -13,6 +13,7 @@ import (
 	"github.com/GitHub-freshman-X/mewcode01/internal/prompt"
 	"github.com/GitHub-freshman-X/mewcode01/internal/provider"
 	"github.com/GitHub-freshman-X/mewcode01/internal/skills"
+	"github.com/GitHub-freshman-X/mewcode01/internal/subagent"
 )
 
 type Mode string
@@ -43,6 +44,7 @@ const (
 type Options struct {
 	MaxIterations   int
 	MaxTokens       int
+	Model           string
 	Thinking        provider.ThinkingOptions
 	Workspace       string
 	SessionID       string
@@ -57,6 +59,8 @@ type Options struct {
 	Logger          *logging.Logger
 	Skills          *skills.Manager
 	Hooks           *hooks.Engine
+	SubAgents       *SubAgentRuntime
+	SystemPrompt    string
 }
 
 type PermissionBridge interface {
@@ -100,6 +104,7 @@ const (
 	EventPermissionResponse EventType = "permission_response"
 	EventUsage              EventType = "usage"
 	EventContextCompaction  EventType = "context_compaction"
+	EventSubAgent           EventType = "subagent"
 	EventCompleted          EventType = "completed"
 	EventStopped            EventType = "stopped"
 	EventCancelled          EventType = "cancelled"
@@ -151,6 +156,7 @@ type Event struct {
 	PermissionConfirmation *permissions.Confirmation
 	Usage                  *provider.Usage
 	ContextCompaction      *CompactionEvent
+	SubAgent               *subagent.TaskInfo
 	Summary                *Summary
 	Err                    error
 }

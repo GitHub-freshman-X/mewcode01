@@ -239,6 +239,9 @@ func (m *Model) statusText() string {
 	}
 	if m.task != nil {
 		usage := m.TokenUsage()
+		if m.runner != nil && m.runner.HasForegroundSubAgent() {
+			return fmt.Sprintf("%s · 子 Agent 前台运行 · ESC 转后台 · Ctrl+C 取消 · tokens in:%d out:%d", mode, usage.InputTokens, usage.OutputTokens)
+		}
 		return fmt.Sprintf("%s · iteration %d · %s · tokens in:%d out:%d · Ctrl+C 取消", mode, m.current.iteration, m.current.phase, usage.InputTokens, usage.OutputTokens)
 	}
 	if m.current.terminal != nil {

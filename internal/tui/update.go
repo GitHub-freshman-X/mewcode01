@@ -7,10 +7,36 @@ import (
 	"github.com/GitHub-freshman-X/mewcode01/internal/agent"
 	"github.com/GitHub-freshman-X/mewcode01/internal/command"
 	"github.com/GitHub-freshman-X/mewcode01/internal/permissions"
+	"github.com/GitHub-freshman-X/mewcode01/internal/subagent"
 )
+
+type subAgentNotificationMsg struct{ notification subagent.TaskNotification }
+
+func waitForSubAgentNotification(ch <-chan subagent.TaskNotification) tea.Cmd {
+	if ch == nil {
+		return nil
+	}
+	return func() tea.Msg {
+		notification, ok := <-ch
+		if !ok {
+			return nil
+		}
+		return subAgentNotificationMsg{notification: notification}
+	}
+}
 
 func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
+	case subAgentNotificationMsg:
+		task := msg.notification.Task
+		if task.Status != subagent.TaskRunning {
+			result := task.Result
+			if result == "" {
+				result = task.Failure
+			}
+			m.AddSystemMessage("子 Agent " + task.Name + " " + string(task.Status) + ": " + result)
+		}
+		return m, waitForSubAgentNotification(m.subAgentNotifications)
 	case permissionRequestMsg:
 		m.pendingPermission = &pendingPermission{decision: msg.decision, reply: msg.reply}
 		m.refreshContent()
@@ -27,6 +53,10 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		key := msg.String()
 		if m.pendingPermission != nil {
 			return m, m.handlePermissionKey(key)
+		}
+		if key == "esc" && m.task != nil && m.runner != nil && m.runner.BackgroundForegroundSubAgent() {
+			m.AddSystemMessage("子 Agent 已转入后台。")
+			return m, waitForAgent(m.task.Events)
 		}
 		if key == keyCancelOrQuit {
 			if m.task != nil {

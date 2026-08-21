@@ -31,6 +31,15 @@ func (e *Engine) SetPromptSink(sink PromptSink) {
 	e.executor.PromptSink = sink
 }
 
+func (e *Engine) SetAgentRunner(runner AgentRunner) {
+	if e == nil {
+		return
+	}
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	e.executor.AgentRunner = runner
+}
+
 func (e *Engine) Run(ctx context.Context, event Event, hookCtx Context) []Result {
 	if e == nil {
 		return nil

@@ -27,6 +27,7 @@ import (
 	"github.com/GitHub-freshman-X/mewcode01/internal/provider"
 	"github.com/GitHub-freshman-X/mewcode01/internal/provider/factory"
 	"github.com/GitHub-freshman-X/mewcode01/internal/skills"
+	"github.com/GitHub-freshman-X/mewcode01/internal/subagent"
 	"github.com/GitHub-freshman-X/mewcode01/internal/tools"
 	"github.com/GitHub-freshman-X/mewcode01/internal/tui"
 )
@@ -127,8 +128,22 @@ func run(args []string, stderr io.Writer) int {
 		fmt.Fprintln(stderr, "session create:", err)
 		return 1
 	}
+	definitions, err := subagent.Discover(subagent.DiscoverOptions{
+		ProjectDir:              filepath.Join(root, ".mewcode", "agents"),
+		UserDir:                 filepath.Join(configRoot, "mewcode", "agents"),
+		EnableVerificationAgent: cfg.Agent.EnableVerificationAgent,
+	})
+	if err != nil {
+		fmt.Fprintln(stderr, "agents:", err)
+		return 1
+	}
+	subAgentRuntime := agent.NewSubAgentRuntime(definitions, subagent.NewTaskManager())
 	registry, err := tools.NewDefaultRegistry(root)
 	if err != nil {
+		fmt.Fprintln(stderr, err)
+		return 1
+	}
+	if err := registry.Register(tools.NewAgentTool()); err != nil {
 		fmt.Fprintln(stderr, err)
 		return 1
 	}
@@ -185,6 +200,7 @@ func run(args []string, stderr io.Writer) int {
 	runner := agent.NewRunner(p, session, registry, executor, agent.Options{
 		MaxIterations:   cfg.Agent.MaxIterations,
 		MaxTokens:       cfg.MaxTokens,
+		Model:           cfg.Model,
 		Thinking:        provider.ThinkingOptions{Enabled: cfg.Thinking.Enabled, BudgetTokens: cfg.Thinking.BudgetTokens},
 		Workspace:       root,
 		SessionID:       sessionMeta.ID,
@@ -195,11 +211,13 @@ func run(args []string, stderr io.Writer) int {
 		Logger:          logger,
 		Skills:          skillManager,
 		Hooks:           hookEngine,
+		SubAgents:       subAgentRuntime,
 		OptionalModules: prompt.OptionalModules{CustomInstructions: nonEmpty(customInstructions), LongTermMemory: memoryIndexes},
 		Memory: memory.NewService(memoryPaths, memory.ServiceOptions{
 			Caller: providerMemoryCaller{provider: p}, Sessions: memorySessionLister{store: sessionStore}, Logger: logger,
 		}),
 	})
+	hookEngine.SetAgentRunner(hookSubAgentRunner{})
 	if err := runTUI(runner, session, bridge); err != nil {
 		fmt.Fprintln(stderr, "tui:", err)
 		return 1
@@ -256,6 +274,23 @@ func permissionMode(mode config.PermissionMode) permissions.Mode {
 	default:
 		return permissions.ModeDefault
 	}
+}
+
+type hookSubAgentRunner struct{}
+
+func (hookSubAgentRunner) RunHookAgent(ctx context.Context, prompt string) (string, error) {
+	host, ok := tools.SubAgentHostFromContext(ctx)
+	if !ok {
+		return "", fmt.Errorf("subagent runtime is not available for this hook event")
+	}
+	result, err := host.DispatchSubAgent(ctx, tools.AgentInput{Prompt: prompt, Description: "hook agent task", SubagentType: "general-purpose", RunInBackground: true})
+	if err != nil {
+		return "", err
+	}
+	if result.Error != nil {
+		return "", fmt.Errorf("%s", result.Error.Message)
+	}
+	return result.JSON(), nil
 }
 
 func newHTTPClient() *http.Client {
