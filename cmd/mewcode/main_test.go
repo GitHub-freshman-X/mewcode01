@@ -22,6 +22,11 @@ import (
 
 type stubProvider struct{}
 
+const expectedStartupCatBanner = ` /\_/\\
+( o.o )
+ > ^ <
+`
+
 func (stubProvider) Stream(_ context.Context, _ provider.ChatRequest) (<-chan provider.StreamEvent, <-chan error) {
 	return nil, nil
 }
@@ -41,6 +46,44 @@ func TestRunConfigOverride(t *testing.T) {
 	runTUI = func(*agent.Runner, *conversation.Session, *tui.PermissionBridge) error { return nil }
 	if code := run([]string{"--config", "custom.yaml"}, &bytes.Buffer{}); code != 0 || loaded != "custom.yaml" {
 		t.Fatalf("code=%d loaded=%s", code, loaded)
+	}
+}
+
+func TestRunDoesNotPrintStartupCatBannerBeforeTUI(t *testing.T) {
+	origLoad, origNew, origTUI, origPaths, origUserDir := loadConfig, newProvider, runTUI, permissionFilePaths, userConfigDir
+	defer func() {
+		loadConfig, newProvider, runTUI, permissionFilePaths, userConfigDir = origLoad, origNew, origTUI, origPaths, origUserDir
+	}()
+	root := t.TempDir()
+	userRoot := t.TempDir()
+	origWD, err := os.Getwd()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chdir(root); err != nil {
+		t.Fatal(err)
+	}
+	defer os.Chdir(origWD)
+	loadConfig = func(string) (config.Config, error) { return validTestConfig(), nil }
+	newProvider = func(config.Config, *http.Client, *logging.Logger) (provider.Provider, error) {
+		return stubProvider{}, nil
+	}
+	permissionFilePaths = func(string) (permissions.FilePaths, error) { return permissions.FilePaths{}, nil }
+	userConfigDir = func() (string, error) { return userRoot, nil }
+	called := false
+	runTUI = func(*agent.Runner, *conversation.Session, *tui.PermissionBridge) error {
+		called = true
+		return nil
+	}
+	var stderr bytes.Buffer
+	if code := run([]string{"--config", "test.yaml"}, &stderr); code != 0 {
+		t.Fatalf("code=%d stderr=%q", code, stderr.String())
+	}
+	if !called {
+		t.Fatal("TUI was not called")
+	}
+	if strings.Contains(stderr.String(), expectedStartupCatBanner) {
+		t.Fatalf("banner printed before TUI: %q", stderr.String())
 	}
 }
 
@@ -211,6 +254,9 @@ func TestRunSafeFailure(t *testing.T) {
 	var stderr bytes.Buffer
 	if code := run([]string{"--config", "x"}, &stderr); code == 0 || stderr.String() == "" {
 		t.Fatalf("code=%d stderr=%q", code, stderr.String())
+	}
+	if strings.Contains(stderr.String(), expectedStartupCatBanner) {
+		t.Fatalf("banner printed on startup failure: %q", stderr.String())
 	}
 }
 

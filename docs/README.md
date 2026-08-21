@@ -34,3 +34,4 @@ chNN-topic/
 | `ch00/02-env-loading` | Environment Loading：项目 `.env` 自动加载与安全变量优先级 | [Spec](ch00/02-env-loading/spec.md) |
 | `ch00/03-log-source-location` | Log Source Location：日志调用点文件与行号 | [Spec](ch00/03-log-source-location/spec.md) |
 | `ch00/05-tui-message-visuals` | TUI 消息视觉层级与会话分隔：消息背景色与会话切换定位 | [Spec](ch00/05-tui-message-visuals/spec.md) · [Plan](ch00/05-tui-message-visuals/plan.md) · [Tasks](ch00/05-tui-message-visuals/task.md) · [Checklist](ch00/05-tui-message-visuals/checklist.md) |
+| `ch00/06-startup-cat-banner` | 启动猫头横幅：进入 TUI 前输出固定 ASCII 猫头 | [Spec](ch00/06-startup-cat-banner/spec.md) · [Plan](ch00/06-startup-cat-banner/plan.md) · [Tasks](ch00/06-startup-cat-banner/task.md) · [Checklist](ch00/06-startup-cat-banner/checklist.md) |

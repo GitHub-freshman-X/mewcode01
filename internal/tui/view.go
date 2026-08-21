@@ -9,6 +9,11 @@ import (
 	"github.com/GitHub-freshman-X/mewcode01/internal/provider"
 )
 
+const startupCatBanner = ` /\_/\\
+( o.o )
+ > ^ <
+`
+
 func (m *Model) View() tea.View {
 	content := m.viewport.View() + "\n" + m.textarea.View() + "\n" + statusStyle.Render(m.statusText())
 	v := tea.NewView(content)
@@ -19,7 +24,19 @@ func (m *Model) View() tea.View {
 
 func (m *Model) refreshContent() {
 	wasBottom := m.viewport.AtBottom()
+	m.viewport.SetContent(m.renderViewportContent())
+	if m.autoFollow || wasBottom {
+		m.viewport.GotoBottom()
+		m.autoFollow = true
+	}
+}
+
+func (m *Model) renderViewportContent() string {
 	var b strings.Builder
+	if m.showStartupCatBanner {
+		b.WriteString(startupCatBanner)
+		b.WriteString("\n")
+	}
 	for _, segment := range m.historySegments {
 		if segment.content != "" {
 			fmt.Fprintln(&b, segment.content)
@@ -31,11 +48,7 @@ func (m *Model) refreshContent() {
 		b.WriteString("\n")
 	}
 	b.WriteString(m.renderCurrentContent())
-	m.viewport.SetContent(strings.TrimRight(b.String(), "\n"))
-	if m.autoFollow || wasBottom {
-		m.viewport.GotoBottom()
-		m.autoFollow = true
-	}
+	return strings.TrimRight(b.String(), "\n")
 }
 
 func (m *Model) renderCurrentContent() string {

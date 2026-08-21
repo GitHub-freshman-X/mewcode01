@@ -113,6 +113,22 @@ func TestExitCommandQuitsWithoutSessionWrite(t *testing.T) {
 	}
 }
 
+func TestInitialViewDisplaysStartupCatBannerOutsideMessages(t *testing.T) {
+	session := conversation.NewSession()
+	m := NewModel(nil, session)
+	view := m.renderViewportContent()
+	banner := strings.TrimSuffix(startupCatBanner, "\n")
+	if count := strings.Count(view, banner); count != 1 {
+		t.Fatalf("banner count=%d view=%q", count, view)
+	}
+	if strings.Contains(m.renderCurrentContent(), banner) {
+		t.Fatalf("banner rendered as message content: %q", m.renderCurrentContent())
+	}
+	if len(session.DisplaySnapshot()) != 0 || len(m.systemMessages) != 0 {
+		t.Fatalf("banner leaked into session state: display=%v system=%v", session.DisplaySnapshot(), m.systemMessages)
+	}
+}
+
 func TestSystemMessageFollowsCurrentCommand(t *testing.T) {
 	m := NewModel(nil, conversation.NewSession())
 	m.current = taskView{prompt: "/do", terminalTy: agent.EventFailed, err: errors.New("no valid plan")}
@@ -375,6 +391,9 @@ func TestClearPreservesDisplayAndStartsNewSessionBoundary(t *testing.T) {
 	if len(previous.Snapshot()) != 2 || len(m.session.Snapshot()) != 0 || len(m.session.DisplaySnapshot()) != 0 {
 		t.Fatalf("session display leaked into history: previous=%d current=%d display=%d", len(previous.Snapshot()), len(m.session.Snapshot()), len(m.session.DisplaySnapshot()))
 	}
+	if count := strings.Count(m.renderViewportContent(), strings.TrimSuffix(startupCatBanner, "\n")); count != 1 {
+		t.Fatalf("banner count after clear=%d", count)
+	}
 }
 
 func TestSessionNewPreservesDisplayAndStartsNewSessionBoundary(t *testing.T) {
@@ -390,6 +409,9 @@ func TestSessionNewPreservesDisplayAndStartsNewSessionBoundary(t *testing.T) {
 	}
 	if len(previous.Snapshot()) != 2 || len(m.session.Snapshot()) != 0 {
 		t.Fatalf("session switch changed history: previous=%d current=%d", len(previous.Snapshot()), len(m.session.Snapshot()))
+	}
+	if count := strings.Count(m.renderViewportContent(), strings.TrimSuffix(startupCatBanner, "\n")); count != 1 {
+		t.Fatalf("banner count after session new=%d", count)
 	}
 }
 
@@ -431,6 +453,9 @@ func TestSessionResumePreservesDisplayAndStartsSessionBoundary(t *testing.T) {
 	}
 	if len(previous.Snapshot()) != 2 || len(m.session.Snapshot()) != 2 || len(m.session.DisplaySnapshot()) != 2 {
 		t.Fatalf("session boundary leaked into history: previous=%d current=%d display=%d", len(previous.Snapshot()), len(m.session.Snapshot()), len(m.session.DisplaySnapshot()))
+	}
+	if count := strings.Count(m.renderViewportContent(), strings.TrimSuffix(startupCatBanner, "\n")); count != 1 {
+		t.Fatalf("banner count after session resume=%d", count)
 	}
 }
 

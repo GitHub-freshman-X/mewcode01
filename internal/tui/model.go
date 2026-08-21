@@ -62,6 +62,7 @@ type Model struct {
 	completion                   []string
 	completionIndex              int
 	memoryClearPending           bool
+	showStartupCatBanner         bool
 	exitRequested                bool
 }
 
@@ -80,7 +81,7 @@ func NewModelWithPermissions(runner *agent.Runner, session *conversation.Session
 	input.Focus()
 	vp := viewport.New(viewport.WithWidth(80), viewport.WithHeight(16))
 	vp.SoftWrap = true
-	m := &Model{runner: runner, session: session, permissionBridge: bridge, textarea: input, viewport: vp, width: 80, height: 20, autoFollow: true, ctx: context.Background(), commands: command.DefaultRegistry()}
+	m := &Model{runner: runner, session: session, permissionBridge: bridge, textarea: input, viewport: vp, width: 80, height: 20, autoFollow: true, ctx: context.Background(), commands: command.DefaultRegistry(), showStartupCatBanner: true}
 	m.RefreshCommands()
 	m.refreshContent()
 	return m
