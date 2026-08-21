@@ -144,6 +144,22 @@ mcp_servers:
 	}
 }
 
+func TestLoadAcceptsHooksForSeparateHookLoader(t *testing.T) {
+	_, err := Load(writeConfig(t, `protocol: openai
+model: test
+base_url: http://localhost
+api_key: fake
+hooks:
+  - event: session_start
+    action:
+      type: prompt
+      message: hello
+`))
+	if err != nil {
+		t.Fatalf("Load() error = %v", err)
+	}
+}
+
 func TestInvalidMCPServerConfig(t *testing.T) {
 	base := "protocol: openai\nmodel: test\nbase_url: http://localhost\napi_key: fake\nmcp_servers:\n  server:\n"
 	for name, suffix := range map[string]string{

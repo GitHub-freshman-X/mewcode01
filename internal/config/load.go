@@ -37,6 +37,7 @@ func Load(path string) (Config, error) {
 		Agent       rawAgentConfig             `yaml:"agent,omitempty"`
 		Permissions PermissionConfig           `yaml:"permissions,omitempty"`
 		MCPServers  map[string]MCPServerConfig `yaml:"mcp_servers,omitempty"`
+		Hooks       any                        `yaml:"hooks,omitempty"`
 	}
 	var raw rawConfig
 	if err := loader.Load(&raw); err != nil {
