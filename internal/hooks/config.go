@@ -11,17 +11,17 @@ import (
 	"go.yaml.in/yaml/v4"
 )
 
-type FilePaths struct{ User, Project, Local string }
+type FilePaths struct{ User, Project string }
 
 func DefaultFilePaths(workspace string) (FilePaths, error) {
 	if strings.TrimSpace(workspace) == "" {
 		return FilePaths{}, errors.New("hook workspace is required")
 	}
-	home, err := os.UserHomeDir()
+	configDir, err := os.UserConfigDir()
 	if err != nil {
-		return FilePaths{}, fmt.Errorf("resolve home directory: %w", err)
+		return FilePaths{}, fmt.Errorf("resolve user config directory: %w", err)
 	}
-	return FilePaths{User: filepath.Join(home, ".mewcode", "config.yaml"), Project: filepath.Join(workspace, ".mewcode", "config.yaml"), Local: filepath.Join(workspace, ".mewcode", "config.local.yaml")}, nil
+	return FilePaths{User: filepath.Join(configDir, "mewcode", "config.yaml"), Project: filepath.Join(workspace, ".mewcode", "config.yaml")}, nil
 }
 
 func LoadRuleSet(paths FilePaths) ([]Rule, error) {
@@ -29,7 +29,7 @@ func LoadRuleSet(paths FilePaths) ([]Rule, error) {
 	for _, item := range []struct {
 		path  string
 		label string
-	}{{paths.User, "user"}, {paths.Project, "project"}, {paths.Local, "local"}} {
+	}{{paths.User, "user"}, {paths.Project, "project"}} {
 		loaded, err := loadFile(item.path)
 		if err != nil {
 			return nil, err

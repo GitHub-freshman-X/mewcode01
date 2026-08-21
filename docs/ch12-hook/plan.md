@@ -43,7 +43,7 @@ Executor 根据动作类型执行经变量展开后的动作。`Result` 只向�
 
 ### `hooks.FilePaths` 与 `hooks.RuleSet`
 
-`FilePaths` 解析用户级 `~/.mewcode/config.yaml`、项目级 `.mewcode/config.yaml`、本地级 `.mewcode/config.local.yaml`。加载器只读取各文件的 `hooks` 字段，按用户、项目、本地顺序追加有效规则；缺失文件和缺失字段均表示空规则集。由于主运行配置目前只从用户配置读取，Hook 加载器直接处理三份 YAML，避免改变现有 Provider 配置的覆盖语义。
+`FilePaths` 解析用户级 `os.UserConfigDir()/mewcode/config.yaml` 和项目级 `.mewcode/config.yaml`。加载器只读取各文件的 `hooks` 字段，按用户、项目顺序追加有效规则；缺失文件和缺失字段均表示空规则集。
 
 ## 模块设计
 
@@ -65,7 +65,7 @@ Executor 根据动作类型执行经变量展开后的动作。`Result` 只向�
 
 ### `internal/hooks/config.go`
 
-**职责：** 解析三份 YAML 的 `hooks` 序列、注入默认规则标识、编译条件并集中校验每类动作的必填字段和事件约束。
+**职责：** 解析两份 YAML 的 `hooks` 序列、注入默认规则标识、编译条件并集中校验每类动作的必填字段和事件约束。
 
 **对外接口：** `DefaultFilePaths`、`LoadRuleSet`、`ValidateRules`。
 
@@ -99,7 +99,7 @@ Executor 根据动作类型执行经变量展开后的动作。`Result` 只向�
 
 **职责：** 构造 Hook 配置路径与 Engine，注入 Runner；公开完整配置面与章节入口。
 
-**改动：** 在创建 Runner 前加载 Hook 规则；加载错误阻止启动并保留可诊断路径；把同一 Logger 与动作依赖交给引擎。`.mewcode/config.example.yaml` 添加三份配置均可声明的 `hooks` 示例和动作字段；README 增补 Hook 配置位置、加载顺序、限制及安全边界；`docs/README.md` 新增第 12 章索引。
+**改动：** 在创建 Runner 前加载 Hook 规则；加载错误阻止启动并保留可诊断路径；把同一 Logger 与动作依赖交给引擎。`.mewcode/config.example.yaml` 添加两份配置均可声明的 `hooks` 示例和动作字段；README 增补 Hook 配置位置、加载顺序、限制及安全边界；`docs/README.md` 新增第 12 章索引。
 
 ## 模块交互
 
@@ -148,7 +148,7 @@ docs/README.md                       — 章节索引
 
 | 决策点 | 选择 | 理由 |
 |---|---|---|
-| 配置位置 | 复用三层 `config.yaml` 的 `hooks` 字段 | 与理论文档及用户心智一致，同时不改变现有主配置的 Provider 覆盖语义。 |
+| 配置位置 | 复用用户级和项目级 `config.yaml` 的 `hooks` 字段 | 与通用配置位置及用户心智一致。 |
 | Hook 包边界 | 新建独立 `internal/hooks` 包 | 条件、配置和执行器可独立测试，避免 Agent Loop 膨胀。 |
 | 工具拦截位置 | Scheduler 在权限与真实执行前调用 | 同一个入口覆盖所有调度批次，确保拒绝时真实工具零执行。 |
 | 权限与 Hook 的关系 | Hook 仅可拒绝 | 保留第 6 章硬安全边界，禁止利用 Hook 反向放行。 |

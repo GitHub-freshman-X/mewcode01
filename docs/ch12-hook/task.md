@@ -5,7 +5,7 @@
 | 操作 | 文件 | 职责 |
 |---|---|---|
 | 新建 | `internal/hooks/types.go`、`condition.go` | Hook 领域模型、上下文变量、条件解析与匹配 |
-| 新建 | `internal/hooks/config.go` | 三层 YAML 读取、追加合并与加载期校验 |
+| 新建 | `internal/hooks/config.go` | 两层 YAML 读取、追加合并与加载期校验 |
 | 新建 | `internal/hooks/executor.go`、`engine.go` | 四类动作、日志、一次执行、异步与工具前拒绝 |
 | 新建 | `internal/hooks/*_test.go` | Hook 包行为与配置的自动化测试 |
 | 修改 | `internal/agent/event.go`、`runner.go` | Hook 注入、通知保存和非工具生命周期事件 |
@@ -47,7 +47,7 @@
 
 **验证：** `go test ./internal/hooks -run TestCondition` 通过。
 
-## T3: 实现三层配置加载与集中校验
+## T3: 实现两层配置加载与集中校验
 
 **文件：** `internal/hooks/config.go`、`internal/hooks/config_test.go`
 
@@ -55,7 +55,7 @@
 
 **步骤：**
 
-1. 解析用户级 `~/.mewcode/config.yaml`、项目级 `.mewcode/config.yaml`、本地级 `.mewcode/config.local.yaml` 中的 `hooks` 序列；缺失文件或字段视为空。
+1. 解析用户级 `os.UserConfigDir()/mewcode/config.yaml`、项目级 `.mewcode/config.yaml` 中的 `hooks` 序列；缺失文件或字段视为空。
 2. 按用户、项目、本地顺序追加规则并分配稳定的默认标识和声明顺序。
 3. 校验事件、动作类型、`reject`/`async` 约束，以及 command、prompt、http、agent 的必填字段和 command 超时格式。
 4. 将条件解析错误包装为包含配置文件、规则标识或序号和字段的可诊断错误。
@@ -137,11 +137,11 @@
 
 **步骤：**
 
-1. 在解析用户配置目录和工作区后构造 Hook 三层路径，加载并校验规则。
+1. 在解析用户配置目录和工作区后构造 Hook 两层路径，加载并校验规则。
 2. 使用同一 Logger、HTTP Client 与 prompt 通知接收器构造 Engine，并注入 Runner/Scheduler 所需 Options。
 3. 在启动和退出生命周期运行对应 Hook，并让加载错误阻止启动且显示规则来源与字段。
 4. 对现有 Slash Command 分流加入可观测的 command 执行 Hook，保持原命令处理结果不变。
-5. 扩展 main 测试覆盖无规则启动、三层加载、非法规则启动失败和不泄露敏感字段的日志。
+5. 扩展 main 测试覆盖无规则启动、两层加载、非法规则启动失败和不泄露敏感字段的日志。
 
 **验证：** `go test ./cmd/mewcode` 通过。
 
@@ -154,7 +154,7 @@
 **步骤：**
 
 1. 在配置示例中记录全部 `hooks` 配置项及实际默认值，展示格式化、工具前拒绝、会话提示和异步 HTTP 通知示例。
-2. 在 README 说明三份配置位置、追加顺序、三要素、四种动作、变量、一次/异步/超时限制与既有权限边界。
+2. 在 README 说明两份配置位置、追加顺序、三要素、四种动作、变量、一次/异步/超时限制与既有权限边界。
 3. 在文档索引加入第 12 章 Spec、Plan、Tasks、Checklist、人工场景与理论学习稿链接。
 4. 新增人工场景，覆盖格式化、危险调用拦截、首次提示词、HTTP 失败不阻断、配置错误和日志脱敏。
 5. 不在示例中写入真实 webhook、密钥、请求头或会泄露用户信息的命令。

@@ -72,7 +72,7 @@ api_key: replace-with-your-api-key
 - `agent.context`：上下文窗口、摘要和工具结果预算。
 - `permissions.mode`：没有规则命中时的默认权限模式。
 - `mcp_servers`：配置 stdio 或 HTTP MCP 服务。stdio 服务可填写 `command`、`args`、`env`；HTTP 服务可填写 `url`、`headers`。
-- `hooks`：在 `~/.mewcode/config.yaml`、`<项目>/.mewcode/config.yaml` 或 `<项目>/.mewcode/config.local.yaml` 中声明生命周期自动化规则；规则按用户、项目、本地顺序追加。每条规则包含 `event`、可选 `if` 和 `action`。条件可用 `==`、`!=`、`=~`、`~=` 与单一的 `&&` 或 `||` 组合；动作中可使用 `$EVENT`、`$TOOL_NAME`、`$FILE_PATH`、`$MESSAGE`、`$ERROR`、`$TOOL_ARGS.<名称>`。`pre_tool_use` 可通过 `reject: true` 拦截工具调用，且不能设置 `async: true`。可用动作是 `command`、`prompt`、`http`、`agent`；`command.timeout` 控制最长运行时间，`agent` 当前只保留后续运行时对接点。
+- `hooks`：在 `os.UserConfigDir()/mewcode/config.yaml` 或 `<项目>/.mewcode/config.yaml` 中声明生命周期自动化规则；规则按用户、项目顺序追加。每条规则包含 `event`、可选 `if` 和 `action`。条件可用 `==`、`!=`、`=~`、`~=` 与单一的 `&&` 或 `||` 组合；动作中可使用 `$EVENT`、`$TOOL_NAME`、`$FILE_PATH`、`$MESSAGE`、`$ERROR`、`$TOOL_ARGS.<名称>`。`pre_tool_use` 可通过 `reject: true` 拦截工具调用，且不能设置 `async: true`。可用动作是 `command`、`prompt`、`http`、`agent`；`command.timeout` 控制最长运行时间，`agent` 当前只保留后续运行时对接点。
 
 OpenAI Responses API 不支持 `thinking` 配置。配置字段会被严格校验，未知字段或无效值会使程序在启动前失败。
 

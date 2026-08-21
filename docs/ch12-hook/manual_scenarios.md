@@ -2,7 +2,7 @@
 
 ## 目标与范围
 
-本方案在独立 fixture 工作区和真实 Provider 下，验证 Hook 的用户可见行为：三层配置追加、条件匹配、工具前拦截、工具后动作、提示词通知、`once`、异步 HTTP 故障隔离、Slash Command 事件、配置诊断和日志脱敏。
+本方案在独立 fixture 工作区和真实 Provider 下，验证 Hook 的用户可见行为：用户级和项目级配置追加、条件匹配、工具前拦截、工具后动作、提示词通知、`once`、异步 HTTP 故障隔离、Slash Command 事件、配置诊断和日志脱敏。
 
 本方案不替代自动化测试。正则/Glob 边界、并发竞争、命令超时、HTTP 状态编码、结构化工具结果、上下文压缩和取消竞争继续由自动化测试负责。真实模型可能不按预期选择工具；遇到这种情况应记录“模型未调用目标工具”，不要为了通过而在真实项目中执行命令。
 
@@ -21,14 +21,17 @@
 ```sh
 fixture_root=$(mktemp -d /private/tmp/mewcode-ch12-manual.XXXXXX)
 test_home=$(mktemp -d /private/tmp/mewcode-ch12-home.XXXXXX)
-hook_user_dir="$test_home/.mewcode"
+case "$(go env GOOS)" in
+  darwin) hook_user_dir="$test_home/Library/Application Support/mewcode" ;;
+  *) hook_user_dir="$test_home/.config/mewcode" ;;
+esac
 mkdir -p "$fixture_root/.mewcode" "$fixture_root/fixtures" "$hook_user_dir"
 printf 'HOOK-FIXTURE-ALPHA-7e31\n' > "$fixture_root/fixtures/alpha.txt"
 printf 'package fixture\n\nfunc  main(){println("HOOK-FORMAT-42ad")}\n' > "$fixture_root/fixtures/unformatted.go"
 printf 'fixture_root=%s\ntest_home=%s\n' "$fixture_root" "$test_home"
 ```
 
-写入三层 Hook 配置。用户级和项目级规则都应生效；本地级规则用于验证最终追加顺序。`127.0.0.1:1` 应立即拒绝连接，适合作为不依赖外网的异步失败场景。
+写入两层 Hook 配置。用户级和项目级规则都应生效。`127.0.0.1:1` 应立即拒绝连接，适合作为不依赖外网的异步失败场景。
 
 ```sh
 cat > "$hook_user_dir/config.yaml" <<'EOF'
@@ -62,11 +65,7 @@ hooks:
     action:
       type: prompt
       message: "HOOK-SLASH-COMMAND-42e8"
-EOF
-
-cat > "$fixture_root/.mewcode/config.local.yaml" <<'EOF'
-hooks:
-  - id: local-write-notification
+  - id: project-write-notification
     event: post_tool_use
     if: 'tool == "write_file"'
     action:
@@ -88,7 +87,7 @@ permissions:
   mode: default
 ```
 
-构建临时二进制并启动。Hook 用户级配置由 `$HOME/.mewcode/config.yaml` 读取，因此必须通过 `HOME` 隔离。若运行环境不尊重 `HOME`，跳过用户级场景；不要指向真实 `~/.mewcode`。
+构建临时二进制并启动。Hook 用户级配置由 `os.UserConfigDir()/mewcode/config.yaml` 读取；上一步已按当前平台创建隔离目录，因此必须通过 `HOME` 隔离。不要指向真实用户配置目录。
 
 ```sh
 go build -o /private/tmp/mewcode-ch12 /Users/xuchangan/Project/mine/mew-agent/mew01/cmd/mewcode
@@ -100,7 +99,7 @@ HOME="$test_home" /private/tmp/mewcode-ch12 --config <real-config.yaml>
 
 ## 场景 A：配置加载、追加顺序与 once
 
-### A1 三层规则均被加载
+### A1 两层规则均被加载
 
 在 TUI 输入：
 
@@ -119,7 +118,7 @@ HOME="$test_home" /private/tmp/mewcode-ch12 --config <real-config.yaml>
 
 ### A2 配置位置与错误定位
 
-退出 TUI，在本地配置末尾临时加入：
+退出 TUI，在项目配置末尾临时加入：
 
 ```yaml
   - id: invalid-async-pre-tool
@@ -130,7 +129,7 @@ HOME="$test_home" /private/tmp/mewcode-ch12 --config <real-config.yaml>
       command: "true"
 ```
 
-重新启动。通过条件：启动失败，错误同时包含 `config.local.yaml`、`invalid-async-pre-tool` 和 async/pre-tool 约束信息。随后删除该测试规则再重启；有效规则应恢复工作。
+重新启动。通过条件：启动失败，错误同时包含 `config.yaml`、`invalid-async-pre-tool` 和 async/pre-tool 约束信息。随后删除该测试规则再重启；有效规则应恢复工作。
 
 ## 场景 B：工具后格式化和异步 HTTP 故障隔离
 
@@ -153,7 +152,7 @@ grep -n 'HOOK-FORMAT-42ad' "$fixture_root/fixtures/unformatted.go"
 
 - `gofmt -d` 无输出，且唯一标记仍存在。
 - TUI 仍显示原始工具调用和结果；格式化 Hook 失败不得替换或遮蔽主工具结果。
-- 本地 HTTP Hook 连接失败不应使任务失败、取消或停在权限确认状态。
+- 项目 HTTP Hook 连接失败不应使任务失败、取消或停在权限确认状态。
 
 ### B2 异步失败日志
 
@@ -161,7 +160,7 @@ grep -n 'HOOK-FORMAT-42ad' "$fixture_root/fixtures/unformatted.go"
 
 ```sh
 find "$fixture_root/logs" -type f -name '*.jsonl' -print
-rg -n '"stage":"hook"|"rule_id":"local-write-notification"|"status":"failed"' "$fixture_root/logs"
+rg -n '"stage":"hook"|"rule_id":"project-write-notification"|"status":"failed"' "$fixture_root/logs"
 ```
 
 通过条件：至少一条记录含 Hook 阶段、规则标识、`http` 动作、失败状态和安全元数据；日志不应包含 HTTP body 中的路径全文、请求头或 API key。
@@ -242,4 +241,3 @@ printf 'fixture_root=%s\ntest_home=%s\n' "$fixture_root" "$test_home"
 ```
 
 若变量为空、不是 `/private/tmp/mewcode-ch12-*` 或 `/private/tmp/mewcode-ch12-home-*`，停止清理并手动确认路径。
-
