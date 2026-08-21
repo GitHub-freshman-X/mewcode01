@@ -14,12 +14,10 @@ import (
 type FilePaths struct {
 	User    string
 	Project string
-	Local   string
 }
 
 type RuleSet struct {
 	Session []Rule
-	Local   []Rule
 	Project []Rule
 	User    []Rule
 }
@@ -27,7 +25,6 @@ type RuleSet struct {
 type RuleStore struct {
 	mu      sync.RWMutex
 	session []Rule
-	local   []Rule
 	project []Rule
 	user    []Rule
 }
@@ -36,14 +33,13 @@ func DefaultFilePaths(workspace string) (FilePaths, error) {
 	if workspace == "" {
 		return FilePaths{}, errors.New("workspace is required")
 	}
-	home, err := os.UserHomeDir()
+	configDir, err := os.UserConfigDir()
 	if err != nil {
-		return FilePaths{}, fmt.Errorf("resolve home directory: %w", err)
+		return FilePaths{}, fmt.Errorf("resolve user config directory: %w", err)
 	}
 	return FilePaths{
-		User:    filepath.Join(home, ".mewcode", "permissions.yaml"),
+		User:    filepath.Join(configDir, "mewcode", "permissions.yaml"),
 		Project: filepath.Join(workspace, ".mewcode", "permissions.yaml"),
-		Local:   filepath.Join(workspace, ".mewcode", "permissions.local.yaml"),
 	}, nil
 }
 
@@ -56,35 +52,30 @@ func LoadRuleSet(paths FilePaths) (RuleSet, error) {
 	if err != nil {
 		return RuleSet{}, err
 	}
-	local, err := loadRulesFile(paths.Local, ScopeLocal)
-	if err != nil {
-		return RuleSet{}, err
-	}
-	return RuleSet{Local: local, Project: project, User: user}, nil
+	return RuleSet{Project: project, User: user}, nil
 }
 
-func AppendLocalAllow(paths FilePaths, rule Rule) error {
-	if paths.Local == "" {
-		return errors.New("local permissions path is required")
+func AppendProjectAllow(paths FilePaths, rule Rule) error {
+	if paths.Project == "" {
+		return errors.New("project permissions path is required")
 	}
 	if rule.Effect != EffectAllow {
 		return errors.New("only allow rules can be appended")
 	}
-	if err := os.MkdirAll(filepath.Dir(paths.Local), 0o755); err != nil {
-		return fmt.Errorf("create local permissions directory: %w", err)
+	if err := os.MkdirAll(filepath.Dir(paths.Project), 0o755); err != nil {
+		return fmt.Errorf("create project permissions directory: %w", err)
 	}
-	existing, err := loadRuleMap(paths.Local)
+	existing, err := loadRuleMap(paths.Project, ScopeProject)
 	if err != nil {
 		return err
 	}
 	existing[rule.Key] = EffectAllow
-	return writeRuleMap(paths.Local, existing)
+	return writeRuleMap(paths.Project, existing)
 }
 
 func NewRuleStore(rules RuleSet) *RuleStore {
 	return &RuleStore{
 		session: append([]Rule(nil), rules.Session...),
-		local:   append([]Rule(nil), rules.Local...),
 		project: append([]Rule(nil), rules.Project...),
 		user:    append([]Rule(nil), rules.User...),
 	}
@@ -106,7 +97,7 @@ func (s *RuleStore) Find(req Request) (Rule, bool, error) {
 	}
 	s.mu.RLock()
 	defer s.mu.RUnlock()
-	for _, layer := range [][]Rule{s.session, s.local, s.project, s.user} {
+	for _, layer := range [][]Rule{s.session, s.project, s.user} {
 		for _, rule := range layer {
 			ok, err := MatchRule(rule, req)
 			if err != nil {
@@ -138,7 +129,7 @@ func loadRulesFile(path string, scope Scope) ([]Rule, error) {
 	return parseRulesNode(path, scope, &root)
 }
 
-func loadRuleMap(path string) (map[string]Effect, error) {
+func loadRuleMap(path string, scope Scope) (map[string]Effect, error) {
 	out := make(map[string]Effect)
 	if path == "" {
 		return out, nil
@@ -168,7 +159,7 @@ func loadRuleMap(path string) (map[string]Effect, error) {
 	for i := 0; i < len(rulesNode.Content); i += 2 {
 		key := rulesNode.Content[i].Value
 		effect := Effect(rulesNode.Content[i+1].Value)
-		if _, err := ParseRule(key, effect, ScopeLocal, i/2); err != nil {
+		if _, err := ParseRule(key, effect, scope, i/2); err != nil {
 			return nil, fmt.Errorf("%s: invalid rule %q: %w", path, key, err)
 		}
 		out[key] = effect
@@ -249,10 +240,10 @@ func writeRuleMap(path string, rules map[string]Effect) error {
 	}
 	data, err := yaml.Marshal(root)
 	if err != nil {
-		return fmt.Errorf("encode local permissions file: %w", err)
+		return fmt.Errorf("encode project permissions file: %w", err)
 	}
 	if err := os.WriteFile(path, data, 0o644); err != nil {
-		return fmt.Errorf("write local permissions file %s: %w", path, err)
+		return fmt.Errorf("write project permissions file %s: %w", path, err)
 	}
 	return nil
 }

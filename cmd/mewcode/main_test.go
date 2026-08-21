@@ -32,8 +32,10 @@ func (stubProvider) Stream(_ context.Context, _ provider.ChatRequest) (<-chan pr
 }
 
 func TestRunConfigOverride(t *testing.T) {
-	origDefault, origLoad, origNew, origTUI := defaultConfigPath, loadConfig, newProvider, runTUI
-	defer func() { defaultConfigPath, loadConfig, newProvider, runTUI = origDefault, origLoad, origNew, origTUI }()
+	origDefault, origLoad, origNew, origTUI, origPaths := defaultConfigPath, loadConfig, newProvider, runTUI, permissionFilePaths
+	defer func() {
+		defaultConfigPath, loadConfig, newProvider, runTUI, permissionFilePaths = origDefault, origLoad, origNew, origTUI, origPaths
+	}()
 	defaultConfigPath = func() (string, error) { return "default", nil }
 	var loaded string
 	loadConfig = func(path string) (config.Config, error) {
@@ -43,6 +45,7 @@ func TestRunConfigOverride(t *testing.T) {
 	newProvider = func(config.Config, *http.Client, *logging.Logger) (provider.Provider, error) {
 		return stubProvider{}, nil
 	}
+	permissionFilePaths = func(string) (permissions.FilePaths, error) { return permissions.FilePaths{}, nil }
 	runTUI = func(*agent.Runner, *conversation.Session, *tui.PermissionBridge) error { return nil }
 	if code := run([]string{"--config", "custom.yaml"}, &bytes.Buffer{}); code != 0 || loaded != "custom.yaml" {
 		t.Fatalf("code=%d loaded=%s", code, loaded)
@@ -174,7 +177,6 @@ func TestRunPermissionRulesMissingAllowed(t *testing.T) {
 		return permissions.FilePaths{
 			User:    filepath.Join(dir, "missing-user.yaml"),
 			Project: filepath.Join(dir, "missing-project.yaml"),
-			Local:   filepath.Join(dir, "missing-local.yaml"),
 		}, nil
 	}
 	loadConfig = func(string) (config.Config, error) { return validTestConfig(), nil }

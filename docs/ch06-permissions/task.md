@@ -10,7 +10,7 @@
 | 新建 | `internal/permissions/path_test.go` | 相对路径、绝对路径、符号链接逃逸测试 |
 | 新建 | `internal/permissions/blacklist.go` | 危险命令正则黑名单 |
 | 新建 | `internal/permissions/blacklist_test.go` | 黑名单命中与误伤测试 |
-| 新建 | `internal/permissions/config.go` | 三层规则 YAML 加载与本地规则写入 |
+| 新建 | `internal/permissions/config.go` | 用户级、项目级规则 YAML 加载与项目级规则写入 |
 | 新建 | `internal/permissions/config_test.go` | 规则文件加载、优先级、非法配置测试 |
 | 新建 | `internal/permissions/request.go` | 工具调用参数转权限请求 |
 | 新建 | `internal/permissions/request_test.go` | 命令、文件、搜索匹配对象构造测试 |
@@ -45,7 +45,6 @@
 | 修改 | `internal/tui/tui_test.go` | 权限确认交互测试 |
 | 修改 | `config.example.yaml` | 示例 `permissions.mode` |
 | 修改 | `docs/README.md` | ch06 文档索引 |
-| 修改 | `.gitignore` | 忽略 `.mewcode/permissions.local.yaml` |
 
 ## T1: 建立权限规则解析与匹配
 
@@ -88,18 +87,18 @@
 
 **验证：** `go test ./internal/permissions -run 'Blacklist|DangerousCommand'` 通过。
 
-## T4: 实现三层规则文件加载与本地写入
+## T4: 实现两层规则文件加载与项目级写入
 
 **文件：** `internal/permissions/config.go`、`internal/permissions/config_test.go`
 **依赖：** T1
 **步骤：**
 1. 定义 `FilePaths`、`RuleSet`、`RuleStore` 和规则文件 YAML 结构。
-2. 实现 `DefaultFilePaths(workspace string)`，返回用户级、项目级、本地级规则路径。
+2. 实现 `DefaultFilePaths(workspace string)`，返回 `os.UserConfigDir()/mewcode/permissions.yaml` 与 `<项目根>/.mewcode/permissions.yaml`。
 3. 实现 `LoadRuleSet(paths FilePaths)`，缺失文件视为空，存在文件必须严格解析。
 4. 校验未知字段、非法 YAML、非法 effect、非法规则键和非法 glob。
-5. 实现并发安全的 `RuleStore`，按 Session、Local、Project、User 顺序查找。
-6. 实现 `AppendLocalAllow`，创建父目录并把 allow 规则追加到本地级 YAML。
-7. 添加测试覆盖缺失文件、三层加载、非法配置报错、永久 allow 写入。
+5. 实现并发安全的 `RuleStore`，按 Session、Project、User 顺序查找。
+6. 实现 `AppendProjectAllow`，创建父目录并把 allow 规则追加到项目级 YAML。
+7. 添加测试覆盖缺失文件、两层加载、非法配置报错、永久 allow 写入。
 
 **验证：** `go test ./internal/permissions -run 'RuleSet|RuleStore|LocalAllow|Config'` 通过。
 
@@ -141,7 +140,7 @@
 **依赖：** T3、T4、T6
 **步骤：**
 1. 定义 `Mode`、`Decision`、`Confirmation`、`Choice`。
-2. 实现 `Engine.Decide`，按黑名单、沙箱、会话、本地、项目、用户、模式默认的顺序决策。
+2. 实现 `Engine.Decide`，按黑名单、沙箱、会话、项目、用户、模式默认的顺序决策。
 3. 实现严格、默认、放行三种模式的默认行为。
 4. 确保显式 deny 不被放行模式覆盖，显式 allow 可在严格模式下放行。
 5. 实现 `ApplyConfirmation`，处理本会话 allow 和永久 allow；本次 allow 不写规则。
@@ -184,7 +183,7 @@
 1. 修改 `NewScheduler`，接收权限引擎和确认桥，同时保留 nil 权限兼容路径。
 2. 在每个工具调用执行前调用 `Engine.Decide`。
 3. allow 时执行原工具；deny 时生成权限失败工具结果；ask 时发出确认请求并调用确认桥。
-4. 根据确认结果执行、写入会话规则、写入本地规则、拒绝或取消。
+4. 根据确认结果执行、写入会话规则、写入项目级规则、拒绝或取消。
 5. 保持结果按模型原始工具调用顺序写回。
 6. 保持只读并发和副作用串行批次语义；需要确认的调用不并发弹多个确认。
 7. 添加测试覆盖允许执行、拒绝不执行、ask 本次允许、ask 本会话允许、ask 拒绝、ask 取消、多工具顺序。
@@ -252,7 +251,6 @@
 **步骤：**
 1. 在 `config.example.yaml` 增加 `permissions.mode: default` 示例。
 2. 在 `docs/README.md` 增加 `ch06` 索引。
-3. 在 `.gitignore` 增加 `.mewcode/permissions.local.yaml`。
 4. 确认不覆盖用户已有 `.gitignore` 其他修改。
 
 **验证：** `git diff -- config.example.yaml docs/README.md .gitignore` 只包含第六章相关改动。
@@ -287,4 +285,3 @@ T5 → T6 → T7 → T8
               ↓
              T16
 ```
-

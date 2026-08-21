@@ -13,9 +13,9 @@ func TestDeniedToolResultEncodesPermissionError(t *testing.T) {
 	decision := Decision{
 		Action:  ActionDeny,
 		Stage:   StageRule,
-		Reason:  "local rule matched",
+		Reason:  "project rule matched",
 		Request: Request{Tool: "write_file", MatchTarget: "secret.txt"},
-		Rule:    &Rule{Scope: ScopeLocal, Effect: EffectDeny, Key: "write_file(secret.txt)"},
+		Rule:    &Rule{Scope: ScopeProject, Effect: EffectDeny, Key: "write_file(secret.txt)"},
 	}
 	result := DeniedToolResult(call, decision)
 	if result.CallID != "call-1" || result.Name != "write_file" || !result.IsError {
@@ -28,7 +28,7 @@ func TestDeniedToolResultEncodesPermissionError(t *testing.T) {
 	if payload.Success || payload.Error == nil || payload.Error.Type != tools.ErrorPermission {
 		t.Fatalf("unexpected payload: %#v", payload)
 	}
-	if payload.Error.Details["stage"] != string(StageRule) || payload.Error.Details["scope"] != string(ScopeLocal) {
+	if payload.Error.Details["stage"] != string(StageRule) || payload.Error.Details["scope"] != string(ScopeProject) {
 		t.Fatalf("unexpected details: %#v", payload.Error.Details)
 	}
 }

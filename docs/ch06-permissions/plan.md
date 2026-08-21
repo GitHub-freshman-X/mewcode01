@@ -2,7 +2,7 @@
 
 ## 架构概览
 
-权限系统新增为独立的 `internal/permissions` 包，负责把一次工具调用转换为可判定的权限请求，并按黑名单、路径沙箱、规则层级、权限模式和用户确认的顺序给出决策。该包不依赖 TUI，也不直接执行工具；它只返回 allow、deny 或 ask，并提供可写入会话/本地规则的结果。
+权限系统新增为独立的 `internal/permissions` 包，负责把一次工具调用转换为可判定的权限请求，并按黑名单、路径沙箱、规则层级、权限模式和用户确认的顺序给出决策。该包不依赖 TUI，也不直接执行工具；它只返回 allow、deny 或 ask，并提供可写入会话/项目规则的结果。
 
 工具层继续负责工具参数校验和真实执行，但会为权限系统补充“权限元数据”：每个工具声明自己的匹配对象来源、路径参数和安全分类。现有 `tools.Executor` 保持“执行一个工具调用并返回结构化工具结果”的边界，权限门禁放在 `agent.Scheduler` 调用 Executor 之前，确保同一响应里的每个工具调用都先判定再执行。
 
@@ -10,7 +10,7 @@ Agent 层负责把权限决策接入现有循环：允许的调用按原调度�
 
 TUI 层负责人在回路体验：展示权限请求，提供本次允许、本会话允许、永久允许、拒绝和取消。TUI 不实现权限规则判断，只把用户选择交回 Agent。脚本化测试使用内存确认器，不需要启动真实界面。
 
-配置层负责加载主配置里的权限模式，以及三层规则 YAML。规则文件采用简单映射结构，用户级、项目级、本地级分别加载并严格校验；永久允许只写入本地级规则文件。
+配置层负责加载主配置里的权限模式，以及用户级、项目级规则 YAML。规则文件采用简单映射结构，分别加载并严格校验；永久允许只写入项目级规则文件。
 
 ## 核心数据结构
 
@@ -48,13 +48,12 @@ type Scope string
 
 const (
     ScopeSession Scope = "session"
-    ScopeLocal   Scope = "local"
     ScopeProject Scope = "project"
     ScopeUser    Scope = "user"
 )
 ```
 
-`Scope` 标记规则来源和优先级。会话级规则仅存在内存中；本地级规则可由“永久允许”写入。
+`Scope` 标记规则来源和优先级。会话级规则仅存在内存中；项目级规则可由“永久允许”写入。
 
 ### permissions.Rule
 
@@ -76,13 +75,12 @@ type Rule struct {
 ```go
 type RuleSet struct {
     Session []Rule
-    Local   []Rule
     Project []Rule
     User    []Rule
 }
 ```
 
-`RuleSet` 保存四层规则。决策顺序固定为 Session、Local、Project、User；每层内部按文件顺序匹配，先命中者生效。
+`RuleSet` 保存三层规则。决策顺序固定为 Session、Project、User；每层内部按文件顺序匹配，先命中者生效。
 
 ### permissions.Request
 
@@ -177,7 +175,7 @@ func MatchRule(rule Rule, req Request) (bool, error)
 
 ### internal/permissions/config.go
 
-**职责：** 定义规则文件 YAML 结构，加载用户级、项目级、本地级规则，并提供本地级永久规则写入。
+**职责：** 定义规则文件 YAML 结构，加载用户级、项目级规则，并提供项目级永久规则写入。
 
 **对外接口：**
 
@@ -185,12 +183,11 @@ func MatchRule(rule Rule, req Request) (bool, error)
 type FilePaths struct {
     User    string
     Project string
-    Local   string
 }
 
 func DefaultFilePaths(workspace string) (FilePaths, error)
 func LoadRuleSet(paths FilePaths) (RuleSet, error)
-func AppendLocalAllow(paths FilePaths, rule Rule) error
+func AppendProjectAllow(paths FilePaths, rule Rule) error
 ```
 
 **依赖：** `go.yaml.in/yaml/v4`、文件系统、`permissions.ParseRule`。
@@ -246,7 +243,7 @@ func SuggestedRuleKey(req Request) string
 
 ### internal/permissions/engine.go
 
-**职责：** 实现完整权限决策顺序：黑名单、路径沙箱、会话规则、本地规则、项目规则、用户规则、权限模式、询问。
+**职责：** 实现完整权限决策顺序：黑名单、路径沙箱、会话规则、项目规则、用户规则、权限模式、询问。
 
 **对外接口：**
 
@@ -378,7 +375,7 @@ type Config struct {
 
 ### cmd/mewcode/main.go
 
-**职责：** 组装权限系统：确定工作区，加载三层规则文件，创建权限引擎，创建 TUI 确认桥，并传入 Runner。
+**职责：** 组装权限系统：确定工作区，加载用户级、项目级规则文件，创建权限引擎，创建 TUI 确认桥，并传入 Runner。
 
 **依赖：** `internal/permissions`、已有 config/tools/agent/tui。
 
@@ -396,22 +393,22 @@ func NewPermissionBridge() *PermissionBridge
 
 ### docs/README.md、config.example.yaml、.gitignore
 
-**职责：** 文档索引新增第六章；示例配置展示 `permissions.mode`；`.gitignore` 建议忽略 `.mewcode/permissions.local.yaml`，避免本机永久允许规则进入版本库。
+**职责：** 文档索引新增第六章；示例配置展示 `permissions.mode`；README 说明用户级和项目级权限规则路径。
 
 ## 模块交互
 
-1. 启动时，`cmd/mewcode` 读取主配置，得到权限模式；根据工作区计算用户级、项目级、本地级规则路径。
-2. `permissions.LoadRuleSet` 加载三层规则文件，严格校验规则键、effect 和 glob 模式；缺失的规则文件视为空规则。
+1. 启动时，`cmd/mewcode` 读取主配置，得到权限模式；根据工作区计算用户级、项目级规则路径。
+2. `permissions.LoadRuleSet` 加载两层规则文件，严格校验规则键、effect 和 glob 模式；缺失的规则文件视为空规则。
 3. `cmd/mewcode` 创建 `permissions.Engine`、TUI `PermissionBridge` 和 Agent Runner。
 4. 模型返回工具调用后，`agent.Scheduler` 按现有只读/副作用批次遍历每个调用。
 5. Scheduler 对每个调用先发出 `EventToolCall`，再调用 `Engine.Decide`。
-6. Engine 根据工具元数据构建权限请求，先检查命令黑名单，再检查路径沙箱，再按会话、本地、项目、用户规则匹配，最后按模式默认行为决定 allow、deny 或 ask。
+6. Engine 根据工具元数据构建权限请求，先检查命令黑名单，再检查路径沙箱，再按会话、项目、用户规则匹配，最后按模式默认行为决定 allow、deny 或 ask。
 7. allow：Scheduler 调用 `tools.Executor.Execute`，并按原有逻辑发出 `EventToolResult`。
 8. deny：Scheduler 调用 `permissions.DeniedToolResult` 生成结构化失败结果，发出权限决策事件和工具结果事件，不执行真实工具。
 9. ask：Scheduler 发出权限请求事件，并通过 `PermissionBridge.Confirm` 等待用户选择。
 10. 用户选择本次允许：Scheduler 执行当前工具。
 11. 用户选择本会话允许：Engine 写入会话规则，再执行当前工具。
-12. 用户选择永久允许：Engine 写入本地级规则文件并刷新规则，再执行当前工具。
+12. 用户选择永久允许：Engine 写入项目级规则文件并刷新规则，再执行当前工具。
 13. 用户拒绝：Scheduler 生成权限失败结果写回模型。
 14. 用户取消或上下文取消：Scheduler 返回取消错误，Runner 发出取消终态，不启动剩余工具。
 15. Agent Runner 将允许和拒绝的工具结果按原始工具调用顺序提交到会话或 Plan Mode 临时历史，保持既有历史边界。
@@ -439,7 +436,7 @@ mew01/
 │   ├── permissions/
 │   │   ├── blacklist.go                — 危险命令正则
 │   │   ├── blacklist_test.go
-│   │   ├── config.go                   — 三层规则加载与本地规则写入
+│   │   ├── config.go                   — 用户级、项目级规则加载与项目级规则写入
 │   │   ├── config_test.go
 │   │   ├── engine.go                   — 权限决策主流程
 │   │   ├── engine_test.go
@@ -474,7 +471,6 @@ mew01/
 │       ├── plan.md
 │       ├── task.md
 │       └── checklist.md
-└── .gitignore                          — 忽略 .mewcode/permissions.local.yaml
 ```
 
 ## 技术决策
@@ -483,15 +479,15 @@ mew01/
 |--------|------|------|
 | 权限系统位置 | 新增 `internal/permissions` 包，Scheduler 执行前调用 | 权限逻辑集中、可测试，不污染每个工具实现，也能覆盖所有 Agent 工具调用入口 |
 | 规则文件格式 | `rules` 映射，键为 `工具名(模式)`，值为 `allow` 或 `deny` | 符合需求里的规则表达，简单可审阅，严格校验容易 |
-| 权限模式位置 | 主配置 `permissions.mode` | 模式是整体运行策略，不和三层规则混在一起；旧配置可默认 `default` |
-| 三层规则路径 | 用户级 `~/Library/Application Support/mewcode/permissions.yaml`，项目级 `.mewcode/permissions.yaml`，本地级 `.mewcode/permissions.local.yaml` | 用户默认、项目共享、本机私有三类用途清晰；本地级适合永久允许 |
-| 规则优先级 | 黑名单、沙箱、会话、本地、项目、用户、模式、确认 | 严格满足 spec；显式 deny 不被放行模式覆盖 |
+| 权限模式位置 | 主配置 `permissions.mode` | 模式是整体运行策略，不和用户级、项目级规则混在一起；旧配置可默认 `default` |
+| 规则路径 | 用户级 `os.UserConfigDir()/mewcode/permissions.yaml`，项目级 `<项目根>/.mewcode/permissions.yaml` | 与其他用户级配置统一；项目级规则承载永久允许，且默认不进入版本控制 |
+| 规则优先级 | 黑名单、沙箱、会话、项目、用户、模式、确认 | 严格满足 spec；显式 deny 不被放行模式覆盖 |
 | 命令匹配对象 | `command` 与 `args` 以 shell-like quoting 规范化成一行文本 | 用户可写 `run_command(git *)`；同时不启用 shell 展开，保留现有执行模型 |
 | 路径沙箱 | 对项目根和输入路径解析真实路径后做边界判断 | 防止符号链接逃逸；写新文件时解析已存在父目录即可覆盖关键风险 |
 | 人在回路 | `PermissionBridge` 阻塞确认，TUI 通过桥回传选择 | 保持 Agent Loop 的顺序语义，测试可用脚本化确认器 |
 | 权限拒绝 | 转成 `permission_error` 工具结果写回模型 | 与现有工具失败反馈一致，让模型调整策略而不中断循环 |
 | Plan Mode 关系 | 先按只读过滤工具，再经过权限系统 | 不扩大规划阶段工具集合，同时允许用户对只读路径继续加规则 |
-| 永久允许写入 | 只追加本地级 allow 规则 | 避免交互操作修改共享项目规则或全局用户默认；符合本机私有覆盖 |
+| 永久允许写入 | 只追加项目级 allow 规则 | 用户明确选择后，规则在当前项目生效且不影响用户级默认 |
 | 配置错误处理 | 规则文件存在但非法时失败；规则文件缺失时视为空 | 避免错误配置导致意外宽松；首次使用无需创建文件 |
 
 ## Spec 覆盖
@@ -505,7 +501,7 @@ mew01/
 | F8, F9, F10 | `RuleSet`、`RuleStore`、`engine.go` 决策顺序 |
 | F11 | `permissions.Mode` 与模式默认决策 |
 | F12, F15, F20 | `PermissionBridge`、权限事件、TUI 确认状态 |
-| F13, F19 | `ApplyConfirmation` 与 `AppendLocalAllow` |
+| F13, F19 | `ApplyConfirmation` 与 `AppendProjectAllow` |
 | F14 | `permissions/result.go` |
 | F16 | `agent/scheduler.go` 权限集成 |
 | F17, F18 | `permissions/config.go` 与 config 默认值 |

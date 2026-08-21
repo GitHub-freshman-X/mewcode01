@@ -10,33 +10,48 @@ func TestLoadRuleSetTreatsMissingFilesAsEmpty(t *testing.T) {
 	paths := FilePaths{
 		User:    filepath.Join(t.TempDir(), "user.yaml"),
 		Project: filepath.Join(t.TempDir(), "project.yaml"),
-		Local:   filepath.Join(t.TempDir(), "local.yaml"),
 	}
 	rules, err := LoadRuleSet(paths)
 	if err != nil {
 		t.Fatalf("LoadRuleSet returned error: %v", err)
 	}
-	if len(rules.User) != 0 || len(rules.Project) != 0 || len(rules.Local) != 0 {
+	if len(rules.User) != 0 || len(rules.Project) != 0 {
 		t.Fatalf("expected empty ruleset, got %#v", rules)
 	}
 }
 
-func TestLoadRuleSetLoadsThreeScopes(t *testing.T) {
+func TestDefaultFilePathsUsesUserConfigAndProjectRoot(t *testing.T) {
+	workspace := t.TempDir()
+	configDir, err := os.UserConfigDir()
+	if err != nil {
+		t.Fatal(err)
+	}
+	paths, err := DefaultFilePaths(workspace)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if want := filepath.Join(configDir, "mewcode", "permissions.yaml"); paths.User != want {
+		t.Fatalf("user path = %q, want %q", paths.User, want)
+	}
+	if want := filepath.Join(workspace, ".mewcode", "permissions.yaml"); paths.Project != want {
+		t.Fatalf("project path = %q, want %q", paths.Project, want)
+	}
+}
+
+func TestLoadRuleSetLoadsUserAndProjectScopes(t *testing.T) {
 	dir := t.TempDir()
 	paths := FilePaths{
 		User:    filepath.Join(dir, "user.yaml"),
 		Project: filepath.Join(dir, "project.yaml"),
-		Local:   filepath.Join(dir, "local.yaml"),
 	}
 	writeFile(t, paths.User, "rules:\n  run_command(git *): allow\n")
 	writeFile(t, paths.Project, "rules:\n  run_command(git *): deny\n")
-	writeFile(t, paths.Local, "rules:\n  read_file(docs/**): allow\n")
 
 	rules, err := LoadRuleSet(paths)
 	if err != nil {
 		t.Fatalf("LoadRuleSet returned error: %v", err)
 	}
-	if rules.User[0].Scope != ScopeUser || rules.Project[0].Effect != EffectDeny || rules.Local[0].Tool != "read_file" {
+	if rules.User[0].Scope != ScopeUser || rules.Project[0].Effect != EffectDeny {
 		t.Fatalf("unexpected loaded scopes: %#v", rules)
 	}
 }
@@ -45,7 +60,6 @@ func TestRuleStoreFindsRulesByPriority(t *testing.T) {
 	store := NewRuleStore(RuleSet{
 		User:    []Rule{mustRule(t, "run_command(git *)", EffectAllow, ScopeUser, 0)},
 		Project: []Rule{mustRule(t, "run_command(git *)", EffectDeny, ScopeProject, 0)},
-		Local:   []Rule{mustRule(t, "run_command(git *)", EffectAllow, ScopeLocal, 0)},
 	})
 	store.AddSessionRule(mustRule(t, "run_command(git *)", EffectDeny, ScopeSession, 0))
 	rule, ok, err := store.Find(Request{Tool: "run_command", MatchTarget: "git status"})
@@ -59,14 +73,13 @@ func TestRuleStoreFindsRulesByPriority(t *testing.T) {
 	store = NewRuleStore(RuleSet{
 		User:    []Rule{mustRule(t, "run_command(git *)", EffectAllow, ScopeUser, 0)},
 		Project: []Rule{mustRule(t, "run_command(git *)", EffectDeny, ScopeProject, 0)},
-		Local:   []Rule{mustRule(t, "run_command(git *)", EffectAllow, ScopeLocal, 0)},
 	})
 	rule, ok, err = store.Find(Request{Tool: "run_command", MatchTarget: "git status"})
 	if err != nil {
 		t.Fatalf("Find returned error: %v", err)
 	}
-	if !ok || rule.Scope != ScopeLocal || rule.Effect != EffectAllow {
-		t.Fatalf("expected local allow, got %#v ok=%v", rule, ok)
+	if !ok || rule.Scope != ScopeProject || rule.Effect != EffectDeny {
+		t.Fatalf("expected project deny, got %#v ok=%v", rule, ok)
 	}
 }
 
@@ -93,19 +106,19 @@ func TestLoadRuleSetRejectsInvalidConfig(t *testing.T) {
 	}
 }
 
-func TestAppendLocalAllowWritesReloadableRule(t *testing.T) {
+func TestAppendProjectAllowWritesReloadableRule(t *testing.T) {
 	dir := t.TempDir()
-	paths := FilePaths{Local: filepath.Join(dir, ".mewcode", "permissions.local.yaml")}
-	rule := mustRule(t, "write_file(tmp/out.txt)", EffectAllow, ScopeLocal, 0)
-	if err := AppendLocalAllow(paths, rule); err != nil {
-		t.Fatalf("AppendLocalAllow returned error: %v", err)
+	paths := FilePaths{Project: filepath.Join(dir, ".mewcode", "permissions.yaml")}
+	rule := mustRule(t, "write_file(tmp/out.txt)", EffectAllow, ScopeProject, 0)
+	if err := AppendProjectAllow(paths, rule); err != nil {
+		t.Fatalf("AppendProjectAllow returned error: %v", err)
 	}
 	rules, err := LoadRuleSet(paths)
 	if err != nil {
 		t.Fatalf("LoadRuleSet returned error: %v", err)
 	}
-	if len(rules.Local) != 1 || rules.Local[0].Key != rule.Key || rules.Local[0].Effect != EffectAllow {
-		t.Fatalf("unexpected local rules: %#v", rules.Local)
+	if len(rules.Project) != 1 || rules.Project[0].Key != rule.Key || rules.Project[0].Effect != EffectAllow {
+		t.Fatalf("unexpected project rules: %#v", rules.Project)
 	}
 }
 

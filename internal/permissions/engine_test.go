@@ -31,7 +31,6 @@ func TestEngineDecideUsesRulePriorityBeforeMode(t *testing.T) {
 	engine, registry := testEngine(t, ModeStrict, RuleSet{
 		User:    []Rule{mustRule(t, "run_command(git *)", EffectAllow, ScopeUser, 0)},
 		Project: []Rule{mustRule(t, "run_command(git *)", EffectDeny, ScopeProject, 0)},
-		Local:   []Rule{mustRule(t, "run_command(git *)", EffectAllow, ScopeLocal, 0)},
 		Session: []Rule{mustRule(t, "run_command(git *)", EffectDeny, ScopeSession, 0)},
 	})
 	tool, _ := registry.Get("run_command")
@@ -91,7 +90,7 @@ func TestEngineModesDefaultDecisions(t *testing.T) {
 
 func TestEngineApplyConfirmationAddsSessionAndPermanentAllow(t *testing.T) {
 	dir := t.TempDir()
-	paths := FilePaths{Local: filepath.Join(dir, ".mewcode", "permissions.local.yaml")}
+	paths := FilePaths{Project: filepath.Join(dir, ".mewcode", "permissions.yaml")}
 	engine := &Engine{Rules: NewRuleStore(RuleSet{}), Paths: paths}
 	decision := Decision{Request: Request{Tool: "write_file", MatchTarget: "tmp/out.txt"}, SuggestedKey: "write_file(tmp/out.txt)"}
 
@@ -110,8 +109,8 @@ func TestEngineApplyConfirmationAddsSessionAndPermanentAllow(t *testing.T) {
 	if err != nil {
 		t.Fatalf("LoadRuleSet returned error: %v", err)
 	}
-	if len(rules.Local) != 1 || rules.Local[0].Effect != EffectAllow {
-		t.Fatalf("unexpected local rules: %#v", rules.Local)
+	if len(rules.Project) != 1 || rules.Project[0].Effect != EffectAllow {
+		t.Fatalf("unexpected project rules: %#v", rules.Project)
 	}
 }
 

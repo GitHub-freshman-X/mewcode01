@@ -130,11 +130,11 @@ func (e *Engine) ApplyConfirmation(conf Confirmation) error {
 		e.Rules.AddSessionRule(rule)
 		return nil
 	case ChoiceAllowPermanent:
-		rule, err := ParseRule(conf.Decision.SuggestedKey, EffectAllow, ScopeLocal, 0)
+		rule, err := ParseRule(conf.Decision.SuggestedKey, EffectAllow, ScopeProject, 0)
 		if err != nil {
 			return err
 		}
-		if err := AppendLocalAllow(e.Paths, rule); err != nil {
+		if err := AppendProjectAllow(e.Paths, rule); err != nil {
 			return err
 		}
 		if e.Rules == nil {

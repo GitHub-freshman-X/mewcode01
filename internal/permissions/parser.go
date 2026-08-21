@@ -19,7 +19,6 @@ type Scope string
 
 const (
 	ScopeSession Scope = "session"
-	ScopeLocal   Scope = "local"
 	ScopeProject Scope = "project"
 	ScopeUser    Scope = "user"
 )
