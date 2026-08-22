@@ -84,7 +84,15 @@ func (r *SubAgentRuntime) dispatch(ctx context.Context, parent *Runner, input to
 	} else {
 		launchCtx, foregroundCancel = foregroundSubAgentContext(ctx)
 	}
-	info, err := r.Tasks.Launch(launchCtx, subagent.LaunchRequest{Name: taskName(input), Description: input.Description, Background: background, Worker: child.worker})
+	info, err := r.Tasks.Launch(launchCtx, subagent.LaunchRequest{
+		Name:        taskName(input),
+		Description: input.Description,
+		Background:  background,
+		Worker:      child.worker,
+		OnTerminal: func(task subagent.TaskInfo) {
+			logSubAgentTerminal(parent.options.Logger, childMode(fork), child.runner.options.Model, task)
+		},
+	})
 	if err != nil {
 		if foregroundCancel != nil {
 			foregroundCancel()
@@ -298,6 +306,22 @@ func taskName(input tools.AgentInput) string {
 		return input.Name
 	}
 	return input.Description
+}
+
+func logSubAgentTerminal(logger *logging.Logger, mode subagent.CreationMode, model string, task subagent.TaskInfo) {
+	logger.Info("subagent finished", logging.Fields{
+		"stage":                 "subagent",
+		"status":                string(task.Status),
+		"mode":                  string(mode),
+		"background":            task.Background,
+		"model":                 model,
+		"tool_calls":            task.ToolCalls,
+		"input_tokens":          task.Usage.InputTokens,
+		"output_tokens":         task.Usage.OutputTokens,
+		"cache_read_tokens":     task.Usage.CacheReadInputTokens,
+		"cache_creation_tokens": task.Usage.CacheCreationInputTokens,
+		"duration_ms":           task.EndedAt.Sub(task.StartedAt).Milliseconds(),
+	})
 }
 
 func asyncResult(info subagent.TaskInfo) tools.Result {

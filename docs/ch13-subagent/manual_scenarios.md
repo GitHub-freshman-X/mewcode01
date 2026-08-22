@@ -223,10 +223,12 @@ agent:
 
 ## 场景 F：隔离与递归能力边界
 
-在 fixture 中记录当前目录清单，随后在 TUI 输入：
+在 fixture 中记录当前目录清单（忽略运行时正常持久化的会话 JSONL），随后在 TUI 输入：
 
 ```sh
-find "$fixture_root" -maxdepth 3 -print | sort > /private/tmp/mewcode-ch13-before-worktree.txt
+find "$fixture_root" -maxdepth 3 \
+  -path "$fixture_root/.mewcode/sessions" -prune -o -print | sort \
+  > /private/tmp/mewcode-ch13-before-worktree.txt
 ```
 
 ```text
@@ -236,12 +238,14 @@ find "$fixture_root" -maxdepth 3 -print | sort > /private/tmp/mewcode-ch13-befor
 通过条件：`agent` 工具返回“worktree isolation is not supported in this chapter”或等价的明确未支持错误。比较目录清单：
 
 ```sh
-find "$fixture_root" -maxdepth 3 -print | sort > /private/tmp/mewcode-ch13-after-worktree.txt
+find "$fixture_root" -maxdepth 3 \
+  -path "$fixture_root/.mewcode/sessions" -prune -o -print | sort \
+  > /private/tmp/mewcode-ch13-after-worktree.txt
 diff -u /private/tmp/mewcode-ch13-before-worktree.txt \
   /private/tmp/mewcode-ch13-after-worktree.txt
 ```
 
-通过：`diff` 无输出，没有创建 Worktree 或其他隔离工作目录。
+MewCode 会在 fixture 的 `.mewcode/sessions/` 持久化当前主会话；该目录中新出现的 JSONL 是正常运行产物，不能作为隔离目录证据。通过：`diff` 无输出，且没有创建 Worktree 或其他隔离工作目录。
 
 最后输入：
 

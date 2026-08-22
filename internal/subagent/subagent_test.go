@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/GitHub-freshman-X/mewcode01/internal/permissions"
+	"github.com/GitHub-freshman-X/mewcode01/internal/provider"
 )
 
 const testDefinition = "---\nname: sample\ndescription: sample role\nmodel: haiku\nmaxTurns: 2\npermissionMode: relaxed\n---\nYou are a sample.\n"
@@ -118,6 +119,76 @@ func TestTaskManagerBackgroundSnapshot(t *testing.T) {
 	}
 	if got := manager.RunningBackground(); len(got) != 0 {
 		t.Fatalf("terminal task remained in snapshot: %+v", got)
+	}
+}
+
+func TestTaskManagerTerminalCallbackReceivesEachTerminalSnapshot(t *testing.T) {
+	for _, outcome := range []Outcome{
+		{Status: TaskCompleted, ToolCalls: 2, Usage: provider.Usage{InputTokens: 3, OutputTokens: 1}},
+		{Status: TaskFailed, Failure: "safe failure", ToolCalls: 4},
+		{Status: TaskCancelled, Failure: "subagent cancelled", ToolCalls: 1},
+	} {
+		t.Run(string(outcome.Status), func(t *testing.T) {
+			manager := NewTaskManager()
+			terminal := make(chan TaskInfo, 1)
+			info, err := manager.Launch(context.Background(), LaunchRequest{
+				Name:       "terminal",
+				Worker:     func(context.Context, func(Progress)) Outcome { return outcome },
+				OnTerminal: func(task TaskInfo) { terminal <- task },
+			})
+			if err != nil {
+				t.Fatal(err)
+			}
+			ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+			defer cancel()
+			if _, err := manager.Wait(ctx, info.ID); err != nil {
+				t.Fatal(err)
+			}
+			select {
+			case got := <-terminal:
+				if got.ID != info.ID || got.Status != outcome.Status || got.ToolCalls != outcome.ToolCalls || got.Usage != outcome.Usage {
+					t.Fatalf("terminal=%+v outcome=%+v", got, outcome)
+				}
+			case <-ctx.Done():
+				t.Fatal("missing terminal callback")
+			}
+			select {
+			case duplicate := <-terminal:
+				t.Fatalf("duplicate terminal callback: %+v", duplicate)
+			case <-time.After(10 * time.Millisecond):
+			}
+		})
+	}
+}
+
+func TestTaskManagerTerminalCallbackDoesNotBlockWaitOrNotification(t *testing.T) {
+	manager := NewTaskManager()
+	updates, unsubscribe := manager.Subscribe()
+	defer unsubscribe()
+	block := make(chan struct{})
+	info, err := manager.Launch(context.Background(), LaunchRequest{
+		Name:       "blocked callback",
+		Worker:     func(context.Context, func(Progress)) Outcome { return Outcome{Status: TaskCompleted} },
+		OnTerminal: func(TaskInfo) { <-block },
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+	defer cancel()
+	if _, err := manager.Wait(ctx, info.ID); err != nil {
+		t.Fatal(err)
+	}
+	for {
+		select {
+		case update := <-updates:
+			if update.Task.Status == TaskCompleted {
+				close(block)
+				return
+			}
+		case <-ctx.Done():
+			t.Fatal("terminal notification was blocked by callback")
+		}
 	}
 }
 

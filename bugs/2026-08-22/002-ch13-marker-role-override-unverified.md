@@ -1,6 +1,6 @@
 # 第十三章 `marker-role` 覆盖结果异常（待诊断）
 
-- 状态：自动化修复完成；场景 D 真实 Provider/TUI 已通过，其余场景待验证
+- 状态：自动化修复完成；场景 D/E 真实 Provider/TUI 已通过，其余场景待验证
 - 影响范围：第十三章人工场景 A 的项目级 Agent 定义覆盖验证。
 
 ## 现象
@@ -109,7 +109,9 @@
 
 再次执行 `go test ./... -count=1`：本次 Agent/TUI/Tools 相关包均通过；全量仍仅失败于已单独记录的 OpenAI 请求正文日志回归 `TestStreamCapturesFinalRequestPayload`，未发现本次改动引入的额外失败。该测试产生的既有会话目录产物已删除并复核不再出现在工作树。
 
-2026-08-23 用户以真实 Provider/TUI 复测场景 D：两次 `sleep 10` 的前台定义式任务在按 ESC 后返回 `async_launched` 和 `subagent-1`；即时提示“子 Agent 已转入后台。”位于原回合之后、下一轮“你好”之前；主会话正常回复；随后 TUI 显示 `manual-esc-background completed: 完成`。这同时确认通知监听、显示时序以及接管后任务不再受原前台 context 取消影响。场景 D 已通过；场景 E 的 120 秒自动接管尚待真实复测。
+2026-08-23 用户以真实 Provider/TUI 复测场景 D：两次 `sleep 10` 的前台定义式任务在按 ESC 后返回 `async_launched` 和 `subagent-1`；即时提示“子 Agent 已转入后台。”位于原回合之后、下一轮“你好”之前；主会话正常回复；随后 TUI 显示 `manual-esc-background completed: 完成`。这同时确认通知监听、显示时序以及接管后任务不再受原前台 context 取消影响。场景 D 已通过。
+
+2026-08-23 用户以真实 Provider/TUI 复测场景 E：全程未按 ESC 的五次 `sleep 25` 前台定义式任务返回 `async_launched` 和 `subagent-2`，随后显示 `manual-auto-background completed: 完成`。这符合约 120 秒自动接管、同一任务继续运行及终态通知的预期，且证明通用 30 秒工具期限未截断任务。转录未展示内部 `run_command` 次数或精确接管时刻，故最多五次且不重复启动仍以自动化测试为决定性证据。
 
 ## 场景 C 追加排查（进行中）
 
@@ -146,3 +148,29 @@ T19 进行中：已更新 README 的 SubAgent 说明，公开记录 `fork` 兼�
 用户随后提供的完整 TUI 记录再次确认：虽然用户指令要求省略字段，实际 `agent` 工具结果明确为 `unknown subagent type "fork"`。该错误只能由实际请求携带 `subagent_type: "fork"` 触发；MewCode 在工具失败后的文字“该环境不支持 Fork”是对错误的错误归因，不是运行时事实。
 
 2026-08-23 已直接读取该场景会话 `20260822-160830-78d3.jsonl` 的第 12 条记录（仅提取路由字段，未输出 prompt 或敏感信息）：`tool_name=agent`、`name=manual-fork-background`、`subagent_type_present=true`、`subagent_type="fork"`、`run_in_background=true`。源码分支是 `strings.TrimSpace(input.SubagentType) == ""` 才为 Fork；因此该次请求不可能进入 Fork 路径。另发现 fixture 中还有一份包含同一任务名的会话 `20260822-161416-733b.jsonl`；已核对其第 12 条记录，路由字段与前一份完全相同：`subagent_type_present=true`、`subagent_type="fork"`、`run_in_background=true`。两次均不是省略类型字段的 Fork 请求。未使用真实 Provider 重跑字段确实缺失的有效场景 C，因此该人工验收项仍待一次参数正确的复测。
+
+## 场景 F Worktree 隔离边界复测（通过；人工脚本已修正）
+
+2026-08-23 现场会话 `20260822-172432-4b95.jsonl` 显示主 Agent 实际调用了 `agent`，参数为 `subagent_type="marker-role"` 与 `isolation="worktree"`；工具立即返回 `success: false` 和明确诊断 `worktree isolation is not supported in this chapter`。这完全符合场景 F、Spec 的“不支持且不得静默降级”要求；未创建子任务，更没有自行创建或改用 Worktree。
+
+原始前后目录清单的唯一差异是 fixture `.mewcode/sessions/` 下新增当前主会话 JSONL。它是 MewCode 正常会话持久化副作用，不是 Worktree 或隔离目录；因此原文要求对包含该目录的完整 `find` 输出零差异，会把正确行为误报为失败。已将 `manual_scenarios.md` 的场景 F 快照命令改为排除 `.mewcode/sessions/`，同时保留对其他 fixture 路径变化的检查。
+
+结论：本轮场景 F 的 Worktree 部分通过；发现并修复的是人工验收脚本的假阳性，不是 SubAgent Worktree 隔离实现缺陷。
+
+### 场景 F 递归能力边界（模型未尝试；自动化已覆盖）
+
+同一会话随后显示主 Agent 成功创建了 `marker-role` 子 Agent（`subagent-1`）；主调用使用 `isolation="none"`，这不违反递归场景的输入要求。子 Agent 的自然语言回复明确称“不会尝试”内部 `agent` 调用，并报告未创建第二个子 Agent。因此该人工轮次只能按场景文档记录为“模型未尝试递归调用”，**不能**作为“子 Agent 不具备 `agent` 工具”的直接人工证据；模型拒绝调用与运行时过滤是不同的结论。
+
+本地定义的 `marker-role` 白名单仅含 `read_file`，且 `internal/subagent.FilterTools` 无条件移除 `agent`。已运行 `go test ./internal/subagent ./internal/tools -run 'Test(FilterTools|AgentToolRejectsUnsupportedIsolation)$' -count=1`，两个包通过：前者断言即使定义白名单包含 `agent`，定义式后台子 Agent 最终也只保留 `read_file`；后者断言 `isolation: worktree` 返回 validation error。递归过滤由该自动化测试作为决定性证据。
+
+该轮返回的 `USER-AGENT-PROMPT-1234` 与当前 fixture 项目级 `marker-role.md` 的正文一致，但不同于人工方案准备步骤中的 `PROJECT-AGENT-PROMPT-72bc`。用户已确认前者为其手动修改的预期标记；它不影响场景 F 的递归边界结论。
+
+### 会话与日志全量复核（进行中）
+
+已完成对 fixture 下全部运行数据的只读结构化扫描。21 个会话文件中 1 个是正常的 0 字节启动会话，其余均为有效 JSONL；22 个日志文件、共 148 行也全为有效 JSON。会话没有格式损坏或未知工具调用：共 26 次 `agent` 调用，结果为 13 次前台 completed、8 次 async_launched、3 次 execution_error、1 次 timeout、1 次 validation_error。
+
+3 次 execution_error 均可由当时人工条件解释：关闭 `Verification` 的预期 unknown-type 轮次 1 次，以及实现 Fork 兼容前模型传入 `subagent_type="fork"` 的无效轮次 2 次；之后同一参数走 Fork 的兼容路径已获得 async_launched。唯一 timeout 是 F15 修复前的两次 `sleep 25` 前台任务；其后的 ESC 与 120 秒自动接管复测均为 async_launched 并有 completed 终态。唯一 validation_error 是场景 F 的 `isolation=worktree` 预期拒绝。因此会话记录没有发现新的第 13 章运行时残留问题。
+
+日志复核另外发现两项：Provider 日志仍有完整消息/工具输出字段，已同步既有 `bugs/2026-08-14/003-provider-request-body-logged.md`；所有 22 条 `stage=subagent` 日志只记录 `status=running`，没有对应的 completed、failed 或 cancelled 终态日志，已创建独立问题记录 `bugs/2026-08-23/001-ch13-subagent-terminal-status-not-logged.md`。
+
+随后也扫描了仓库根目录下全部历史测试日志：149 个 JSONL 文件、351 条记录全部可解析，且无会话文件；这些日志不含 `fields.message` 请求/响应正文，也没有 Ch13 `subagent` 阶段记录。它们没有提供新的残留问题证据，也不能推翻 fixture 中真实运行二进制的两项发现。

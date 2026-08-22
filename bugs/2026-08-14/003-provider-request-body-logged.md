@@ -31,3 +31,7 @@ OpenAI 请求日志现仅记录 provider、请求大小、消息数和工具数�
 2026-08-23：第十三章 Fork 参数兼容修复的全量回归再次仅失败于 `TestStreamCapturesFinalRequestPayload`。测试输出中的日志仍只含安全元数据，测试却期待 `request-canary` 出现；未触及 Provider 实现。该过时测试继续阻塞 `go test ./... -count=1` 的全绿验证，待独立修复。
 
 2026-08-23 后续全量回归显示该问题已回归：`go test ./... -count=1` 在同一测试失败，日志 JSON 的 `fields.message` 直接包含 `request-canary`。源码 `internal/provider/openai/client.go` 也确认安全元数据日志调用被注释，而当前调用记录了 `message: body.Input`。这会泄露请求正文，违反 N5；与本次 TUI 改动无关，但阻塞全量测试且必须独立恢复仅记录 provider、请求大小、消息数和工具数的日志行为。全量测试同时再次生成 `cmd/mewcode/.mewcode/` 测试产物，已按关联问题处理。
+
+2026-08-23 对 ch13 隔离 fixture 的全部 22 个 Provider/子 Agent 日志文件进行只读结构化扫描：148 行均为有效 JSON，104 条为 `provider_request` 阶段；其中 78 条记录具有 `fields.message`，包含 457 个带 `content` 的消息项和 70 个带 `output` 的消息项。未输出正文以避免二次泄露，但字段结构已确认该真实运行二进制仍记录完整 Provider 输入/工具输出，而非仅安全元数据。该现场证据确认问题仍为“回归，待处理”。
+
+用户说明当前完整消息输出是其临时测试设置，并将在提交 Git 前自行恢复。2026-08-23 的 `go test ./... -count=1` 因此仍仅失败于 `internal/provider/openai.TestStreamCapturesFinalRequestPayload`：测试实际观察到 `request-canary` 位于 Provider 日志。该失败与本次 Ch13 终态日志修复无关；在用户恢复安全日志前，不应将全量测试视为全绿。

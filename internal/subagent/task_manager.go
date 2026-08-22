@@ -55,6 +55,7 @@ type LaunchRequest struct {
 	Description string
 	Background  bool
 	Worker      Worker
+	OnTerminal  func(TaskInfo)
 }
 
 type TaskNotification struct{ Task TaskInfo }
@@ -68,9 +69,10 @@ type TaskManager struct {
 }
 
 type managedTask struct {
-	info   TaskInfo
-	cancel context.CancelFunc
-	done   chan struct{}
+	info       TaskInfo
+	cancel     context.CancelFunc
+	done       chan struct{}
+	onTerminal func(TaskInfo)
 }
 
 func NewTaskManager() *TaskManager {
@@ -84,7 +86,7 @@ func (m *TaskManager) Launch(ctx context.Context, request LaunchRequest) (TaskIn
 	started := m.clock()
 	id := fmt.Sprintf("subagent-%d", m.sequence.Add(1))
 	taskCtx, cancel := context.WithCancel(ctx)
-	task := &managedTask{info: TaskInfo{ID: id, Name: request.Name, Description: request.Description, Status: TaskRunning, StartedAt: started, Background: request.Background}, cancel: cancel, done: make(chan struct{})}
+	task := &managedTask{info: TaskInfo{ID: id, Name: request.Name, Description: request.Description, Status: TaskRunning, StartedAt: started, Background: request.Background}, cancel: cancel, done: make(chan struct{}), onTerminal: request.OnTerminal}
 	m.mu.Lock()
 	m.tasks[id] = task
 	initial := cloneTaskInfo(task.info)
@@ -231,6 +233,9 @@ func (m *TaskManager) finish(id string, outcome Outcome) {
 	close(task.done)
 	m.mu.Unlock()
 	m.publish(info)
+	if task.onTerminal != nil {
+		go task.onTerminal(cloneTaskInfo(info))
+	}
 }
 
 func (m *TaskManager) publish(info TaskInfo) {

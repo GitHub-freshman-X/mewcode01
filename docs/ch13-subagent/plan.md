@@ -77,6 +77,12 @@ type TaskManager interface {
 
 TaskManager 仅保存进程内状态。它用锁保护状态快照，以单一消费者读取子 Runner 的事件流，归集终态、工具调用计数和用量，并向订阅者发布安全摘要。合法状态迁移仅为 `running → completed`、`running → failed` 或 `running → cancelled`。
 
+### 子 Agent 终态日志
+
+`LaunchRequest` 增加可选的每任务终态回调。`TaskManager.finish` 规范化 `Outcome`、冻结终态 `TaskInfo`、关闭等待通道并发布既有通知后，异步调用该回调。回调只接收冻结快照；同一任务只能由 `finish` 完成一次，因此每个终态最多触发一次回调。日志 I/O 即使变慢，也不会延迟任务状态、前台等待结果或 TUI/主对话通知的可见性。
+
+`internal/subagent` 不依赖 `internal/logging`。`SubAgentRuntime.dispatch` 在创建任务时以回调闭包捕获父 Runner 的 Logger、创建模式和子 Runner 的实际模型，并写入一条 `stage=subagent` 的终态日志。字段仅包括 `status`、`mode`、`background`、`model`、`tool_calls`、`input_tokens`、`output_tokens`、`cached_tokens` 与 `duration_ms`；`failed` 或 `cancelled` 可追加既有安全失败摘要。不得记录任务 prompt、模型消息、工具结果正文、密钥、请求头或原始错误。
+
 ### `tools.AgentInput` 与 `tools.SubAgentHost`
 
 ```go
@@ -213,6 +219,7 @@ Scheduler 执行 agent 工具
 internal/subagent/
 ├── definition.go              — Definition、Source、frontmatter 校验
 ├── discover.go                — 四来源加载、覆盖与插件注入
+├── task_manager.go            — 任务状态、通知与终态回调
 ├── builtins/
 │   ├── explore.md
 │   ├── plan.md
@@ -254,6 +261,7 @@ README.md · docs/README.md · docs/ch13-subagent/* — 用户与章节文档
 | 用户级目录 | `os.UserConfigDir()/mewcode/agents` | 支持 macOS、Linux 和 Windows。 |
 | 角色权限模式 | 仅 `strict/default/relaxed` | 复用既有权限引擎，避免本章扩展权限语义。 |
 | 前台转后台 | TaskManager 从一开始独占事件流，前台仅等待其状态 | 可无重启、无双消费者地在 120 秒或 ESC 时接管。 |
+| 终态日志归属 | TaskManager 提供终态回调，Runtime 负责日志上下文与写入 | 保持任务域不依赖 logging，同时用统一终态边界保证全路径覆盖和最多一次记录。 |
 | 异步回传 | 线程安全待发送通知队列 | 不并发写主会话历史，且不修改 prompt cache 前缀。 |
 | Fork 递归防护 | 运行时来源标记 + 工具过滤 | 不依赖可压缩的消息文本，防止绕过与上下文爆炸。 |
 | 插件来源 | 构造 Registry 时注入定义集合 | 本章提供来源与覆盖语义，不引入插件安装系统。 |
@@ -270,5 +278,6 @@ README.md · docs/README.md · docs/ch13-subagent/* — 用户与章节文档
 | F8 | `agent/run_completion.go` |
 | F9 | `subagent/task_manager.go`、120 秒接管与 TUI 转后台 |
 | F10 | Runner 待发送通知队列 |
+| F16-F18、N13-N14 | TaskManager 终态回调与 SubAgentRuntime 安全终态日志 |
 | F11 | TUI 子任务视图、ESC 和订阅 |
 | N1-N7 | 过滤、隔离、前缀保持、失败隔离、安全日志、跨平台发现和自动测试 |

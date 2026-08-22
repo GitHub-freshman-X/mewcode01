@@ -2,11 +2,15 @@ package agent
 
 import (
 	"context"
+	"encoding/json"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
 
 	"github.com/GitHub-freshman-X/mewcode01/internal/conversation"
+	"github.com/GitHub-freshman-X/mewcode01/internal/logging"
 	"github.com/GitHub-freshman-X/mewcode01/internal/provider"
 	"github.com/GitHub-freshman-X/mewcode01/internal/subagent"
 	"github.com/GitHub-freshman-X/mewcode01/internal/tools"
@@ -49,6 +53,102 @@ func TestDefinitionSubAgentRunsToCompletion(t *testing.T) {
 	if len(p.requests[1].Messages) != 1 || messageText(p.requests[1].Messages[0]) != "inspect" {
 		t.Fatalf("child messages=%+v", p.requests[1].Messages)
 	}
+}
+
+func TestLogSubAgentTerminalWritesSafeMetadata(t *testing.T) {
+	root := t.TempDir()
+	logger, err := logging.New(root, func() time.Time { return time.Date(2026, 8, 23, 0, 0, 0, 0, time.UTC) }, 1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	started := time.Date(2026, 8, 23, 0, 0, 0, 0, time.UTC)
+	for _, status := range []subagent.TaskStatus{subagent.TaskCompleted, subagent.TaskFailed, subagent.TaskCancelled} {
+		logSubAgentTerminal(logger, subagent.CreationDefinition, "child-model", subagent.TaskInfo{
+			Status: status, Background: true, Result: "result-canary", Failure: "failure-canary",
+			StartedAt: started, EndedAt: started.Add(1500 * time.Millisecond), ToolCalls: 2,
+			Usage: provider.Usage{InputTokens: 3, OutputTokens: 4, CacheReadInputTokens: 5, CacheCreationInputTokens: 6},
+		})
+	}
+	if err := logger.Close(); err != nil {
+		t.Fatal(err)
+	}
+	files, err := filepath.Glob(filepath.Join(root, "logs", "*", "*", "*", "*.jsonl"))
+	if err != nil || len(files) != 1 {
+		t.Fatalf("files=%v err=%v", files, err)
+	}
+	body, err := os.ReadFile(files[0])
+	if err != nil {
+		t.Fatal(err)
+	}
+	lines := strings.Split(strings.TrimSpace(string(body)), "\n")
+	if len(lines) != 3 {
+		t.Fatalf("lines=%d", len(lines))
+	}
+	for i, line := range lines {
+		var event logging.Event
+		if err := json.Unmarshal([]byte(line), &event); err != nil {
+			t.Fatal(err)
+		}
+		if event.Message != "subagent finished" || event.Fields["stage"] != "subagent" || event.Fields["status"] != string([]subagent.TaskStatus{subagent.TaskCompleted, subagent.TaskFailed, subagent.TaskCancelled}[i]) || event.Fields["mode"] != "definition" || event.Fields["background"] != true || event.Fields["model"] != "child-model" || event.Fields["tool_calls"] != float64(2) || event.Fields["duration_ms"] != float64(1500) {
+			t.Fatalf("event=%+v", event)
+		}
+		for _, key := range []string{"input_tokens", "output_tokens", "cache_read_tokens", "cache_creation_tokens"} {
+			if _, ok := event.Fields[key]; !ok {
+				t.Fatalf("missing %s in %+v", key, event.Fields)
+			}
+		}
+		encoded, _ := json.Marshal(event)
+		if strings.Contains(string(encoded), "result-canary") || strings.Contains(string(encoded), "failure-canary") {
+			t.Fatalf("unsafe terminal log: %s", encoded)
+		}
+	}
+}
+
+func TestDefinitionSubAgentRegistersTerminalLogCallback(t *testing.T) {
+	definition := subagent.Definition{Name: "reader", Description: "read", SystemPrompt: "ROLE SYSTEM", MaxTurns: 3}
+	p := &scriptedProvider{rounds: []scriptedRound{
+		toolRound(provider.ToolCall{ID: "agent-call", Name: "agent", Arguments: []byte(`{"prompt":"inspect","description":"inspect code","subagent_type":"reader"}`)}),
+		textRound("child report", provider.Usage{InputTokens: 2, OutputTokens: 1}),
+		textRound("parent done", provider.Usage{}),
+	}}
+	runner := subAgentTestRunner(t, p, []subagent.Definition{definition})
+	root := t.TempDir()
+	logger, err := logging.New(root, time.Now, 1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	runner.options.Logger = logger
+	runner.options.Model = "actual-child-model"
+	task, err := runner.Start(context.Background(), Request{Mode: ModeAct, Prompt: "delegate"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	drainTask(t, task)
+	deadline := time.Now().Add(time.Second)
+	for time.Now().Before(deadline) {
+		files, _ := filepath.Glob(filepath.Join(root, "logs", "*", "*", "*", "*.jsonl"))
+		if len(files) == 1 {
+			body, readErr := os.ReadFile(files[0])
+			if readErr != nil {
+				t.Fatal(readErr)
+			}
+			for _, line := range strings.Split(strings.TrimSpace(string(body)), "\n") {
+				var event logging.Event
+				if json.Unmarshal([]byte(line), &event) == nil && event.Message == "subagent finished" {
+					if event.Fields["status"] != "completed" || event.Fields["mode"] != "definition" || event.Fields["background"] != false || event.Fields["model"] != "actual-child-model" || event.Fields["input_tokens"] != float64(2) || event.Fields["output_tokens"] != float64(1) {
+						t.Fatalf("event=%+v", event)
+					}
+					if err := logger.Close(); err != nil {
+						t.Fatal(err)
+					}
+					return
+				}
+			}
+		}
+		time.Sleep(time.Millisecond)
+	}
+	_ = logger.Close()
+	t.Fatal("missing definition subagent terminal log")
 }
 
 func TestForegroundSubAgentContextDetachesParentDeadline(t *testing.T) {

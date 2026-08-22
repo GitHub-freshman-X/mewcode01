@@ -24,6 +24,14 @@
 - [ ] **主对话任务通知（AC8）**：后台任务完成、失败和取消均形成 `<task-notification>`；主 Agent 空闲时通知保留到下一请求；通知不改系统提示也不包含 prompt、工具正文或原始错误。（验证：`go test ./internal/agent -run TestTaskNotification -count=1`，期望模型请求与安全内容断言通过。）
 - [ ] **失败隔离与安全日志（AC10）**：子任务失败、超时或取消不终止主 Agent；日志仅含模式、状态、计数、耗时、用量、模型和类型等安全元数据。（验证：`go test ./internal/agent ./internal/subagent -run 'Test.*(Failure|Cancellation|SafeLog)' -count=1`，期望主流程继续和日志脱敏断言通过。）
 
+## 子 Agent 终态日志
+
+- [x] **终态一次性记录（AC17）**：completed、failed、cancelled 任务各产生一条且仅一条 `stage=subagent` 终态日志；重复或非法终态不得额外记录。（验证：`go test -race ./internal/subagent ./internal/agent -count=1` 通过；`TestTaskManagerTerminalCallbackReceivesEachTerminalSnapshot` 覆盖三类终态的单次回调。）
+- [x] **字段与安全性（AC17、N13）**：终态日志包含状态、模式、后台标记、模型、工具调用数、三类 Token 用量和耗时；不含 prompt、模型消息、工具结果正文、密钥、请求头或原始错误。（验证：`go test ./internal/agent -run 'Test(LogSubAgentTerminalWritesSafeMetadata|DefinitionSubAgentRegistersTerminalLogCallback)$' -count=1` 通过；覆盖字段、实际模型/用量与 result/failure canary 脱敏。）
+- [ ] **创建与接管路径覆盖（AC18）**：定义式前台、显式后台、Fork、ESC 接管和自动后台化均记录同一终态语义。（验证：`go test ./internal/agent ./internal/tui -run 'Test.*(SubAgent|Background|Fork|Escape|AutoBackground).*Terminal.*Log' -count=1`，期望每条路径均有一条终态记录。）
+- [ ] **非阻塞与兼容（AC19、N14）**：阻塞终态日志回调不阻塞 `Wait`、任务通知、前台返回或后台执行；既有 ESC、自动后台、取消和通知注入测试继续通过。（验证：`go test -race ./internal/subagent ./internal/agent ./internal/tui -run 'Test.*(TaskManager|SubAgent|Escape|Background|TaskNotification)' -count=1`，期望退出码为 0。）
+- [ ] **真实 Provider 日志复测**：在隔离 fixture 运行完成、失败或取消的子 Agent 后，日志中同时存在 `running` 与相同任务的安全终态记录；未执行时明确标注。（验证：按 `manual_scenarios.md` 的隔离启动方式运行并仅检查安全元数据。2026-08-23 已复测定义式前台 completed：最新日志含一条 running 与一条 completed，终态含工具调用数、Token 用量和耗时；failed/cancelled 与后台路径仍待复测。）
+
 ## TUI 与 Hook 集成
 
 - [ ] **前台进度与 ESC 接管（AC9）**：TUI 显示子 Agent 进度；有可接管任务时按 ESC 转后台并恢复输入；Ctrl+C 仍取消主任务。（验证：`go test ./internal/tui -run 'Test.*(SubAgent|Background|Escape)' -count=1`，期望状态迁移、输入恢复和取消回归通过。）
@@ -66,7 +74,7 @@
 - [x] `gofmt -w internal/tools/executor.go internal/tools/tools_test.go internal/agent/subagent.go internal/agent/subagent_test.go && go test ./internal/tools ./internal/agent -run 'Test(ExecutorDoesNotApplyGeneralTimeoutToAgent|ExecutorUnknownAndTimeout|ForegroundSubAgentContextDetachesParentDeadline)$' -count=1` 通过：Agent 不继承通用期限，普通工具期限保持，前台 lifetime context 不继承父 deadline 且可显式取消。
 - [x] `go test ./internal/tools ./internal/agent ./internal/tui -count=1 && go build ./cmd/mewcode && git diff --check` 通过。
 - [x] 真实 Provider/TUI 场景 D 已复测：两次 `sleep 10` 的定义式前台任务在 ESC 接管后返回 `async_launched`/`subagent-1`；ESC 提示位于原回合后、下一轮“你好”前；主会话可继续回复；随后显示 `manual-esc-background completed: 完成`。该结果确认接管后任务未被原前台调用取消。
-- [ ] 场景 E 尚未以真实 Provider/TUI 重跑；须确认无 ESC 时任务不会在通用 30 秒期限前被截断，并在约 120 秒后自动接管。
+- [x] 真实 Provider/TUI 场景 E 已复测：未按 ESC 的五次 `sleep 25` 定义式前台任务返回 `async_launched`/`subagent-2`，随后显示 `manual-auto-background completed: 完成`。这确认任务未受通用 30 秒期限截断并在既有自动后台路径后完成；该转录未显示每次内部 `run_command`，故“五次且不重复启动”仍以自动化测试为决定性证据。
 
 ## Fork 参数兼容验收证据（2026-08-23）
 

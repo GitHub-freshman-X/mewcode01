@@ -353,6 +353,45 @@
 
 **验证：** `git diff --check` 无输出。
 
+## T26：增加单次、非阻塞的终态回调
+
+**文件：** `internal/subagent/task_manager.go`、`internal/subagent/subagent_test.go`
+
+**依赖：** T6
+
+**步骤：**
+1. 在 `LaunchRequest` 增加可选终态回调；回调只接收冻结的 `TaskInfo` 快照。
+2. 在 `finish` 完成状态更新、关闭等待通道并发布既有通知后异步调用回调；保持非法或重复终态不触发回调。
+3. 增加 completed、failed、cancelled 回调测试，断言每个任务仅触发一次、回调获得最终状态、后台标记、用量和工具调用数；验证回调阻塞不延迟 `Wait` 或通知可见性。
+
+**验证：** `go test -race ./internal/subagent -run 'TestTaskManager.*(Completion|Terminal|Callback)' -count=1` 通过。
+
+## T27：写入安全的 SubAgent 终态日志
+
+**文件：** `internal/agent/subagent.go`、`internal/agent/subagent_test.go`
+
+**依赖：** T26
+
+**步骤：**
+1. 在 `SubAgentRuntime.dispatch` 创建任务时注册终态回调，捕获父 Logger、创建模式和子 Runner 的实际模型。
+2. 将终态快照映射为一条 `stage=subagent` 日志：状态、模式、后台标记、模型、工具调用数、三类 Token 用量和毫秒耗时；仅为 failed/cancelled 加入安全失败摘要。
+3. 增加定义式前台 completed、显式或接管后台 completed、Fork completed、failed 和 cancelled 的日志断言；每项确认仅一条终态日志，且不含 prompt、模型消息、工具正文、密钥、请求头或原始错误。
+
+**验证：** `go test ./internal/agent ./internal/subagent -run 'Test.*(SubAgent|TaskManager).*(Terminal|Log|Completion|Cancellation)' -count=1` 通过。
+
+## T28：同步验收证据与问题记录
+
+**文件：** `docs/ch13-subagent/checklist.md`、`bugs/2026-08-23/001-ch13-subagent-terminal-status-not-logged.md`
+
+**依赖：** T27
+
+**步骤：**
+1. 在 checklist 增加 completed、failed、cancelled 的终态日志、全路径覆盖和脱敏验证项，并填写实际命令和结果。
+2. 更新问题记录的根因、修复方案、验证方式和最终状态；未执行的真实 Provider 复测须明确标注。
+3. 运行格式化、定向测试、race、相关包回归、构建和 `git diff --check`。
+
+**验证：** `gofmt -w internal/subagent/task_manager.go internal/subagent/subagent_test.go internal/agent/subagent.go internal/agent/subagent_test.go && go test -race ./internal/subagent ./internal/agent -count=1 && go build ./cmd/mewcode && git diff --check` 通过。
+
 ## 执行顺序
 
 ```text
@@ -364,4 +403,5 @@ T11 ─────────────────────────�
 T2 → T4 → T17 → T18 → T19
 T13 → T20 → T21 → T22 → T23
 T11 → T24 → T25
+T6 → T26 → T27 → T28
 ```

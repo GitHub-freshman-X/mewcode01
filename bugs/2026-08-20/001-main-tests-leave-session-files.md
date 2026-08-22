@@ -27,6 +27,8 @@ go test ./cmd/mewcode -count=1
 
 2026-08-23 前台期限与接管 context 修复执行 `go test ./... -count=1` 后再次生成该目录；本次也未触及启动测试，已删除并以 `git status --short | rg 'cmd/mewcode/\\.mewcode' || true` 复核无输出。
 
+2026-08-23 Ch13 子 Agent 终态日志修复执行 `go test ./... -count=1` 后再次生成该目录。本次未触及启动测试；已删除 `cmd/mewcode/.mewcode/` 并以 `git status --short | rg 'cmd/mewcode/\\.mewcode' || true` 复核无输出。根因与修复建议不变。
+
 ## 建议下一步
 
 为所有调用 `run` 的启动测试统一注入临时工作目录，并在测试结束时恢复原工作目录；随后验证 `go test ./cmd/mewcode -count=1` 后工作树无新增 `.mewcode` 产物。
