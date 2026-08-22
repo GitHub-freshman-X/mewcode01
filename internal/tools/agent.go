@@ -42,7 +42,7 @@ func (t *AgentTool) Metadata() Metadata {
 		"properties": map[string]any{
 			"prompt":            map[string]any{"type": "string", "description": "The complete subtask instructions."},
 			"description":       map[string]any{"type": "string", "description": "A short description of the subtask."},
-			"subagent_type":     map[string]any{"type": "string", "description": "Optional predefined agent role. Omit for a fork."},
+			"subagent_type":     map[string]any{"type": "string", "description": "Optional predefined agent role. Omit it or set it to fork for a forked subagent."},
 			"model":             map[string]any{"type": "string", "description": "Optional model override."},
 			"run_in_background": map[string]any{"type": "boolean", "description": "Run without blocking the caller."},
 			"name":              map[string]any{"type": "string", "description": "Optional task name."},

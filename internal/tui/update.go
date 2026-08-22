@@ -249,6 +249,12 @@ func (m *Model) applyAgentEvent(event agent.Event) {
 	case agent.EventCompleted, agent.EventStopped, agent.EventCancelled, agent.EventFailed:
 		m.current.terminal, m.current.terminalTy, m.current.err = event.Summary, event.Type, event.Err
 		m.task = nil
+		switch event.Type {
+		case agent.EventCompleted, agent.EventStopped:
+			m.resolvePendingSystemMessages(true)
+		default:
+			m.resolvePendingSystemMessages(false)
+		}
 	}
 }
 

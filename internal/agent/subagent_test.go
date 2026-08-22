@@ -51,9 +51,42 @@ func TestDefinitionSubAgentRunsToCompletion(t *testing.T) {
 	}
 }
 
+func TestForegroundSubAgentContextDetachesParentDeadline(t *testing.T) {
+	parent, cancelParent := context.WithTimeout(context.Background(), time.Millisecond)
+	defer cancelParent()
+	child, cancelChild := foregroundSubAgentContext(parent)
+	defer cancelChild()
+	if _, ok := child.Deadline(); ok {
+		t.Fatal("foreground child inherited the parent deadline")
+	}
+	<-parent.Done()
+	select {
+	case <-child.Done():
+		t.Fatal("foreground child was cancelled before an explicit foreground cancellation")
+	default:
+	}
+	cancelChild()
+	select {
+	case <-child.Done():
+	case <-time.After(time.Second):
+		t.Fatal("explicit foreground cancellation did not stop child")
+	}
+}
+
+func TestForkTypeRecognizesOmittedAndAlias(t *testing.T) {
+	for _, subagentType := range []string{"", " ", "fork", " FoRk "} {
+		if !isForkType(subagentType) {
+			t.Fatalf("type %q was not recognized as fork", subagentType)
+		}
+	}
+	if isForkType("general-purpose") {
+		t.Fatal("definition type was recognized as fork")
+	}
+}
+
 func TestForkSubAgentPreservesHistoryAndRunsBackground(t *testing.T) {
 	p := &scriptedProvider{rounds: []scriptedRound{
-		toolRound(provider.ToolCall{ID: "agent-call", Name: "agent", Arguments: []byte(`{"prompt":"inspect","description":"inspect code"}`)}),
+		toolRound(provider.ToolCall{ID: "agent-call", Name: "agent", Arguments: []byte(`{"prompt":"inspect","description":"inspect code","subagent_type":"fork"}`)}),
 		textRound("child report", provider.Usage{}),
 		textRound("parent done", provider.Usage{}),
 	}}

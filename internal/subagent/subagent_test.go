@@ -25,6 +25,18 @@ func TestParseDefinition(t *testing.T) {
 	}
 }
 
+func TestDefinitionRejectsReservedForkName(t *testing.T) {
+	for _, name := range []string{"fork", " Fork ", "FORK"} {
+		content := "---\nname: " + name + "\ndescription: role\n---\nRole body.\n"
+		if _, err := ParseDefinition("reserved.md", content, SourceProject); err == nil {
+			t.Fatalf("name %q was accepted", name)
+		}
+	}
+	if _, err := ParseDefinition("allowed.md", "---\nname: forker\ndescription: role\n---\nRole body.\n", SourceProject); err != nil {
+		t.Fatalf("non-reserved name was rejected: %v", err)
+	}
+}
+
 func TestDiscoverPrecedence(t *testing.T) {
 	root := t.TempDir()
 	user, project := filepath.Join(root, "user"), filepath.Join(root, "project")

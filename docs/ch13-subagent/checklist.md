@@ -13,6 +13,7 @@
 
 - [ ] **定义式隔离（AC4）**：定义式首轮请求仅包含角色系统提示和任务，不含父历史；调用参数可覆盖定义模型；会话、权限、读缓存和 Token 用量不影响父 Agent。（验证：`go test ./internal/agent -run TestDefinitionSubAgent -count=1`，期望请求、隔离和共享基础设施断言通过。）
 - [ ] **Fork 前缀与合法历史（AC4、AC11）**：Fork 保留父系统提示和历史前缀、补齐末尾悬空工具调用结果，再追加 Fork 约束与任务；Provider 返回的缓存 Token 正确归集但没有伪造命中。（验证：`go test ./internal/agent -run TestForkSubAgent -count=1`，期望历史合法、前缀保持和用量断言通过。）
+- [ ] **Fork 参数兼容与保留名（AC1a、N8）**：省略 `subagent_type`、空白类型和 `subagent_type: "fork"` 均启动强制后台 Fork，而不是查找定义式角色；定义来源中的 `fork`、大小写或首尾空白变体均被拒绝，其他角色仍可加载。（验证：`go test ./internal/agent ./internal/subagent ./internal/tools -run 'Test.*(Fork|Reserved)' -count=1`，期望兼容调用返回异步任务、历史继承和递归限制不变、保留名有诊断错误。）
 - [ ] **多层工具过滤（AC5）**：定义式按全局禁止、角色黑名单、角色白名单过滤；后台再受固定白名单限制；未知白名单工具报错。（验证：`go test ./internal/subagent -run TestFilter -count=1`，期望过滤后的工具集与错误断言通过。）
 - [ ] **递归与隔离参数防护（AC5、N1）**：Fork 再 Fork 被运行时来源标记拒绝；后台 Agent 无法创建子 Agent；`isolation: worktree` 返回明确的未支持错误且不创建任务。（验证：`go test ./internal/agent ./internal/tools -run 'Test.*(Fork|Background|Isolation)' -count=1`，期望拒绝断言通过。）
 
@@ -27,6 +28,11 @@
 
 - [ ] **前台进度与 ESC 接管（AC9）**：TUI 显示子 Agent 进度；有可接管任务时按 ESC 转后台并恢复输入；Ctrl+C 仍取消主任务。（验证：`go test ./internal/tui -run 'Test.*(SubAgent|Background|Escape)' -count=1`，期望状态迁移、输入恢复和取消回归通过。）
 - [ ] **后台终态展示（AC8、AC9）**：后台完成、失败或取消后，TUI 显示含任务名称、状态和安全摘要的系统通知，主会话仍可提交后续输入。（验证：`go test ./internal/tui -run Test.*SubAgent -count=1`，期望渲染和可输入断言通过。）
+- [ ] **ESC 提示时序（AC12）**：前台子 Agent 运行时按 ESC，完成该主回合后再完成一轮对话；“子 Agent 已转入后台。”位于原回合之后、后续用户消息之前。（验证：`go test ./internal/tui -run 'Test.*Escape.*' -count=1`，期望排序断言通过。）
+- [ ] **首次终态通知（AC13）**：启动 TUI 后发布一个后台任务 `completed`、`failed` 或 `cancelled` 通知；视图显示任务名、终态和安全摘要。（验证：`go test ./internal/tui -run 'Test.*SubAgent.*Notification.*' -count=1`，期望首次通知被消费。）
+- [ ] **连续通知（AC14）**：连续发布多个后台任务终态；每条只显示一次、按接收顺序显示，输入仍可用。（验证：`go test ./internal/tui -run 'Test.*SubAgent.*Notification.*' -count=1`，期望全部顺序断言通过。）
+- [ ] **通知兼容性与安全（AC15）**：ESC 接管、`Ctrl+C`、主 Agent 的下一请求任务通知注入保持通过；终态展示不含 prompt、工具结果正文或原始错误。（验证：`go test ./internal/tui ./internal/agent -run 'Test.*(Escape|SubAgent|TaskNotification)' -count=1`，期望退出码为 0。）
+- [ ] **前台期限与接管 context（AC16）**：超过通用 30 秒期限但未到 120 秒阈值的前台 Agent 调用不被截断；ESC/自动接管后父调用取消不终止同一子任务；未接管前台任务仍随父取消结束；非 Agent 工具期限不变。（验证：`go test ./internal/tools ./internal/agent -run 'Test.*(Agent|Background|AutoBackground|Timeout|Cancellation)' -count=1`。）
 - [ ] **Hook agent 动作（AC10）**：Hook 的 `agent` 动作调用同一 SubAgentRuntime，不再返回“未接入”；其失败不阻断主 Agent。（验证：`go test ./internal/hooks ./cmd/mewcode -run 'Test.*(Agent|SubAgent)' -count=1`，期望运行时桥接和故障隔离断言通过。）
 
 ## 兼容性、构建与全量回归
@@ -39,7 +45,7 @@
 
 - [ ] **定义覆盖场景**：在临时项目 `.mewcode/agents/` 和隔离用户配置目录各放置同名角色；启动应用并要求主 Agent 委派该角色。（验证：项目级角色提示/行为生效，用户级和内置版本未生效；删除项目定义后用户级版本生效。）
 - [ ] **前台转后台场景**：请求一个会持续调用工具的定义式子 Agent，在 TUI 看到前台进度后按 ESC。（验证：任务显示为后台运行，输入框立即可用；输入新请求能被主 Agent 接收；原任务最终显示完成、失败或取消通知。）
-- [ ] **显式与 Fork 后台场景**：分别请求显式后台定义式任务和未指定类型的 Fork 任务。（验证：两者立即返回不同任务 ID，Fork 不阻塞主会话；完成后下一轮主 Agent 请求可见 task-notification。）
+- [ ] **显式与 Fork 后台场景**：分别请求显式后台定义式任务和未指定类型或 `subagent_type: "fork"` 的 Fork 任务。（验证：两种 Fork 写法均立即返回不同任务 ID，Fork 不阻塞主会话；完成后下一轮主 Agent 请求可见 task-notification。）
 - [ ] **自动后台与边界场景**：使用测试时钟或测试配置触发等价的 120 秒前台阈值，并请求 `isolation: worktree`。（验证：超时任务被接管且未重新开始；Worktree 请求明确报告本章未支持，未创建隔离工作区。）
 
 ## 当前验收证据（2026-08-20）
@@ -49,3 +55,23 @@
 - [x] `go test -race ./internal/subagent ./internal/agent ./internal/tui -count=1` 通过。
 - [x] `rg -n 'enable_verification_agent|UserConfigDir|ch13-subagent|ESC|worktree' README.md .mewcode/config.example.yaml docs/README.md docs/ch13-subagent` 已验证配置、文档索引和跨平台路径说明。
 - [ ] 真实 Provider/TUI 的定义覆盖、ESC 转后台、120 秒自动后台和后台完成通知尚未人工执行；前提是准备可用 Provider 配置与隔离项目目录。
+
+## ESC 提示与后台终态通知修复证据（2026-08-23）
+
+- [x] `gofmt -w internal/tui/model.go internal/tui/update.go internal/tui/tui_test.go && go test ./internal/tui -run 'Test(EscapeSystemMessageStaysBeforeLaterConversationTurn|InitConsumesFirstSubAgentTerminalNotification|SubAgentTerminalNotificationsContinueInOrder)$' -count=1` 通过：ESC 提示在成功主回合后位于下一轮前；TUI 初始化消费首个终态；连续终态按顺序显示且输入可用。
+- [x] `go test ./internal/tui -count=1` 通过。
+- [x] `go test ./internal/tui ./internal/agent -run 'Test.*(Escape|SubAgent|TaskNotification)' -count=1` 通过：ESC、TUI 通知与主 Agent 通知注入兼容路径无回归。
+- [x] `go build ./cmd/mewcode && git diff --check` 通过。
+- [ ] `go test ./... -count=1` 未全绿：本次变更相关的 TUI、Agent 与其余非 OpenAI 包通过；仅 `internal/provider/openai.TestStreamCapturesFinalRequestPayload` 失败，当前日志实际含请求正文，详见 `bugs/2026-08-14/003-provider-request-body-logged.md`。
+- [x] `gofmt -w internal/tools/executor.go internal/tools/tools_test.go internal/agent/subagent.go internal/agent/subagent_test.go && go test ./internal/tools ./internal/agent -run 'Test(ExecutorDoesNotApplyGeneralTimeoutToAgent|ExecutorUnknownAndTimeout|ForegroundSubAgentContextDetachesParentDeadline)$' -count=1` 通过：Agent 不继承通用期限，普通工具期限保持，前台 lifetime context 不继承父 deadline 且可显式取消。
+- [x] `go test ./internal/tools ./internal/agent ./internal/tui -count=1 && go build ./cmd/mewcode && git diff --check` 通过。
+- [x] 真实 Provider/TUI 场景 D 已复测：两次 `sleep 10` 的定义式前台任务在 ESC 接管后返回 `async_launched`/`subagent-1`；ESC 提示位于原回合后、下一轮“你好”前；主会话可继续回复；随后显示 `manual-esc-background completed: 完成`。该结果确认接管后任务未被原前台调用取消。
+- [ ] 场景 E 尚未以真实 Provider/TUI 重跑；须确认无 ESC 时任务不会在通用 30 秒期限前被截断，并在约 120 秒后自动接管。
+
+## Fork 参数兼容验收证据（2026-08-23）
+
+- [x] `go test ./internal/subagent ./internal/agent ./internal/tools -run 'Test.*(Fork|Reserved|AgentTool|DefinitionSubAgent)' -count=1` 通过：`fork` 保留名及变体被拒绝；省略、空白和 `fork` 变体均被识别为 Fork；`subagent_type: "fork"` 的模拟调用保留父历史并后台运行；schema 说明兼容写法。
+- [x] `go build ./cmd/mewcode` 通过。
+- [x] `git diff --check` 通过。
+- [ ] `go test ./... -count=1` 未全绿：仅 `internal/provider/openai.TestStreamCapturesFinalRequestPayload` 仍期待日志包含请求正文，与当前脱敏实现冲突；详情见 `bugs/2026-08-14/003-provider-request-body-logged.md`。
+- [ ] 尚未以真实 Provider/TUI 重跑场景 C；下次复测应验证 `subagent_type: "fork"` 立即返回 `async_launched` 和任务 ID。

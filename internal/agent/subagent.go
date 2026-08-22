@@ -68,7 +68,7 @@ func (r *SubAgentRuntime) dispatch(ctx context.Context, parent *Runner, input to
 	if r == nil || r.Tasks == nil {
 		return tools.Result{}, fmt.Errorf("subagent runtime is not configured")
 	}
-	fork := strings.TrimSpace(input.SubagentType) == ""
+	fork := isForkType(input.SubagentType)
 	if fork && isForkSource(ctx) {
 		return tools.Failure("agent", tools.ErrorPermission, "forked subagents cannot fork again", nil), nil
 	}
@@ -78,11 +78,17 @@ func (r *SubAgentRuntime) dispatch(ctx context.Context, parent *Runner, input to
 		return tools.Result{}, err
 	}
 	launchCtx := ctx
+	var foregroundCancel context.CancelFunc
 	if background {
 		launchCtx = context.WithoutCancel(ctx)
+	} else {
+		launchCtx, foregroundCancel = foregroundSubAgentContext(ctx)
 	}
 	info, err := r.Tasks.Launch(launchCtx, subagent.LaunchRequest{Name: taskName(input), Description: input.Description, Background: background, Worker: child.worker})
 	if err != nil {
+		if foregroundCancel != nil {
+			foregroundCancel()
+		}
 		return tools.Result{}, err
 	}
 	parent.options.Logger.Info("subagent launched", logging.Fields{"stage": "subagent", "status": "running", "mode": string(childMode(fork)), "background": background, "model": input.Model})
@@ -108,6 +114,7 @@ func (r *SubAgentRuntime) dispatch(ctx context.Context, parent *Runner, input to
 		r.Tasks.MarkBackground(info.ID)
 		return asyncResult(info), nil
 	case <-ctx.Done():
+		foregroundCancel()
 		return tools.Result{}, ctx.Err()
 	case <-waitTask(r.Tasks, info.ID):
 		finished, _ := r.Tasks.Get(info.ID)
@@ -269,6 +276,15 @@ func clonePermissions(parent *permissions.Engine) *permissions.Engine {
 }
 
 func cloneContextConfig(config contextmanager.Config) contextmanager.Config { return config }
+
+func foregroundSubAgentContext(parent context.Context) (context.Context, context.CancelFunc) {
+	return context.WithCancel(context.WithoutCancel(parent))
+}
+
+func isForkType(subagentType string) bool {
+	normalized := strings.TrimSpace(subagentType)
+	return normalized == "" || strings.EqualFold(normalized, "fork")
+}
 
 func childMode(fork bool) subagent.CreationMode {
 	if fork {

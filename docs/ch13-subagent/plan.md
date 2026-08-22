@@ -23,6 +23,12 @@
   → 主对话 task-notification + TUI 状态更新
 ```
 
+## Fork 参数兼容
+
+统一 `agent` 工具不改变参数集合：省略 `subagent_type` 仍是标准 Fork 写法；值为 `fork` 是兼容写法。`internal/agent` 在创建子 Runner 前将两种输入归一为 Fork 模式，因此两者共用强制后台、父历史复制和递归阻断路径；不会对定义式角色做名为 `fork` 的查找。
+
+`internal/subagent` 在定义校验阶段拒绝名称（忽略首尾空白及大小写）为 `fork` 的角色，防止项目、用户、内置或插件来源的定义与兼容语义冲突。角色列表中的其他名称和现有覆盖顺序不变。
+
 ## 核心数据结构
 
 ### `subagent.Definition` 与 `subagent.Registry`
@@ -84,7 +90,7 @@ type SubAgentHost interface {
 }
 ```
 
-`AgentTool` 固定暴露 `prompt`、`description`、`subagent_type`、`model`、`run_in_background`、`name`、`isolation` 参数。工具层只校验输入并从 Context 取得 `SubAgentHost`；无 Host 时返回配置失败。`isolation: "worktree"` 返回结构化的本章未支持错误。
+`AgentTool` 固定暴露 `prompt`、`description`、`subagent_type`、`model`、`run_in_background`、`name`、`isolation` 参数。工具层只校验输入并从 Context 取得 `SubAgentHost`；无 Host 时返回配置失败。`isolation: "worktree"` 返回结构化的本章未支持错误。schema 描述明确省略类型或传入 `fork` 都会创建 Fork，减少模型错误构造参数的概率。
 
 ### `agent.SubAgentRuntime` 与运行结果
 
@@ -118,7 +124,7 @@ agent:
 
 ### `internal/subagent`
 
-- `definition.go`：定义 `Definition`、`Source`、创建模式以及模型、权限模式校验。
+- `definition.go`：定义 `Definition`、`Source`、创建模式以及模型、权限模式校验；拒绝保留的 `fork` 角色名。
 - `discover.go`：复用第 11 章 frontmatter 的解析约定，扫描 `<项目根>/.mewcode/agents/*.md` 和 `os.UserConfigDir()/mewcode/agents/*.md`，再合并插件注入和内置定义。
 - `builtins/*.md`：嵌入 `Explore`、`Plan`、`general-purpose`、`Verification` 的系统提示和角色元数据。
 - `filter.go`：先移除全局禁止工具，再应用角色黑名单，最后在有白名单时取交集；后台路径额外和固定后台白名单取交集。未知白名单工具在加载期报错。
@@ -132,7 +138,7 @@ Agent 工具声明为有副作用的固定单一工具。它校验必填的 `pro
 
 - `subagent.go`：实现运行时桥接、定义解析及子 Runner 工厂。
   - **定义式**：新建 Session、permissions.Engine 和 context Manager；复制基础 Options 并应用定义和调用覆盖；使用过滤后且不含 Agent 工具的 registry。
-  - **Fork**：复制父历史，为末尾悬空工具调用补齐结果，追加 Fork Boilerplate 和任务；复制工具 registry，但由运行时来源标记拒绝再次 Fork。
+  - **Fork**：省略类型或类型为 `fork` 时，复制父历史，为末尾悬空工具调用补齐结果，追加 Fork Boilerplate 和任务；复制工具 registry，但由运行时来源标记拒绝再次 Fork。
 - `run_completion.go`：消费子 Runner 事件至终态，归集最终文本、Token 用量、工具调用计数和失败安全摘要。
 - `event.go`：增加子任务状态事件和 Options 中的 SubAgentRuntime 注入。
 - `runner.go`：在 Scheduler Context 中注入当前 `SubAgentHost`、来源标记及前台子任务事件转发；维护带锁的待发送任务通知队列。
@@ -145,6 +151,24 @@ Agent 工具声明为有副作用的固定单一工具。它校验必填的 `pro
 `agent.Event` 的子任务状态载荷包含任务 ID、名称、模式、状态、轮次、工具调用数、用量和安全摘要。`Model` 保存任务视图集合：前台显示阶段和进度，后台显示名称、ID、状态、耗时和终态。
 
 当主任务仍在运行且存在可转后台子任务时，ESC 调用 `Runner.BackgroundForegroundSubAgent()`；成功后，工具调用以 `async_launched` 结果返回父循环，输入框恢复。Ctrl+C 继续取消主任务。TUI 订阅 TaskManager 通知，完成、失败和取消只渲染安全摘要的系统消息。
+
+### ESC 提示时序与后台终态通知修复
+
+TUI 的任务终态展示与主 Agent 的 `<task-notification>` 注入保持两条独立路径：前者只影响用户可见视图，后者继续由 Runner 在下一次模型请求前消费，二者均不写入持久会话历史。
+
+`Model.Init()` 使用 `tea.Batch` 并行启动输入框焦点、已有权限桥监听（若存在）和首次 `waitForSubAgentNotification`。`Update` 在每次收到 `subAgentNotificationMsg` 后继续返回新的等待命令，保证 TaskManager 依次发布的多个终态均可显示；该等待不阻塞输入或主任务事件循环。
+
+系统消息增加内部“等待当前主任务提交后定位”标记。ESC 成功接管时产生的提示在主任务仍处于临时视图时使用该标记，视图仍临时渲染在当前回合之后。主任务以完成或停止终态结束、且该回合已提交到 `DisplaySnapshot` 后，TUI 将带该标记的提示锚定为当前显示历史长度；后续轮次因此始终排在提示之后。若主任务失败或取消，则清除该标记而保留末尾渲染，维持现有失败/取消临时回合的显示语义，避免未来成功回合错误重定位旧提示。
+
+测试在 TUI 层直接驱动模型、会话和 TaskManager：覆盖 ESC 提示在主回合提交后的锚定、首次通知监听、连续终态通知顺序，以及输入焦点和既有 ESC/Ctrl+C 行为回归。
+
+### 前台期限与接管 context 修复
+
+通用工具执行器继续为普通工具使用既有 30 秒 deadline，但对 `agent` 工具保留调用方 context，不附加该通用 deadline，使 SubAgentRuntime 的 120 秒前台自动后台计时器成为前台等待的唯一期限。
+
+前台子任务以剥离 deadline 的独立 lifetime context 启动；运行时在任务仍为前台时转发父调用的取消，在 ESC 或自动后台接管信号先到达时停止转发。接管只改变同一 TaskManager 任务的背景状态，不重启 Worker 或事件流。由此，未接管任务仍随 `Ctrl+C` 取消，而已接管任务不再继承原工具调用的超时和取消。
+
+回归测试使用可控 context 和阻塞 Worker 验证：Agent 工具不获得 Executor 的短 deadline、普通工具仍会超时；ESC/自动接管后取消父 context 不会取消任务；未接管时取消父 context 会取消任务。
 
 ### 主对话通知
 
@@ -239,7 +263,7 @@ README.md · docs/README.md · docs/ch13-subagent/* — 用户与章节文档
 
 | Spec 需求 | 设计归属 |
 |---|---|
-| F1 | `tools.AgentTool`、`agent.SubAgentRuntime` |
+| F1、F1a | `tools.AgentTool`、`agent.SubAgentRuntime`、`subagent` 定义校验 |
 | F2-F3 | `subagent` 定义、发现、内置角色与配置 |
 | F4-F6 | `agent/subagent.go`、独立 Session/权限/Context、Provider/Hook/工作区复用 |
 | F7 | `subagent/filter.go` 和运行时 Fork 标记 |

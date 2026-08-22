@@ -11,7 +11,9 @@
 | 新建 | `internal/tools/agent.go`、`agent_test.go` | 固定 Agent 工具和运行时桥接 |
 | 新建 | `internal/agent/subagent.go`、`run_completion.go` | 创建子 Runner、Fork、执行到终态 |
 | 修改 | `internal/agent/event.go`、`runner.go`、`scheduler.go` | 运行时注入、子任务事件、通知队列 |
-| 修改 | `internal/agent/*_test.go` | 定义式/Fork、隔离、通知与后台路径测试 |
+| 修改 | `internal/agent/subagent.go`、`subagent_test.go` | Fork 兼容分流与后台/历史回归测试 |
+| 修改 | `internal/subagent/definition.go`、`subagent_test.go` | 保留 `fork` 角色名校验与来源加载回归 |
+| 修改 | `internal/tools/agent.go`、`agent_test.go` | Fork 兼容语义的 schema 说明与断言 |
 | 修改 | `internal/hooks/executor.go`、`internal/hooks/*_test.go` | Hook agent 动作接入同一 Runtime |
 | 修改 | `internal/tui/model.go`、`update.go`、`view.go`、`tui_test.go` | 子任务视图、ESC 接管与通知渲染 |
 | 修改 | `internal/config/config.go`、`load.go`、`validate.go`、测试 | Verification 开关加载、默认值和校验 |
@@ -233,6 +235,124 @@
 
 **验证：** `gofmt -w` 后 `go test ./... -count=1` 与 `go build ./cmd/mewcode` 均通过。
 
+## T17：拒绝保留的 Fork 角色名
+
+**文件：** `internal/subagent/definition.go`、`internal/subagent/subagent_test.go`
+
+**依赖：** T2、T4
+
+**步骤：**
+1. 在定义校验中将去除首尾空白且大小写无关等于 `fork` 的名称判为无效，并保留现有名称和错误诊断约定。
+2. 增加直接解析与通过来源发现加载的测试，覆盖 `fork`、` Fork ` 和其他正常名称。
+
+**验证：** `go test ./internal/subagent -run 'Test(ParseDefinition|Discover).*Fork|Test.*Reserved.*Fork' -count=1` 通过。
+
+## T18：将 `fork` 类型归一为 Fork 创建
+
+**文件：** `internal/agent/subagent.go`、`internal/agent/subagent_test.go`、`internal/tools/agent.go`、`internal/tools/agent_test.go`
+
+**依赖：** T17
+
+**步骤：**
+1. 在运行时将省略类型、空白类型和 `fork`（忽略首尾空白及大小写）统一识别为 Fork，避免对该名称进行定义查找。
+2. 保持两种 Fork 输入均强制后台，并复用父历史、占位工具结果和递归阻断逻辑。
+3. 更新工具 schema 的 `subagent_type` 描述；不增加或删除参数。
+4. 增加脚本 Provider 回归测试：显式 `fork` 返回异步任务、子请求带 Fork boilerplate 和父历史；定义式非 `fork` 行为保持不变；schema 含兼容说明。
+
+**验证：** `go test ./internal/agent ./internal/tools -run 'Test.*(Fork|AgentTool|DefinitionSubAgent)' -count=1` 通过。
+
+## T19：同步人工验收与全量回归
+
+**文件：** `docs/ch13-subagent/manual_scenarios.md`、`docs/ch13-subagent/checklist.md`
+
+**依赖：** T18
+
+**步骤：**
+1. 将场景 C 的预检调整为接受字段缺失或值为 `fork`，两者均按 Fork 验收；其他类型值仍记录为模型调用错误。
+2. 在 checklist 中增加兼容 Fork 与保留角色名的可观察验收项和自动化验证命令。
+3. 格式化变更的 Go 文件，执行目标测试、全量测试和构建，并将实际证据写入 checklist；真实 Provider 场景如未执行必须标明。
+
+**验证：** `gofmt -w internal/agent/subagent.go internal/agent/subagent_test.go internal/subagent/definition.go internal/subagent/subagent_test.go internal/tools/agent.go internal/tools/agent_test.go && go test ./... -count=1 && go build ./cmd/mewcode` 通过。
+
+## T20：建立通知监听与临时提示锚点
+
+**文件：** `internal/tui/model.go`
+
+**依赖：** T13
+
+**步骤：**
+1. 为系统消息增加仅表示“等待当前主任务提交后定位”的内部状态；保持普通系统消息和失败/取消临时消息的现有锚点语义。
+2. 在 TUI 初始化命令中并行启动输入焦点、已有权限桥监听（如有）和首次子 Agent 通知等待。
+3. 不修改 TaskManager、Runner 的模型通知注入或持久会话历史。
+
+**验证：** `go test ./internal/tui -run 'Test.*(SystemMessage|SubAgent)' -count=1` 通过。
+
+## T21：在主任务终态解析 ESC 提示位置
+
+**文件：** `internal/tui/update.go`
+
+**依赖：** T20
+
+**步骤：**
+1. ESC 接管产生的系统提示标记为等待当前主任务提交后定位。
+2. 主任务以 completed 或 stopped 终态结束且显示历史已提交后，将该提示定位到当前回合末尾。
+3. 主任务 failed 或 cancelled 时清除等待定位标记，保留其在临时回合之后的显示，避免未来成功回合重定位旧提示。
+
+**验证：** ESC 排序回归测试在实现前失败、实现后通过；`go test ./internal/tui -run 'Test.*(Escape|SystemMessage)' -count=1` 通过。
+
+## T22：补充 TUI 回归测试
+
+**文件：** `internal/tui/tui_test.go`
+
+**依赖：** T20、T21
+
+**步骤：**
+1. 构造 ESC 提示在主任务运行期间产生、主回合提交、再提交下一轮对话的场景，断言其相对顺序正确。
+2. 构造初始化后的后台任务终态通知，断言首次通知被消费并渲染任务名称、终态和安全摘要。
+3. 构造连续多个终态通知，断言均只显示一次且按接收顺序显示；同时断言输入仍可用。
+
+**验证：** `go test ./internal/tui -count=1` 通过。
+
+## T23：同步验收文档与问题记录
+
+**文件：** `docs/ch13-subagent/checklist.md`、`docs/ch13-subagent/manual_scenarios.md`、`bugs/2026-08-22/002-ch13-marker-role-override-unverified.md`、`bugs/2026-08-22/README.md`
+
+**依赖：** T22
+
+**步骤：**
+1. 将 AC12–AC15 的自动化验证命令、实际结果和未执行的真实 Provider/TUI 复测写入 checklist。
+2. 在场景 D 中要求确认 ESC 提示位于下一轮输入前，并分别确认后台任务终态通知。
+3. 在问题记录中记录修复方案、验证结果和最终状态；若真实 Provider/TUI 未复测，明确标为待验证。
+
+**验证：** `git diff --check` 无输出，文档中的命令和测试名称与实现一致。
+
+## T24：修复 Agent 前台期限与接管 context
+
+**文件：** `internal/tools/executor.go`、`internal/tools/tools_test.go`、`internal/agent/subagent.go`、`internal/agent/subagent_test.go`
+
+**依赖：** T11、T20–T22
+
+**步骤：**
+1. 仅让 `agent` 工具跳过 Executor 的通用 30 秒 deadline；保持其他工具的期限和超时错误不变。
+2. 为前台子任务建立独立 lifetime context；仅在任务仍前台时转发父 context 的取消。
+3. ESC 或自动接管后停止该取消转发，复用原 TaskManager 任务和 Worker；未接管时保持 `Ctrl+C` 取消。
+4. 增加通用期限豁免、普通工具期限保持、接管后父取消不终止任务、未接管父取消终止任务的回归测试。
+
+**验证：** `go test ./internal/tools ./internal/agent -run 'Test.*(Agent|Background|AutoBackground|Timeout|Cancellation)' -count=1` 通过。
+
+## T25：同步期限修复验收
+
+**文件：** `docs/ch13-subagent/checklist.md`、`docs/ch13-subagent/manual_scenarios.md`、`bugs/2026-08-22/002-ch13-marker-role-override-unverified.md`
+
+**依赖：** T24
+
+**步骤：**
+1. 将 AC16 的自动化验证和真实场景 D/E 复测要求写入 checklist。
+2. 在场景 D/E 记录通用 30 秒期限不应截断前台 120 秒自动接管，以及接管后必须完成或给出真实终态。
+3. 更新问题记录的修复方案、验证证据与未验证项。
+
+**验证：** `git diff --check` 无输出。
+
 ## 执行顺序
 
 ```text
@@ -241,4 +361,7 @@ T2 ─┘          │       ├→ T11 → T12 ─┬→ T14 → T16
                T5 → T6 → T8 ─┘        └→ T15 ─┘
                        └────────→ T10 ─┘
 T11 ─────────────────────────────→ T13 → T15
+T2 → T4 → T17 → T18 → T19
+T13 → T20 → T21 → T22 → T23
+T11 → T24 → T25
 ```

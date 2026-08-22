@@ -82,6 +82,9 @@ func ValidateDefinition(definition Definition) error {
 	if strings.TrimSpace(definition.Name) == "" {
 		return fmt.Errorf("agent definition %s: name is required", definition.Path)
 	}
+	if strings.EqualFold(strings.TrimSpace(definition.Name), "fork") {
+		return fmt.Errorf("agent definition %s: name %q is reserved", definition.Path, definition.Name)
+	}
 	if strings.TrimSpace(definition.Description) == "" {
 		return fmt.Errorf("agent definition %s: description is required", definition.Path)
 	}

@@ -192,6 +192,27 @@ func (panicTool) Metadata() Metadata {
 }
 func (panicTool) Execute(context.Context, json.RawMessage) Result { panic("boom") }
 
+type delayedAgentTool struct{}
+
+func (delayedAgentTool) Metadata() Metadata {
+	return Metadata{Name: "agent", Description: "agent timeout exemption test", Schema: Schema{"type": "object"}}
+}
+func (delayedAgentTool) Execute(context.Context, json.RawMessage) Result {
+	time.Sleep(30 * time.Millisecond)
+	return Success("agent", nil)
+}
+
+func TestExecutorDoesNotApplyGeneralTimeoutToAgent(t *testing.T) {
+	registry := NewRegistry()
+	if err := registry.Register(delayedAgentTool{}); err != nil {
+		t.Fatal(err)
+	}
+	result := NewExecutor(5*time.Millisecond).Execute(context.Background(), registry, provider.ToolCall{ID: "agent-call", Name: "agent", Arguments: []byte(`{}`)})
+	if result.IsError {
+		t.Fatalf("agent inherited general executor timeout: %+v", result)
+	}
+}
+
 func TestExecutorPanic(t *testing.T) {
 	registry := NewRegistry()
 	if err := registry.Register(panicTool{}); err != nil {

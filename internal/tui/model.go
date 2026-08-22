@@ -30,9 +30,10 @@ type taskView struct {
 }
 
 type systemMessage struct {
-	content string
-	after   int
-	role    provider.Role
+	content                 string
+	after                   int
+	role                    provider.Role
+	pendingCurrentTaskAfter bool
 }
 
 type displaySegment struct{ content string }
@@ -107,11 +108,26 @@ func (m *Model) AddSystemMessage(message string) {
 	if m.session != nil {
 		after = len(m.session.DisplaySnapshot())
 	}
-	if m.hasTransientTaskView() {
+	pendingCurrentTaskAfter := m.task != nil
+	if pendingCurrentTaskAfter || m.hasTransientTaskView() {
 		after = -1
 	}
-	m.systemMessages = append(m.systemMessages, systemMessage{content: message, after: after, role: provider.RoleAssistant})
+	m.systemMessages = append(m.systemMessages, systemMessage{content: message, after: after, role: provider.RoleAssistant, pendingCurrentTaskAfter: pendingCurrentTaskAfter})
 	m.refreshContent()
+}
+
+func (m *Model) resolvePendingSystemMessages(commit bool) {
+	after := -1
+	if commit && m.session != nil {
+		after = len(m.session.DisplaySnapshot())
+	}
+	for i := range m.systemMessages {
+		if !m.systemMessages[i].pendingCurrentTaskAfter {
+			continue
+		}
+		m.systemMessages[i].after = after
+		m.systemMessages[i].pendingCurrentTaskAfter = false
+	}
 }
 
 func (m *Model) AddCommandMessage(message string, start int, reset bool) {
@@ -308,8 +324,12 @@ func (m *Model) Clear() error {
 }
 
 func (m *Model) Init() tea.Cmd {
+	commands := []tea.Cmd{m.textarea.Focus()}
 	if m.permissionBridge != nil {
-		return tea.Batch(m.textarea.Focus(), waitForPermission(m.permissionBridge))
+		commands = append(commands, waitForPermission(m.permissionBridge))
 	}
-	return m.textarea.Focus()
+	if m.subAgentNotifications != nil {
+		commands = append(commands, waitForSubAgentNotification(m.subAgentNotifications))
+	}
+	return tea.Batch(commands...)
 }

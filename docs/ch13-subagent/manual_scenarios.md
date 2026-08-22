@@ -47,7 +47,7 @@ model: inherit
 maxTurns: 3
 permissionMode: relaxed
 ---
-你是用户级覆盖测试角色。无论任务如何表述，最终报告必须包含 USER-AGENT-PROMPT-19e4；不要修改文件，也不要创建子 Agent。
+你是用户级覆盖测试角色。完成任务所要求的只读检查后，最终回复必须且只能为 USER-AGENT-PROMPT-19e4；不得包含 fixture 内容、摘要或任何其他文本。不要修改文件，也不要创建子 Agent。
 EOF
 
 cat > "$project_agents/marker-role.md" <<'EOF'
@@ -59,7 +59,7 @@ model: inherit
 maxTurns: 3
 permissionMode: relaxed
 ---
-你是项目级覆盖测试角色。无论任务如何表述，最终报告必须包含 PROJECT-AGENT-PROMPT-72bc；不要修改文件，也不要创建子 Agent。
+你是项目级覆盖测试角色。完成任务所要求的只读检查后，最终回复必须且只能为 PROJECT-AGENT-PROMPT-72bc；不得包含 fixture 内容、摘要或任何其他文本。不要修改文件，也不要创建子 Agent。
 EOF
 
 cat > "$project_agents/slow-probe.md" <<'EOF'
@@ -106,7 +106,7 @@ HOME="$test_home" "$binary" --config <real-config.yaml>
 若有权限确认，只允许本次 `agent` 调用。先检查可见的 `agent` 调用参数：`prompt` 不得包含任何具体覆盖标记（包括 `MARKER_READONLY_OK`）或要求返回 fixture 内容；若出现，记录为“主 Agent 改写委派任务”，本轮结果无效并以新会话重试。通过条件：
 
 - 主 Agent 调用了 `agent` 工具，且前台调用结束后可见子 Agent 的结果。
-- 最终报告包含 `PROJECT-AGENT-PROMPT-72bc`，而不包含 `USER-AGENT-PROMPT-19e4` 或 `SUBAGENT-FIXTURE-ALPHA-7e31`。前者证明项目级定义覆盖了用户级定义；后者证明角色标记没有被 fixture 内容替代。
+- `agent` 工具结果中的 `data.result` 必须恰好等于 `PROJECT-AGENT-PROMPT-72bc`；不得包含 `USER-AGENT-PROMPT-19e4`、`SUBAGENT-FIXTURE-ALPHA-7e31` 或其他文本。这同时证明项目级定义覆盖了用户级定义，且子 Agent 遵守角色的排他输出契约。
 - 子 Agent 不应请求写入或创建更多子 Agent；若出现此类请求，拒绝并记录实际工具名。
 
 退出 MewCode，删除项目级同名定义后重新启动：
@@ -117,7 +117,7 @@ cd "$fixture_root"
 HOME="$test_home" "$binary" --config <real-config.yaml>
 ```
 
-重复相同请求。通过条件：结果改为包含 `USER-AGENT-PROMPT-19e4`，且不包含项目级标记。定义只在启动时发现，因此删除文件后必须重启；本章没有 Agent 定义热刷新命令。
+重复相同请求。通过条件：`agent` 工具结果中的 `data.result` 恰好等于 `USER-AGENT-PROMPT-19e4`。定义只在启动时发现，因此删除文件后必须重启；本章没有 Agent 定义热刷新命令。
 
 为后续场景恢复项目级定义：
 
@@ -137,7 +137,7 @@ PY
 当前配置保持 `enable_verification_agent: false`。在 TUI 输入：
 
 ```text
-必须调用一次 agent 工具，使用 subagent_type="Verification" 创建定义式子 Agent，任务是不调用其他工具、只报告 Verification 是否可用。若工具返回失败，直接说明失败原因；不要改用其他角色。
+必须调用一次 agent 工具，使用 subagent_type="Verification" 创建定义式子 Agent。委派任务：不调用其他工具，完成后只给出一句简短的任务完成报告。等待工具返回后，仅根据 `agent` 工具的结构化返回判断并报告调用是否成功；若工具返回失败，直接说明失败原因；不要改用其他角色。
 ```
 
 通过条件：`agent` 工具返回未知 `Verification` 类型或等价的不可用诊断；主会话仍可继续输入。此处不要求模型逐字复述错误，但不得静默改用其他角色。
@@ -150,7 +150,7 @@ agent:
   enable_verification_agent: true
 ```
 
-重复上述请求。通过条件：`agent` 工具成功启动名为 `Verification` 的定义式子 Agent，并得到完成结果。该角色的系统职责是只读验证；本场景不授权写入或破坏性命令。
+重复上述请求。通过条件：`agent` 工具的结构化返回为成功（`success: true`），且包含完成状态和任务 ID，证明名为 `Verification` 的定义式子 Agent 已成功启动并得到完成结果。不要将子 Agent 最终文本中对自身“是否可用”的陈述作为类型可用性的证据；角色是否加载只能由 `agent` 工具是否成功解析并启动该类型判断。该角色的系统职责是只读验证；本场景不授权写入或破坏性命令。
 
 完成本场景后将测试配置恢复为 `false`，退出并重启后再继续，以免后续测试或日常使用意外增加可用角色。
 
@@ -176,6 +176,8 @@ agent:
 必须调用一次 agent 工具，但不要提供 subagent_type，以 Fork 方式委派任务“只报告你继承到的唯一父会话标记”。设置 name="manual-fork-background"。调用后立即报告 task_id；不要等待子 Agent 完成。
 ```
 
+先检查可见的 `agent` 调用参数：`subagent_type` 可以完全缺失，也可以为 `"fork"`（大小写和首尾空白均兼容）；两种写法都必须走 Fork。其他值按定义式角色查找；若模型传入其他值并导致未知类型，应记录为“模型未按要求创建 Fork”，本轮无效并以新会话重试。
+
 通过条件：
 
 - Fork 调用也立即返回不同的 `task_id` 和 `async_launched`，即使请求中没有设置 `run_in_background: true`。
@@ -192,11 +194,11 @@ agent:
 必须调用一次 agent 工具，使用 subagent_type="slow-probe"、run_in_background=false、name="manual-esc-background"。委派任务：顺序执行两次 sleep 25，每次都必须通过 run_command；完成后只报告完成。不要等待我确认。
 ```
 
-允许主 Agent 的一次 `agent` 调用。看到状态栏出现“子 Agent 前台运行 · ESC 转后台”且慢角色正在执行第一条 `sleep` 时，按 `Esc` 一次。
+允许主 Agent 的一次 `agent` 调用。通用工具默认 30 秒期限不得在按 ESC 前截断该前台子 Agent；看到状态栏出现“子 Agent 前台运行 · ESC 转后台”且慢角色正在执行第一条 `sleep` 时，按 `Esc` 一次。接管后即使原前台工具调用已返回或其 context 被取消，子 Agent 仍必须继续同一任务。
 
 通过条件：
 
-- TUI 显示“子 Agent 已转入后台。”；主 Agent 随后完成当前回合，输入框恢复可用。
+- TUI 显示“子 Agent 已转入后台。”；主 Agent 随后完成当前回合，输入框恢复可用。继续发送一条普通请求并获得回复后，该提示仍必须位于触发 ESC 的原回合之后、该普通请求之前，不能永久停留在聊天底部。
 - 输入一条不调用工具的短问题，主 Agent 能正常接收并回答，证明后台任务未阻塞主会话。
 - 等待慢角色结束后，TUI 显示 `manual-esc-background` 的 completed、failed 或 cancelled 终态通知；正常未拒绝命令时预期为 completed。
 - `Ctrl+C` 仍用于取消当前主任务，不应被 `Esc` 的后台化语义替代。
@@ -211,7 +213,7 @@ agent:
 必须调用一次 agent 工具，使用 subagent_type="slow-probe"、run_in_background=false、name="manual-auto-background"。委派任务：顺序执行五次 sleep 25，每次都必须通过 run_command；完成后只报告完成。不要等待我确认。整个过程中我不会按 Esc。
 ```
 
-允许一次主 `agent` 调用后，不要按 `Esc` 或 `Ctrl+C`。约 120 秒后通过条件：
+允许一次主 `agent` 调用后，不要按 `Esc` 或 `Ctrl+C`。通用 30 秒工具期限不得提前截断该前台等待；约 120 秒后通过条件：
 
 - 前台等待自动结束，主 Agent 工具结果以异步任务 ID 返回；该子 Agent 没有从头重新开始。
 - 主回合结束后输入框可用；在第五次 `sleep` 完成后，TUI 显示 `manual-auto-background` 的终态通知。
@@ -254,7 +256,7 @@ diff -u /private/tmp/mewcode-ch13-before-worktree.txt \
 | 场景 | 输入/配置 | TUI 证据 | 文件或状态证据 | 结果 |
 |---|---|---|---|---|
 | A 定义覆盖 |  | 子 Agent 结果中的唯一标记 | 重启后项目级→用户级切换 | 通过/失败/模型未调用 |
-| B Verification | 开关 false / true | 不可用诊断 / 成功创建 | 配置字段已切换并恢复 | 通过/失败/模型未调用 |
+| B Verification | 开关 false / true | 未知类型错误 / `agent` 结构化成功、完成状态和任务 ID | 配置字段已切换并恢复 | 通过/失败/模型未调用 |
 | C 显式与 Fork 后台 |  | 两个 task ID、终态通知、可继续输入 | ID 不同，Fork 强制异步 | 通过/失败/模型未调用 |
 | D ESC 后台化 |  | 前台状态、ESC 提示、输入恢复 | `manual-esc-background` 终态 | 通过/失败/模型未调用 |
 | E 自动后台化 |  | 约 120 秒后异步返回、终态通知 | 不重复启动，最多五次 sleep | 通过/失败/未完成 |

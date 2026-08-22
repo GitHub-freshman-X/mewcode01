@@ -35,8 +35,15 @@ func (e *Executor) execute(ctx context.Context, registry *Registry, call provide
 	if !ok {
 		return Failure(call.Name, ErrorNotFound, "tool is not registered", map[string]any{"tool": call.Name})
 	}
-	ctx, cancel := context.WithTimeout(ctx, e.Timeout)
-	defer cancel()
+	if call.Name != "agent" {
+		ctx, cancel := context.WithTimeout(ctx, e.Timeout)
+		defer cancel()
+		return e.executeWithContext(ctx, call, tool)
+	}
+	return e.executeWithContext(ctx, call, tool)
+}
+
+func (e *Executor) executeWithContext(ctx context.Context, call provider.ToolCall, tool Tool) (result Result) {
 	done := make(chan Result, 1)
 	go func() {
 		defer func() {

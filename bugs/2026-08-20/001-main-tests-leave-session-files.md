@@ -21,6 +21,12 @@ go test ./cmd/mewcode -count=1
 
 2026-08-22 执行 `go test ./... -count=1` 时再次生成 `cmd/mewcode/.mewcode/sessions/`（共 9 个 JSONL 文件）；已立即删除该目录并确认工作树不再包含该产物。尚未修改既有启动测试的工作目录隔离，原因是该问题独立于 `/status` 诊断功能。
 
+2026-08-23 执行全量测试后该目录再次出现；本次变更未触及启动测试。已确认其中仅有 3 个会话 JSONL 测试产物，已删除 `cmd/mewcode/.mewcode/` 并复核工作树不再包含该未跟踪目录；根因与修复建议不变。
+
+2026-08-23 TUI 通知修复的全量回归再次在失败前生成 `cmd/mewcode/.mewcode/`。本次未触及启动测试；已删除该目录并以 `git status --short | rg 'cmd/mewcode/\\.mewcode' || true` 复核无输出。根因与修复建议不变。
+
+2026-08-23 前台期限与接管 context 修复执行 `go test ./... -count=1` 后再次生成该目录；本次也未触及启动测试，已删除并以 `git status --short | rg 'cmd/mewcode/\\.mewcode' || true` 复核无输出。
+
 ## 建议下一步
 
 为所有调用 `run` 的启动测试统一注入临时工作目录，并在测试结束时恢复原工作目录；随后验证 `go test ./cmd/mewcode -count=1` 后工作树无新增 `.mewcode` 产物。

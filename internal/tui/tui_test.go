@@ -15,6 +15,7 @@ import (
 	"github.com/GitHub-freshman-X/mewcode01/internal/conversation"
 	"github.com/GitHub-freshman-X/mewcode01/internal/permissions"
 	"github.com/GitHub-freshman-X/mewcode01/internal/provider"
+	"github.com/GitHub-freshman-X/mewcode01/internal/subagent"
 	"github.com/GitHub-freshman-X/mewcode01/internal/tools"
 )
 
@@ -166,6 +167,89 @@ func TestSystemMessageStaysBetweenConversationTurns(t *testing.T) {
 	}
 	if len(session.Snapshot()) != 4 {
 		t.Fatalf("system message leaked into history: %v", session.Snapshot())
+	}
+}
+
+func TestEscapeSystemMessageStaysBeforeLaterConversationTurn(t *testing.T) {
+	session := conversation.NewSession()
+	commitTUIRound(t, session, "before user", "before assistant")
+	m := NewModel(nil, session)
+	m.task = &agent.Task{}
+	m.AddSystemMessage("子 Agent 已转入后台。")
+	if len(m.systemMessages) != 1 || !m.systemMessages[0].pendingCurrentTaskAfter {
+		t.Fatalf("ESC message was not marked for the current task: %+v", m.systemMessages)
+	}
+	commitTUIRound(t, session, "ESC user", "ESC assistant")
+	m.applyAgentEvent(agent.Event{Type: agent.EventCompleted})
+	commitTUIRound(t, session, "later user", "later assistant")
+	m.refreshContent()
+	view := stripANSI(m.View().Content)
+	current := strings.Index(view, "ESC assistant")
+	notice := strings.Index(view, "子 Agent 已转入后台。")
+	later := strings.Index(view, "later user")
+	if current < 0 || notice < 0 || later < 0 || !(current < notice && notice < later) {
+		t.Fatalf("ESC system message order is wrong: %q", view)
+	}
+	if m.systemMessages[0].pendingCurrentTaskAfter {
+		t.Fatal("ESC message remained pending after the task completed")
+	}
+}
+
+func TestInitConsumesFirstSubAgentTerminalNotification(t *testing.T) {
+	registry, err := tools.NewDefaultRegistry(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	manager := subagent.NewTaskManager()
+	session := conversation.NewSession()
+	runner := agent.NewRunner(tuiScriptedProvider{}, session, registry, tools.NewExecutor(time.Second), agent.Options{SubAgents: agent.NewSubAgentRuntime(nil, manager)})
+	m := NewModel(runner, session)
+	batch, ok := m.Init()().(tea.BatchMsg)
+	if !ok || len(batch) < 2 {
+		t.Fatalf("Init did not batch the notification listener: %#v", batch)
+	}
+	if _, err := manager.Launch(context.Background(), subagent.LaunchRequest{Name: "terminal-task", Background: true, Worker: func(context.Context, func(subagent.Progress)) subagent.Outcome {
+		return subagent.Outcome{Status: subagent.TaskCompleted, Result: "safe summary"}
+	}}); err != nil {
+		t.Fatal(err)
+	}
+	_, next := m.Update(batch[len(batch)-1]()) // running notification
+	if next == nil {
+		t.Fatal("running notification did not continue listening")
+	}
+	_, next = m.Update(next()) // terminal notification
+	if next == nil {
+		t.Fatal("terminal notification did not continue listening")
+	}
+	view := stripANSI(m.View().Content)
+	for _, want := range []string{"terminal-task", "completed", "safe summary"} {
+		if !strings.Contains(view, want) {
+			t.Fatalf("terminal notification missing %q: %q", want, view)
+		}
+	}
+}
+
+func TestSubAgentTerminalNotificationsContinueInOrder(t *testing.T) {
+	m := NewModel(nil, conversation.NewSession())
+	notifications := make(chan subagent.TaskNotification, 2)
+	m.subAgentNotifications = notifications
+	wait := waitForSubAgentNotification(notifications)
+	notifications <- subagent.TaskNotification{Task: subagent.TaskInfo{Name: "first", Status: subagent.TaskCompleted, Result: "first safe"}}
+	_, wait = m.Update(wait())
+	notifications <- subagent.TaskNotification{Task: subagent.TaskInfo{Name: "second", Status: subagent.TaskFailed, Failure: "second safe"}}
+	_, wait = m.Update(wait())
+	if wait == nil {
+		t.Fatal("terminal notification did not continue listening")
+	}
+	view := stripANSI(m.View().Content)
+	first, second := strings.Index(view, "first safe"), strings.Index(view, "second safe")
+	if first < 0 || second < 0 || first >= second {
+		t.Fatalf("notifications are missing or out of order: %q", view)
+	}
+	m.textarea.SetValue("")
+	m.Update(tea.KeyPressMsg{Text: "x"})
+	if got := m.textarea.Value(); got != "x" {
+		t.Fatalf("notification blocked input: %q", got)
 	}
 }
 

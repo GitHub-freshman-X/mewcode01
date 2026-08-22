@@ -140,7 +140,7 @@ Hook 配置可在用户主配置或项目 `.mewcode/config.yaml` 的 `hooks` 顶
 
 主 Agent 可通过固定的 `agent` 工具委派子任务。定义式子 Agent 从上表的用户级、项目级目录发现；同名定义按项目级、用户级、内置级、插件级的顺序覆盖。定义文件使用 YAML frontmatter（`name`、`description`、`tools`、`disallowedTools`、`model`、`maxTurns`、`permissionMode`）和 Markdown 操作说明。
 
-内置 `Explore`、`Plan`、`general-purpose` 始终可用；`Verification` 需设置 `agent.enable_verification_agent: true`。定义式子 Agent 使用独立对话和权限记录；未指定 `subagent_type` 的 Fork 子 Agent 继承父对话并始终后台运行。显式后台、运行 120 秒自动后台及按 `Esc` 都会创建或接管进程内任务，完成结果以通知回传主对话。后台任务不会跨会话持久化，且暂不支持 `isolation: worktree`、Fork 再 Fork 或后台任务再派生子 Agent。
+内置 `Explore`、`Plan`、`general-purpose` 始终可用；`Verification` 需设置 `agent.enable_verification_agent: true`。定义式子 Agent 使用独立对话和权限记录；省略 `subagent_type` 或设为 `fork` 的 Fork 子 Agent 继承父对话并始终后台运行，`fork` 是不可用于角色定义的保留名称。显式后台、运行 120 秒自动后台及按 `Esc` 都会创建或接管进程内任务，完成结果以通知回传主对话。后台任务不会跨会话持久化，且暂不支持 `isolation: worktree`、Fork 再 Fork 或后台任务再派生子 Agent。
 
 ## 权限与安全
 

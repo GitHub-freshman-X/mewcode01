@@ -3,6 +3,7 @@ package tools
 import (
 	"context"
 	"encoding/json"
+	"strings"
 	"testing"
 )
 
@@ -24,6 +25,10 @@ func TestAgentToolDispatchesStableSchema(t *testing.T) {
 		if _, ok := properties[name]; !ok {
 			t.Fatalf("missing property %s", name)
 		}
+	}
+	forkDescription := properties["subagent_type"].(map[string]any)["description"].(string)
+	if !strings.Contains(forkDescription, "fork") || !strings.Contains(forkDescription, "Omit") {
+		t.Fatalf("subagent_type description does not document fork compatibility: %q", forkDescription)
 	}
 	host := &fakeSubAgentHost{}
 	input, _ := json.Marshal(map[string]any{"prompt": "inspect", "description": "inspect files", "subagent_type": "Explore"})
