@@ -3,6 +3,7 @@ package subagent
 import (
 	"context"
 	"fmt"
+	"sort"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -30,6 +31,7 @@ type TaskInfo struct {
 	EndedAt     time.Time
 	Usage       provider.Usage
 	ToolCalls   int
+	Background  bool
 }
 
 type Progress struct {
@@ -51,6 +53,7 @@ type Worker func(context.Context, func(Progress)) Outcome
 type LaunchRequest struct {
 	Name        string
 	Description string
+	Background  bool
 	Worker      Worker
 }
 
@@ -81,7 +84,7 @@ func (m *TaskManager) Launch(ctx context.Context, request LaunchRequest) (TaskIn
 	started := m.clock()
 	id := fmt.Sprintf("subagent-%d", m.sequence.Add(1))
 	taskCtx, cancel := context.WithCancel(ctx)
-	task := &managedTask{info: TaskInfo{ID: id, Name: request.Name, Description: request.Description, Status: TaskRunning, StartedAt: started}, cancel: cancel, done: make(chan struct{})}
+	task := &managedTask{info: TaskInfo{ID: id, Name: request.Name, Description: request.Description, Status: TaskRunning, StartedAt: started, Background: request.Background}, cancel: cancel, done: make(chan struct{})}
 	m.mu.Lock()
 	m.tasks[id] = task
 	initial := cloneTaskInfo(task.info)
@@ -122,6 +125,40 @@ func (m *TaskManager) List() []TaskInfo {
 	for _, task := range m.tasks {
 		out = append(out, cloneTaskInfo(task.info))
 	}
+	return out
+}
+
+// MarkBackground atomically marks a running task as detached from the foreground.
+func (m *TaskManager) MarkBackground(id string) bool {
+	m.mu.Lock()
+	task, ok := m.tasks[id]
+	if !ok || task.info.Status != TaskRunning {
+		m.mu.Unlock()
+		return false
+	}
+	task.info.Background = true
+	info := cloneTaskInfo(task.info)
+	m.mu.Unlock()
+	m.publish(info)
+	return true
+}
+
+// RunningBackground returns a stable snapshot of running background tasks only.
+func (m *TaskManager) RunningBackground() []TaskInfo {
+	m.mu.RLock()
+	out := make([]TaskInfo, 0, len(m.tasks))
+	for _, task := range m.tasks {
+		if task.info.Status == TaskRunning && task.info.Background {
+			out = append(out, cloneTaskInfo(task.info))
+		}
+	}
+	m.mu.RUnlock()
+	sort.Slice(out, func(i, j int) bool {
+		if out[i].StartedAt.Equal(out[j].StartedAt) {
+			return out[i].ID < out[j].ID
+		}
+		return out[i].StartedAt.Before(out[j].StartedAt)
+	})
 	return out
 }
 

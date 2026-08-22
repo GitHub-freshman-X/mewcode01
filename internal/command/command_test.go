@@ -4,11 +4,13 @@ import (
 	"context"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/GitHub-freshman-X/mewcode01/internal/agent"
 	"github.com/GitHub-freshman-X/mewcode01/internal/hooks"
 	"github.com/GitHub-freshman-X/mewcode01/internal/provider"
 	"github.com/GitHub-freshman-X/mewcode01/internal/skills"
+	"github.com/GitHub-freshman-X/mewcode01/internal/status"
 )
 
 func TestRegistryRejectsConflicts(t *testing.T) {
@@ -45,6 +47,7 @@ type fakeUI struct {
 	requests []agent.Request
 	plan     bool
 	exit     bool
+	usage    provider.Usage
 }
 
 func (u *fakeUI) AddSystemMessage(s string)        { u.messages = append(u.messages, s) }
@@ -52,10 +55,14 @@ func (u *fakeUI) StartAgent(r agent.Request) error { u.requests = append(u.reque
 func (u *fakeUI) SetPlanMode(v bool)               { u.plan = v }
 func (u *fakeUI) PlanMode() bool                   { return u.plan }
 func (u *fakeUI) RequestExit()                     { u.exit = true }
-func (u *fakeUI) TokenUsage() provider.Usage       { return provider.Usage{} }
+func (u *fakeUI) TokenUsage() provider.Usage       { return u.usage }
 func (u *fakeUI) RefreshStatus()                   {}
 func (u *fakeUI) MemoryClearPending() bool         { return false }
 func (u *fakeUI) SetMemoryClearPending(bool)       {}
+
+type fakeStatus struct{ snapshot status.Snapshot }
+
+func (s fakeStatus) StatusSnapshot() status.Snapshot { return s.snapshot }
 
 type fakeSessions struct {
 	current SessionMeta
@@ -142,6 +149,27 @@ func TestSessionListUsesTitle(t *testing.T) {
 	}
 	if !strings.Contains(message, "20260816-090000-c3d4 — （空会话）") || strings.Contains(message, "99 条消息") {
 		t.Fatalf("message=%q", message)
+	}
+}
+
+func TestStatusCommandRendersSafeRuntimeSnapshot(t *testing.T) {
+	ui := &fakeUI{usage: provider.Usage{InputTokens: 12, OutputTokens: 4}}
+	ctx := CommandContext{Context: context.Background(), UI: ui, Sessions: fakeSessions{current: SessionMeta{ID: "session-1", MessageCount: 3}}, Status: fakeStatus{snapshot: status.Snapshot{
+		Workspace: "/fixture", LogDirectory: "/fixture/logs", PermissionMode: "default",
+		ToolCount: 8, SkillCount: 2, UserMemoryCount: 1, ProjectMemoryCount: 3, MemoryAvailable: true,
+		SubAgentDefinitionCount: 4,
+		BackgroundTasks:         []status.BackgroundTask{{ID: "subagent-1", Name: "verify", Status: "running", Elapsed: 3 * time.Second}},
+	}}}
+	if err := Dispatch(DefaultRegistry(), Parse("/status"), ctx); err != nil {
+		t.Fatal(err)
+	}
+	if len(ui.messages) != 1 {
+		t.Fatalf("messages=%v", ui.messages)
+	}
+	for _, want := range []string{"MewCode 状态", "工作目录：/fixture", "日志目录：/fixture/logs", "会话：session-1（3 条消息）", "Token：in:12 out:4", "工具：8 · Skill：2 · 记忆：用户 1 · 项目 3 · SubAgent 定义：4", "后台任务：1", "subagent-1 · verify · running · 3s"} {
+		if !strings.Contains(ui.messages[0], want) {
+			t.Fatalf("status missing %q: %q", want, ui.messages[0])
+		}
 	}
 }
 

@@ -102,7 +102,7 @@ api_key: replace-with-your-api-key
 | `/do` | 执行当前会话累积的待执行计划。 |
 | `/session [list\|new\|resume <id>\|delete <id>]` | 查看、创建、恢复或删除会话（别名：`/s`）。 |
 | `/memory [list\|add <类别> <内容>\|clear]` | 管理记忆（别名：`/m`）；清空时须再次输入确认。 |
-| `/status` | 显示当前模式、会话与累计 Token 用量。 |
+| `/status` | 显示本地诊断快照：模式、工作目录、日志目录、权限、会话、累计 Token、工具/Skill/记忆/SubAgent 数量及运行中后台任务。 |
 | `/skills reload` | 重新发现 Skill 并刷新对应命令。 |
 | `/<skill-name> [参数]` | 执行已发现的 Skill；内置 `commit`、`review`、`test`。 |
 | `/exit` | 空闲时退出 MewCode。 |

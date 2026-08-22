@@ -9,6 +9,7 @@ import (
 	"github.com/GitHub-freshman-X/mewcode01/internal/hooks"
 	"github.com/GitHub-freshman-X/mewcode01/internal/logging"
 	"github.com/GitHub-freshman-X/mewcode01/internal/skills"
+	"github.com/GitHub-freshman-X/mewcode01/internal/status"
 )
 
 const sessionTitleLimit = 48
@@ -81,7 +82,7 @@ func Dispatch(registry *Registry, invocation Invocation, ctx CommandContext) err
 		return nil
 	}
 	started := time.Now()
-	err := command.Handler(CommandContext{Context: ctx.Context, UI: ctx.UI, Registry: registry, Sessions: ctx.Sessions, Memory: ctx.Memory, Skills: ctx.Skills, Logger: ctx.Logger, Hooks: ctx.Hooks, Args: invocation.Args})
+	err := command.Handler(CommandContext{Context: ctx.Context, UI: ctx.UI, Registry: registry, Sessions: ctx.Sessions, Memory: ctx.Memory, Skills: ctx.Skills, Status: ctx.Status, Logger: ctx.Logger, Hooks: ctx.Hooks, Args: invocation.Args})
 	if ctx.Hooks != nil {
 		ctx.Hooks.Run(ctx.Context, hooks.EventCommandExecute, hooks.Context{Message: "/" + command.Name + " " + invocation.Args})
 	}
@@ -264,7 +265,52 @@ func statusCommand(ctx CommandContext) error {
 	if ctx.UI.PlanMode() {
 		mode = "PLAN"
 	}
-	ctx.systemf("[%s] tokens in:%d out:%d", mode, usage.InputTokens, usage.OutputTokens)
+	workspace, logDirectory, permissionMode := "不可用", "不可用", "不可用"
+	toolCount, skillCount, userMemoryCount, projectMemoryCount, definitionCount := 0, 0, 0, 0, 0
+	memory := "不可用"
+	var background []status.BackgroundTask
+	if ctx.Status != nil {
+		snapshot := ctx.Status.StatusSnapshot()
+		if snapshot.Workspace != "" {
+			workspace = snapshot.Workspace
+		}
+		if snapshot.LogDirectory != "" {
+			logDirectory = snapshot.LogDirectory
+		}
+		if snapshot.PermissionMode != "" {
+			permissionMode = snapshot.PermissionMode
+		}
+		toolCount, skillCount = snapshot.ToolCount, snapshot.SkillCount
+		definitionCount = snapshot.SubAgentDefinitionCount
+		background = snapshot.BackgroundTasks
+		if snapshot.MemoryAvailable {
+			userMemoryCount, projectMemoryCount = snapshot.UserMemoryCount, snapshot.ProjectMemoryCount
+			memory = fmt.Sprintf("用户 %d · 项目 %d", userMemoryCount, projectMemoryCount)
+		}
+	}
+	session := "不可用"
+	if ctx.Sessions != nil {
+		current := ctx.Sessions.Current()
+		if current.ID != "" {
+			session = fmt.Sprintf("%s（%d 条消息）", current.ID, current.MessageCount)
+		}
+	}
+	var lines []string
+	lines = append(lines,
+		"MewCode 状态",
+		fmt.Sprintf("模式：%s", mode),
+		fmt.Sprintf("工作目录：%s", workspace),
+		fmt.Sprintf("日志目录：%s", logDirectory),
+		fmt.Sprintf("权限模式：%s", permissionMode),
+		fmt.Sprintf("会话：%s", session),
+		fmt.Sprintf("Token：in:%d out:%d", usage.InputTokens, usage.OutputTokens),
+		fmt.Sprintf("工具：%d · Skill：%d · 记忆：%s · SubAgent 定义：%d", toolCount, skillCount, memory, definitionCount),
+		fmt.Sprintf("后台任务：%d", len(background)),
+	)
+	for _, task := range background {
+		lines = append(lines, fmt.Sprintf("- %s · %s · %s · %s", task.ID, task.Name, task.Status, task.Elapsed.Round(time.Second)))
+	}
+	ctx.systemf("%s", strings.Join(lines, "\n"))
 	return nil
 }
 func DefaultRegistry() *Registry { r, _ := NewRegistry(DefaultCommands()...); return r }

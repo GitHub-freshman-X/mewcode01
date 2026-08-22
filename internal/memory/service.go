@@ -64,6 +64,7 @@ type Service struct {
 	mu       sync.Mutex
 	lastScan map[string]time.Time
 	recent   map[[32]byte]struct{}
+	status   StatusSummary
 }
 
 const (
@@ -84,13 +85,72 @@ func NewService(paths Paths, options ServiceOptions) *Service {
 	if logger == nil {
 		logger = logging.Nop()
 	}
-	return &Service{paths: paths, caller: options.Caller, clock: clock, sessions: options.Sessions, logger: logger, lastScan: make(map[string]time.Time), recent: make(map[[32]byte]struct{})}
+	service := &Service{paths: paths, caller: options.Caller, clock: clock, sessions: options.Sessions, logger: logger, lastScan: make(map[string]time.Time), recent: make(map[[32]byte]struct{})}
+	service.refreshStatus()
+	return service
+}
+
+type StatusSummary struct {
+	UserCount, ProjectCount int
+	Available               bool
 }
 
 type CommandSummary struct{ UserCount, ProjectCount int }
 type CommandItem struct {
 	Kind              MemoryKind
 	Name, Description string
+}
+
+// StatusSummary returns cached counts without filesystem access.
+func (s *Service) StatusSummary() StatusSummary {
+	if s == nil {
+		return StatusSummary{}
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.status
+}
+
+func (s *Service) refreshStatus() {
+	if s == nil {
+		return
+	}
+	summary, err := countStatus(s.paths)
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if err != nil {
+		s.status = StatusSummary{}
+		return
+	}
+	s.status = summary
+}
+
+func countStatus(paths Paths) (StatusSummary, error) {
+	var summary StatusSummary
+	for _, item := range []struct {
+		directory string
+		project   bool
+	}{{paths.UserMemory, false}, {paths.ProjectMemory, true}} {
+		entries, err := os.ReadDir(item.directory)
+		if errors.Is(err, os.ErrNotExist) {
+			continue
+		}
+		if err != nil {
+			return StatusSummary{}, err
+		}
+		for _, entry := range entries {
+			if entry.IsDir() || entry.Name() == "MEMORY.md" || filepath.Ext(entry.Name()) != ".md" {
+				continue
+			}
+			if item.project {
+				summary.ProjectCount++
+			} else {
+				summary.UserCount++
+			}
+		}
+	}
+	summary.Available = true
+	return summary, nil
 }
 
 func (s *Service) CommandSummary() (CommandSummary, error) {
@@ -165,7 +225,11 @@ func (s *Service) CommandAdd(kind, content string) error {
 	}
 	key := sha256.Sum256([]byte(content))
 	name := fmt.Sprintf("manual-%x", key[:6])
-	return ApplyOperations(s.paths, []MemoryOperation{{Action: "create", Kind: memoryKind, Name: name, Description: "Manual memory", Content: content}})
+	if err := ApplyOperations(s.paths, []MemoryOperation{{Action: "create", Kind: memoryKind, Name: name, Description: "Manual memory", Content: content}}); err != nil {
+		return err
+	}
+	s.refreshStatus()
+	return nil
 }
 
 func (s *Service) CommandClear() error {
@@ -192,6 +256,7 @@ func (s *Service) CommandClear() error {
 			}
 		}
 	}
+	s.refreshStatus()
 	return nil
 }
 
@@ -251,6 +316,7 @@ func (s *Service) Extract(ctx context.Context, mode Mode, transcript []provider.
 		s.logger.Error("memory extraction failed", logging.Fields{"stage": "memory_extract", "status": "operation_failed", "operation_count": len(operations), "duration_ms": s.clock.Now().Sub(started).Milliseconds()})
 		return err
 	}
+	s.refreshStatus()
 	s.logger.Info("memory extraction completed", logging.Fields{"stage": "memory_extract", "status": "completed", "mode": string(mode), "operation_count": len(operations), "duration_ms": s.clock.Now().Sub(started).Milliseconds()})
 	return nil
 }
@@ -332,6 +398,7 @@ func (s *Service) consolidateDirectory(ctx context.Context, directory string, no
 		s.logger.Error("memory consolidation failed", logging.Fields{"stage": "memory_consolidation", "status": "operation_failed", "operation_count": len(operations), "duration_ms": s.clock.Now().Sub(started).Milliseconds()})
 		return err
 	}
+	s.refreshStatus()
 	if err := atomicWrite(filepath.Join(directory, consolidationMarkerName), []byte(strconv.FormatInt(now.Unix(), 10)+"\n"), 0o600); err != nil {
 		return err
 	}

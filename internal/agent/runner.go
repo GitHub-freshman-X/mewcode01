@@ -16,6 +16,7 @@ import (
 	"github.com/GitHub-freshman-X/mewcode01/internal/prompt"
 	"github.com/GitHub-freshman-X/mewcode01/internal/provider"
 	"github.com/GitHub-freshman-X/mewcode01/internal/skills"
+	"github.com/GitHub-freshman-X/mewcode01/internal/status"
 	"github.com/GitHub-freshman-X/mewcode01/internal/subagent"
 	"github.com/GitHub-freshman-X/mewcode01/internal/tools"
 )
@@ -250,6 +251,47 @@ func (r *Runner) MemoryService() *memory.Service {
 		return nil
 	}
 	return r.options.Memory
+}
+
+// StatusSnapshot returns only safe, local runtime metadata for /status.
+func (r *Runner) StatusSnapshot() status.Snapshot {
+	if r == nil {
+		return status.Snapshot{}
+	}
+	snapshot := status.Snapshot{Workspace: r.options.Workspace, LogDirectory: r.options.LogDirectory}
+	if r.options.Permissions != nil {
+		snapshot.PermissionMode = string(r.options.Permissions.Mode)
+	}
+	if r.registry != nil {
+		snapshot.ToolCount = len(r.registry.Names())
+	}
+	if r.options.Skills != nil {
+		snapshot.SkillCount = len(r.options.Skills.Directory())
+	}
+	if r.options.Memory != nil {
+		memorySummary := r.options.Memory.StatusSummary()
+		snapshot.UserMemoryCount = memorySummary.UserCount
+		snapshot.ProjectMemoryCount = memorySummary.ProjectCount
+		snapshot.MemoryAvailable = memorySummary.Available
+	}
+	if r.options.SubAgents == nil {
+		return snapshot
+	}
+	if r.options.SubAgents.Definitions != nil {
+		snapshot.SubAgentDefinitionCount = len(r.options.SubAgents.Definitions.All())
+	}
+	if r.options.SubAgents.Tasks == nil {
+		return snapshot
+	}
+	now := r.options.Clock.Now()
+	for _, task := range r.options.SubAgents.Tasks.RunningBackground() {
+		elapsed := now.Sub(task.StartedAt)
+		if elapsed < 0 {
+			elapsed = 0
+		}
+		snapshot.BackgroundTasks = append(snapshot.BackgroundTasks, status.BackgroundTask{ID: task.ID, Name: task.Name, Status: string(task.Status), Elapsed: elapsed})
+	}
+	return snapshot
 }
 
 func (r *Runner) SkillDirectory() []skills.Metadata {

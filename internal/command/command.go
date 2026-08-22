@@ -9,6 +9,7 @@ import (
 	"github.com/GitHub-freshman-X/mewcode01/internal/logging"
 	"github.com/GitHub-freshman-X/mewcode01/internal/provider"
 	"github.com/GitHub-freshman-X/mewcode01/internal/skills"
+	"github.com/GitHub-freshman-X/mewcode01/internal/status"
 )
 
 type Kind string
@@ -79,6 +80,10 @@ type SkillService interface {
 	SkillDirectory() []skills.Metadata
 }
 
+type StatusService interface {
+	StatusSnapshot() status.Snapshot
+}
+
 type CommandContext struct {
 	Context  context.Context
 	UI       UIController
@@ -86,6 +91,7 @@ type CommandContext struct {
 	Sessions SessionService
 	Memory   MemoryService
 	Skills   SkillService
+	Status   StatusService
 	Logger   *logging.Logger
 	Hooks    *hooks.Engine
 	Args     string

@@ -81,6 +81,34 @@ func TestFilterTools(t *testing.T) {
 	}
 }
 
+func TestTaskManagerBackgroundSnapshot(t *testing.T) {
+	manager := NewTaskManager()
+	finished := make(chan struct{})
+	info, err := manager.Launch(context.Background(), LaunchRequest{Name: "background", Worker: func(_ context.Context, _ func(Progress)) Outcome {
+		<-finished
+		return Outcome{Status: TaskCompleted}
+	}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !manager.MarkBackground(info.ID) {
+		t.Fatal("could not mark running task as background")
+	}
+	running := manager.RunningBackground()
+	if len(running) != 1 || running[0].ID != info.ID || !running[0].Background || running[0].Status != TaskRunning {
+		t.Fatalf("running=%+v", running)
+	}
+	close(finished)
+	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+	defer cancel()
+	if _, err := manager.Wait(ctx, info.ID); err != nil {
+		t.Fatal(err)
+	}
+	if got := manager.RunningBackground(); len(got) != 0 {
+		t.Fatalf("terminal task remained in snapshot: %+v", got)
+	}
+}
+
 func TestTaskManagerCompletionAndNotification(t *testing.T) {
 	manager := NewTaskManager()
 	updates, cancel := manager.Subscribe()

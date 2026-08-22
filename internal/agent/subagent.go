@@ -81,7 +81,7 @@ func (r *SubAgentRuntime) dispatch(ctx context.Context, parent *Runner, input to
 	if background {
 		launchCtx = context.WithoutCancel(ctx)
 	}
-	info, err := r.Tasks.Launch(launchCtx, subagent.LaunchRequest{Name: taskName(input), Description: input.Description, Worker: child.worker})
+	info, err := r.Tasks.Launch(launchCtx, subagent.LaunchRequest{Name: taskName(input), Description: input.Description, Background: background, Worker: child.worker})
 	if err != nil {
 		return tools.Result{}, err
 	}
@@ -102,8 +102,10 @@ func (r *SubAgentRuntime) dispatch(ctx context.Context, parent *Runner, input to
 	defer timer.Stop()
 	select {
 	case <-front.background:
+		r.Tasks.MarkBackground(info.ID)
 		return asyncResult(info), nil
 	case <-timer.C:
+		r.Tasks.MarkBackground(info.ID)
 		return asyncResult(info), nil
 	case <-ctx.Done():
 		return tools.Result{}, ctx.Err()

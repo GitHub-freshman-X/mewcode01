@@ -203,6 +203,7 @@ func run(args []string, stderr io.Writer) int {
 		Model:           cfg.Model,
 		Thinking:        provider.ThinkingOptions{Enabled: cfg.Thinking.Enabled, BudgetTokens: cfg.Thinking.BudgetTokens},
 		Workspace:       root,
+		LogDirectory:    filepath.Join(root, "logs"),
 		SessionID:       sessionMeta.ID,
 		SessionStore:    sessionStore,
 		Permissions:     gate,

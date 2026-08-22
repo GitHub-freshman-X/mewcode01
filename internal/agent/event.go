@@ -3,6 +3,7 @@ package agent
 import (
 	"context"
 	"os"
+	"path/filepath"
 
 	contextmanager "github.com/GitHub-freshman-X/mewcode01/internal/context"
 	"github.com/GitHub-freshman-X/mewcode01/internal/conversation"
@@ -47,6 +48,7 @@ type Options struct {
 	Model           string
 	Thinking        provider.ThinkingOptions
 	Workspace       string
+	LogDirectory    string
 	SessionID       string
 	SessionStore    *conversation.SessionStore
 	Clock           prompt.Clock
@@ -78,6 +80,9 @@ func (o Options) normalized() Options {
 		if cwd, err := os.Getwd(); err == nil {
 			o.Workspace = cwd
 		}
+	}
+	if o.LogDirectory == "" {
+		o.LogDirectory = filepath.Join(o.Workspace, "logs")
 	}
 	if o.Clock == nil {
 		o.Clock = prompt.SystemClock{}

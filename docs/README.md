@@ -36,3 +36,4 @@ chNN-topic/
 | `ch00/03-log-source-location` | Log Source Location：日志调用点文件与行号 | [Spec](ch00/03-log-source-location/spec.md) |
 | `ch00/05-tui-message-visuals` | TUI 消息视觉层级与会话分隔：消息背景色与会话切换定位 | [Spec](ch00/05-tui-message-visuals/spec.md) · [Plan](ch00/05-tui-message-visuals/plan.md) · [Tasks](ch00/05-tui-message-visuals/task.md) · [Checklist](ch00/05-tui-message-visuals/checklist.md) |
 | `ch00/06-startup-cat-banner` | 启动猫头横幅：进入 TUI 前输出固定 ASCII 猫头 | [Spec](ch00/06-startup-cat-banner/spec.md) · [Plan](ch00/06-startup-cat-banner/plan.md) · [Tasks](ch00/06-startup-cat-banner/task.md) · [Checklist](ch00/06-startup-cat-banner/checklist.md) |
+| `ch00/07-status-diagnostics` | `/status` 诊断信息：本地运行环境、会话、扩展与后台任务快照 | [Spec](ch00/07-status-diagnostics/spec.md) · [Plan](ch00/07-status-diagnostics/plan.md) · [Tasks](ch00/07-status-diagnostics/task.md) · [Checklist](ch00/07-status-diagnostics/checklist.md) |

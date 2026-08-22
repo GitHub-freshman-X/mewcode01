@@ -40,6 +40,28 @@ func TestMemoryPathsMapKindsToTheirStorageLevel(t *testing.T) {
 	}
 }
 
+func TestServiceStatusSummaryCachesMemoryCounts(t *testing.T) {
+	paths := testPaths(t)
+	writeFile(t, filepath.Join(paths.UserMemory, "existing.md"), "user")
+	writeFile(t, filepath.Join(paths.ProjectMemory, "project.md"), "project")
+	service := NewService(paths, ServiceOptions{})
+	if got := service.StatusSummary(); !got.Available || got.UserCount != 1 || got.ProjectCount != 1 {
+		t.Fatalf("initial status=%+v", got)
+	}
+	if err := service.CommandAdd("user", "remember status cache"); err != nil {
+		t.Fatal(err)
+	}
+	if got := service.StatusSummary(); got.UserCount != 2 || got.ProjectCount != 1 {
+		t.Fatalf("after add status=%+v", got)
+	}
+	if err := service.CommandClear(); err != nil {
+		t.Fatal(err)
+	}
+	if got := service.StatusSummary(); got.UserCount != 0 || got.ProjectCount != 0 {
+		t.Fatalf("after clear status=%+v", got)
+	}
+}
+
 func TestLoadIndexesLimitsLinesAndBytes(t *testing.T) {
 	paths := testPaths(t)
 	writeFile(t, filepath.Join(paths.UserMemory, "MEMORY.md"), strings.Repeat("line\n", maxIndexLines+1))
