@@ -14,6 +14,7 @@ import (
 	"github.com/GitHub-freshman-X/mewcode01/internal/provider"
 	"github.com/GitHub-freshman-X/mewcode01/internal/subagent"
 	"github.com/GitHub-freshman-X/mewcode01/internal/tools"
+	"github.com/GitHub-freshman-X/mewcode01/internal/worktree"
 )
 
 const forkBoilerplate = `<fork_boilerplate>
@@ -24,15 +25,17 @@ type SubAgentRuntime struct {
 	Definitions    *subagent.Registry
 	Tasks          *subagent.TaskManager
 	AutoBackground time.Duration
+	Worktrees      *worktree.Manager
 
 	mu         sync.Mutex
 	foreground map[*Runner]*foregroundSubAgent
 }
 
 type foregroundSubAgent struct {
-	id         string
-	background chan struct{}
-	once       sync.Once
+	id              string
+	background      chan struct{}
+	allowBackground bool
+	once            sync.Once
 }
 
 func NewSubAgentRuntime(definitions *subagent.Registry, tasks *subagent.TaskManager) *SubAgentRuntime {
@@ -103,7 +106,7 @@ func (r *SubAgentRuntime) dispatch(ctx context.Context, parent *Runner, input to
 	if background {
 		return asyncResult(info), nil
 	}
-	front := &foregroundSubAgent{id: info.ID, background: make(chan struct{})}
+	front := &foregroundSubAgent{id: info.ID, background: make(chan struct{}), allowBackground: child.isolated}
 	r.mu.Lock()
 	r.foreground[parent] = front
 	r.mu.Unlock()
@@ -114,11 +117,15 @@ func (r *SubAgentRuntime) dispatch(ctx context.Context, parent *Runner, input to
 	}
 	timer := time.NewTimer(timeout)
 	defer timer.Stop()
+	var timerC <-chan time.Time
+	if child.isolated {
+		timerC = timer.C
+	}
 	select {
 	case <-front.background:
 		r.Tasks.MarkBackground(info.ID)
 		return asyncResult(info), nil
-	case <-timer.C:
+	case <-timerC:
 		r.Tasks.MarkBackground(info.ID)
 		return asyncResult(info), nil
 	case <-ctx.Done():
@@ -159,6 +166,9 @@ func (r *SubAgentRuntime) BackgroundForeground(parent *Runner) bool {
 	if front == nil {
 		return false
 	}
+	if !front.allowBackground {
+		return false
+	}
 	front.once.Do(func() { close(front.background) })
 	return true
 }
@@ -172,9 +182,12 @@ func (r *SubAgentRuntime) clearForeground(parent *Runner, want *foregroundSubAge
 }
 
 type childRun struct {
-	runner  *Runner
-	request Request
-	fork    bool
+	runner   *Runner
+	request  Request
+	fork     bool
+	isolated bool
+	worktree *worktree.Worktree
+	manager  *worktree.Manager
 }
 
 func (c childRun) worker(ctx context.Context, progress func(subagent.Progress)) subagent.Outcome {
@@ -216,6 +229,11 @@ func (c childRun) worker(ctx context.Context, progress func(subagent.Progress)) 
 	if outcome.Status == "" {
 		outcome.Status, outcome.Failure = subagent.TaskFailed, "subagent ended without terminal event"
 	}
+	if c.worktree != nil && c.manager != nil {
+		if err := c.manager.AutoCleanup(context.Background(), *c.worktree); err != nil {
+			outcome.Result = strings.TrimSpace(outcome.Result + "\n\nWorktree retained: " + c.worktree.Path + " (branch " + c.worktree.Branch + ")")
+		}
+	}
 	return outcome
 }
 
@@ -225,6 +243,7 @@ func (r *SubAgentRuntime) newChild(parent *Runner, input tools.AgentInput, fork,
 	}
 	var registry *tools.Registry
 	var err error
+	var definition subagent.Definition
 	options := parent.options
 	options.SessionStore, options.SessionID, options.Memory = nil, "", nil
 	options.SubAgents = r
@@ -232,6 +251,8 @@ func (r *SubAgentRuntime) newChild(parent *Runner, input tools.AgentInput, fork,
 	options.Permissions = clonePermissions(parent.options.Permissions)
 	session := conversation.NewSession()
 	prompt := input.Prompt
+	isolated := fork || input.Isolation == "worktree"
+	var wt *worktree.Worktree
 	if fork {
 		session.ReplaceHistory(completeForkHistory(parent.session.Snapshot()))
 		registry, err = parent.registry.Subset(nil, nil)
@@ -244,10 +265,12 @@ func (r *SubAgentRuntime) newChild(parent *Runner, input tools.AgentInput, fork,
 		if r.Definitions == nil {
 			return childRun{}, fmt.Errorf("agent definition registry is not configured")
 		}
-		definition, ok := r.Definitions.Get(input.SubagentType)
+		var ok bool
+		definition, ok = r.Definitions.Get(input.SubagentType)
 		if !ok {
 			return childRun{}, fmt.Errorf("unknown subagent type %q", input.SubagentType)
 		}
+		isolated = isolated || definition.Isolation == "worktree"
 		names, err := subagent.FilterTools(parent.registry.Names(), definition, background)
 		if err != nil {
 			return childRun{}, err
@@ -268,8 +291,53 @@ func (r *SubAgentRuntime) newChild(parent *Runner, input tools.AgentInput, fork,
 			options.Model = input.Model
 		}
 	}
+	if isolated && r.Worktrees == nil {
+		return childRun{}, fmt.Errorf("worktree isolation is not configured")
+	}
+	if isolated {
+		name := fmt.Sprintf("tmp-%d", time.Now().UnixNano())
+		created, err := r.Worktrees.Create(context.Background(), name)
+		if err != nil {
+			return childRun{}, err
+		}
+		wt = &created
+		workspace, err := tools.NewWorkspace(created.Path)
+		if err != nil {
+			return childRun{}, err
+		}
+		registry, err = tools.NewDefaultRegistryForWorkspace(workspace)
+		if err != nil {
+			return childRun{}, err
+		}
+		if err := registry.Register(tools.NewAgentTool()); err != nil {
+			return childRun{}, err
+		}
+		if options.Permissions != nil {
+			sandbox, err := permissions.NewSandbox(created.Path)
+			if err != nil {
+				return childRun{}, err
+			}
+			options.Permissions.Sandbox = sandbox
+			paths, err := permissions.DefaultFilePaths(created.Path)
+			if err == nil {
+				options.Permissions.Paths = paths
+			}
+		}
+		options.Workspace = created.Path
+		prompt = "<worktree_isolation> You are in an isolated Git Worktree. Re-read all local files from this Worktree. Convert any absolute path under the main workspace to a relative path before using tools. </worktree_isolation>\n\n" + prompt
+		if !fork {
+			names, err := subagent.FilterTools(registry.Names(), definition, background)
+			if err != nil {
+				return childRun{}, err
+			}
+			registry, err = registry.Subset(names, nil)
+			if err != nil {
+				return childRun{}, err
+			}
+		}
+	}
 	child := NewRunner(parent.provider, session, registry, parent.executor, options)
-	return childRun{runner: child, request: Request{Mode: ModeAct, Prompt: prompt}, fork: fork}, nil
+	return childRun{runner: child, request: Request{Mode: ModeAct, Prompt: prompt}, fork: fork, isolated: isolated, worktree: wt, manager: r.Worktrees}, nil
 }
 
 func clonePermissions(parent *permissions.Engine) *permissions.Engine {

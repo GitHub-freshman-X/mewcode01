@@ -21,6 +21,16 @@ func NewDefaultRegistry(root string) (*Registry, error) {
 	if err != nil {
 		return nil, err
 	}
+	return NewDefaultRegistryForWorkspace(workspace)
+}
+
+// NewDefaultRegistryForWorkspace creates fresh tool instances bound to the
+// supplied workspace. It is used for worktrees so no tool retains the main
+// workspace as an implicit current directory.
+func NewDefaultRegistryForWorkspace(workspace *Workspace) (*Registry, error) {
+	if workspace == nil {
+		return nil, errors.New("workspace is nil")
+	}
 	r := NewRegistry()
 	for _, tool := range []Tool{
 		NewReadFileTool(workspace),
@@ -35,6 +45,23 @@ func NewDefaultRegistry(root string) (*Registry, error) {
 		}
 	}
 	return r, nil
+}
+
+// RebindWorkspace returns a registry whose local filesystem and command tools
+// use workspace. Tools that are not workspace-bound (for example MCP tools)
+// are preserved from the original registry.
+func (r *Registry) RebindWorkspace(workspace *Workspace) (*Registry, error) {
+	bound, err := NewDefaultRegistryForWorkspace(workspace)
+	if err != nil {
+		return nil, err
+	}
+	for name, tool := range r.tools {
+		if _, local := bound.tools[name]; local {
+			continue
+		}
+		bound.tools[name] = tool
+	}
+	return bound, nil
 }
 
 func (r *Registry) Register(tool Tool) error {

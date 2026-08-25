@@ -37,13 +37,14 @@ func Load(path string) (Config, error) {
 		Agent       rawAgentConfig             `yaml:"agent,omitempty"`
 		Permissions PermissionConfig           `yaml:"permissions,omitempty"`
 		MCPServers  map[string]MCPServerConfig `yaml:"mcp_servers,omitempty"`
+		Worktree    WorktreeConfig             `yaml:"worktree,omitempty"`
 		Hooks       any                        `yaml:"hooks,omitempty"`
 	}
 	var raw rawConfig
 	if err := loader.Load(&raw); err != nil {
 		return Config{}, fmt.Errorf("config: parse YAML: %w", err)
 	}
-	cfg := Config{Protocol: raw.Protocol, Model: raw.Model, BaseURL: raw.BaseURL, APIKey: raw.APIKey, Thinking: raw.Thinking, Agent: AgentConfig{MaxIterations: raw.Agent.MaxIterations, EnableVerificationAgent: raw.Agent.EnableVerificationAgent}, Permissions: raw.Permissions, MCPServers: raw.MCPServers, MaxTokens: DefaultMaxTokens}
+	cfg := Config{Protocol: raw.Protocol, Model: raw.Model, BaseURL: raw.BaseURL, APIKey: raw.APIKey, Thinking: raw.Thinking, Agent: AgentConfig{MaxIterations: raw.Agent.MaxIterations, EnableVerificationAgent: raw.Agent.EnableVerificationAgent}, Permissions: raw.Permissions, MCPServers: raw.MCPServers, Worktree: raw.Worktree, MaxTokens: DefaultMaxTokens}
 	cfg.applyDefaults()
 	raw.Agent.Context.apply(&cfg.Agent.Context)
 	if raw.MaxTokens != nil {

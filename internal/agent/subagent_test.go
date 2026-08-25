@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -14,11 +15,30 @@ import (
 	"github.com/GitHub-freshman-X/mewcode01/internal/provider"
 	"github.com/GitHub-freshman-X/mewcode01/internal/subagent"
 	"github.com/GitHub-freshman-X/mewcode01/internal/tools"
+	"github.com/GitHub-freshman-X/mewcode01/internal/worktree"
 )
 
 func subAgentTestRunner(t *testing.T, p *scriptedProvider, definitions []subagent.Definition) *Runner {
 	t.Helper()
-	registry, err := tools.NewDefaultRegistry(t.TempDir())
+	root := t.TempDir()
+	for _, args := range [][]string{{"init"}, {"config", "user.email", "test@example.com"}, {"config", "user.name", "Test"}} {
+		cmd := exec.Command("git", args...)
+		cmd.Dir = root
+		if output, err := cmd.CombinedOutput(); err != nil {
+			t.Fatalf("git %v: %v: %s", args, err, output)
+		}
+	}
+	if err := os.WriteFile(filepath.Join(root, "README"), []byte("base"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	for _, args := range [][]string{{"add", "README"}, {"commit", "-m", "base"}} {
+		cmd := exec.Command("git", args...)
+		cmd.Dir = root
+		if output, err := cmd.CombinedOutput(); err != nil {
+			t.Fatalf("git %v: %v: %s", args, err, output)
+		}
+	}
+	registry, err := tools.NewDefaultRegistry(root)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -31,7 +51,8 @@ func subAgentTestRunner(t *testing.T, p *scriptedProvider, definitions []subagen
 	}
 	runtime := NewSubAgentRuntime(catalog, subagent.NewTaskManager())
 	runtime.AutoBackground = time.Hour
-	return NewRunner(p, conversation.NewSession(), registry, tools.NewExecutor(time.Second), Options{SubAgents: runtime})
+	runtime.Worktrees = worktree.NewManager(root)
+	return NewRunner(p, conversation.NewSession(), registry, tools.NewExecutor(time.Second), Options{SubAgents: runtime, Workspace: root})
 }
 
 func TestDefinitionSubAgentRunsToCompletion(t *testing.T) {

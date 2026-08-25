@@ -10,6 +10,7 @@ import (
 	"github.com/GitHub-freshman-X/mewcode01/internal/provider"
 	"github.com/GitHub-freshman-X/mewcode01/internal/skills"
 	"github.com/GitHub-freshman-X/mewcode01/internal/status"
+	"github.com/GitHub-freshman-X/mewcode01/internal/worktree"
 )
 
 type Kind string
@@ -85,16 +86,17 @@ type StatusService interface {
 }
 
 type CommandContext struct {
-	Context  context.Context
-	UI       UIController
-	Registry *Registry
-	Sessions SessionService
-	Memory   MemoryService
-	Skills   SkillService
-	Status   StatusService
-	Logger   *logging.Logger
-	Hooks    *hooks.Engine
-	Args     string
+	Context   context.Context
+	UI        UIController
+	Registry  *Registry
+	Sessions  SessionService
+	Memory    MemoryService
+	Skills    SkillService
+	Status    StatusService
+	Logger    *logging.Logger
+	Hooks     *hooks.Engine
+	Worktrees *worktree.Manager
+	Args      string
 }
 
 type Handler func(CommandContext) error

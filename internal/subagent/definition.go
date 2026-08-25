@@ -33,6 +33,7 @@ type Definition struct {
 	Model           string
 	MaxTurns        int
 	PermissionMode  permissions.Mode
+	Isolation       string
 	SystemPrompt    string
 	Path            string
 	Source          Source
@@ -104,6 +105,9 @@ func ValidateDefinition(definition Definition) error {
 	default:
 		return fmt.Errorf("agent definition %s: unsupported permissionMode %q", definition.Path, definition.PermissionMode)
 	}
+	if definition.Isolation != "" && definition.Isolation != "worktree" {
+		return fmt.Errorf("agent definition %s: unsupported isolation %q", definition.Path, definition.Isolation)
+	}
 	return nil
 }
 
@@ -115,6 +119,7 @@ type frontmatter struct {
 	Model           string           `yaml:"model"`
 	MaxTurns        int              `yaml:"maxTurns"`
 	PermissionMode  permissions.Mode `yaml:"permissionMode"`
+	Isolation       string           `yaml:"isolation"`
 }
 
 func ParseDefinition(path, content string, source Source) (Definition, error) {
@@ -131,7 +136,7 @@ func ParseDefinition(path, content string, source Source) (Definition, error) {
 	if err := yaml.Unmarshal([]byte(content[4:end]), &raw); err != nil {
 		return Definition{}, fmt.Errorf("agent definition %s: invalid frontmatter: %w", path, err)
 	}
-	definition := Definition{Name: strings.TrimSpace(raw.Name), Description: strings.TrimSpace(raw.Description), Tools: raw.Tools, DisallowedTools: raw.DisallowedTools, Model: strings.TrimSpace(raw.Model), MaxTurns: raw.MaxTurns, PermissionMode: raw.PermissionMode, SystemPrompt: strings.TrimSpace(content[end+5:]), Path: path, Source: source}
+	definition := Definition{Name: strings.TrimSpace(raw.Name), Description: strings.TrimSpace(raw.Description), Tools: raw.Tools, DisallowedTools: raw.DisallowedTools, Model: strings.TrimSpace(raw.Model), MaxTurns: raw.MaxTurns, PermissionMode: raw.PermissionMode, Isolation: strings.TrimSpace(raw.Isolation), SystemPrompt: strings.TrimSpace(content[end+5:]), Path: path, Source: source}
 	if err := ValidateDefinition(definition); err != nil {
 		return Definition{}, err
 	}

@@ -13,12 +13,14 @@ import (
 	"github.com/GitHub-freshman-X/mewcode01/internal/hooks"
 	"github.com/GitHub-freshman-X/mewcode01/internal/logging"
 	"github.com/GitHub-freshman-X/mewcode01/internal/memory"
+	"github.com/GitHub-freshman-X/mewcode01/internal/permissions"
 	"github.com/GitHub-freshman-X/mewcode01/internal/prompt"
 	"github.com/GitHub-freshman-X/mewcode01/internal/provider"
 	"github.com/GitHub-freshman-X/mewcode01/internal/skills"
 	"github.com/GitHub-freshman-X/mewcode01/internal/status"
 	"github.com/GitHub-freshman-X/mewcode01/internal/subagent"
 	"github.com/GitHub-freshman-X/mewcode01/internal/tools"
+	"github.com/GitHub-freshman-X/mewcode01/internal/worktree"
 )
 
 type Runner struct {
@@ -36,6 +38,52 @@ type Runner struct {
 
 	promptMu     sync.RWMutex
 	latestPrompt string
+}
+
+func (r *Runner) WorktreeManager() *worktree.Manager {
+	if r == nil || r.options.SubAgents == nil {
+		return nil
+	}
+	return r.options.SubAgents.Worktrees
+}
+
+// SyncWorktreeWorkspace applies the current persisted Worktree session to the
+// runner without changing the process working directory.
+func (r *Runner) SyncWorktreeWorkspace() error {
+	m := r.WorktreeManager()
+	if m == nil {
+		return nil
+	}
+	root := m.RepoRoot
+	if session := m.Current(); session != nil {
+		root = session.WorktreePath
+	}
+	workspace, err := tools.NewWorkspace(root)
+	if err != nil {
+		return err
+	}
+	registry, err := r.registry.RebindWorkspace(workspace)
+	if err != nil {
+		return err
+	}
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if r.active {
+		return errors.New("cannot change worktree while an agent task is active")
+	}
+	r.registry = registry
+	r.options.Workspace = root
+	if r.options.Permissions != nil {
+		sandbox, err := permissions.NewSandbox(root)
+		if err != nil {
+			return err
+		}
+		r.options.Permissions.Sandbox = sandbox
+		if paths, err := permissions.DefaultFilePaths(root); err == nil {
+			r.options.Permissions.Paths = paths
+		}
+	}
+	return nil
 }
 
 func NewRunner(p provider.Provider, session *conversation.Session, registry *tools.Registry, executor *tools.Executor, options Options) *Runner {

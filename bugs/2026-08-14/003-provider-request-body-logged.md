@@ -35,3 +35,5 @@ OpenAI 请求日志现仅记录 provider、请求大小、消息数和工具数�
 2026-08-23 对 ch13 隔离 fixture 的全部 22 个 Provider/子 Agent 日志文件进行只读结构化扫描：148 行均为有效 JSON，104 条为 `provider_request` 阶段；其中 78 条记录具有 `fields.message`，包含 457 个带 `content` 的消息项和 70 个带 `output` 的消息项。未输出正文以避免二次泄露，但字段结构已确认该真实运行二进制仍记录完整 Provider 输入/工具输出，而非仅安全元数据。该现场证据确认问题仍为“回归，待处理”。
 
 用户说明当前完整消息输出是其临时测试设置，并将在提交 Git 前自行恢复。2026-08-23 的 `go test ./... -count=1` 因此仍仅失败于 `internal/provider/openai.TestStreamCapturesFinalRequestPayload`：测试实际观察到 `request-canary` 位于 Provider 日志。该失败与本次 Ch13 终态日志修复无关；在用户恢复安全日志前，不应将全量测试视为全绿。
+
+2026-08-25：第十四章全量回归再次确认源码仍记录 `message: body.Input`，`TestStreamCapturesFinalRequestPayload` 因日志出现 canary 失败。已恢复仅写入 provider、请求大小、消息数和工具数的安全元数据调用；`go test ./...` 通过后，本问题状态更新为已修复。

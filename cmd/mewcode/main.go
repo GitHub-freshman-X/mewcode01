@@ -30,6 +30,7 @@ import (
 	"github.com/GitHub-freshman-X/mewcode01/internal/subagent"
 	"github.com/GitHub-freshman-X/mewcode01/internal/tools"
 	"github.com/GitHub-freshman-X/mewcode01/internal/tui"
+	"github.com/GitHub-freshman-X/mewcode01/internal/worktree"
 )
 
 var (
@@ -137,8 +138,22 @@ func run(args []string, stderr io.Writer) int {
 		fmt.Fprintln(stderr, "agents:", err)
 		return 1
 	}
+	worktreeManager := worktree.NewManager(root)
+	worktreeManager.Options = worktree.Options{LocalFiles: cfg.Worktree.LocalFiles, SymlinkDirectories: cfg.Worktree.SymlinkDirectories, Retention: time.Duration(cfg.Worktree.RetentionHours) * time.Hour}
+	worktreeManager.Logger = logger
+	if _, err := worktreeManager.RecoverSession(); err != nil {
+		logger.Error("worktree session recovery failed", logging.Fields{"stage": "worktree_recovery", "status": "failed"})
+	}
+	if err := worktreeManager.CleanupExpired(context.Background(), time.Now()); err != nil {
+		logger.Error("worktree cleanup failed", logging.Fields{"stage": "worktree_cleanup", "status": "failed"})
+	}
 	subAgentRuntime := agent.NewSubAgentRuntime(definitions, subagent.NewTaskManager())
-	registry, err := tools.NewDefaultRegistry(root)
+	subAgentRuntime.Worktrees = worktreeManager
+	workspaceRoot := root
+	if current := worktreeManager.Current(); current != nil {
+		workspaceRoot = current.WorktreePath
+	}
+	registry, err := tools.NewDefaultRegistry(workspaceRoot)
 	if err != nil {
 		fmt.Fprintln(stderr, err)
 		return 1
@@ -174,7 +189,7 @@ func run(args []string, stderr io.Writer) int {
 	hookEngine := hooks.NewEngine(hookRules, hooks.Executor{HTTPClient: newHTTPClient()}, logger)
 	hookEngine.Run(context.Background(), hooks.EventStartup, hooks.Context{})
 	defer hookEngine.Run(context.Background(), hooks.EventShutdown, hooks.Context{})
-	paths, err := permissionFilePaths(root)
+	paths, err := permissionFilePaths(workspaceRoot)
 	if err != nil {
 		fmt.Fprintln(stderr, err)
 		return 1
@@ -184,7 +199,7 @@ func run(args []string, stderr io.Writer) int {
 		fmt.Fprintln(stderr, err)
 		return 1
 	}
-	sandbox, err := permissions.NewSandbox(root)
+	sandbox, err := permissions.NewSandbox(workspaceRoot)
 	if err != nil {
 		fmt.Fprintln(stderr, err)
 		return 1
@@ -202,7 +217,7 @@ func run(args []string, stderr io.Writer) int {
 		MaxTokens:       cfg.MaxTokens,
 		Model:           cfg.Model,
 		Thinking:        provider.ThinkingOptions{Enabled: cfg.Thinking.Enabled, BudgetTokens: cfg.Thinking.BudgetTokens},
-		Workspace:       root,
+		Workspace:       workspaceRoot,
 		LogDirectory:    filepath.Join(root, "logs"),
 		SessionID:       sessionMeta.ID,
 		SessionStore:    sessionStore,

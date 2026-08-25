@@ -29,6 +29,9 @@ func Validate(cfg Config) error {
 	if cfg.Agent.MaxIterations < 0 {
 		return fmt.Errorf("config: field %q must not be negative", "agent.max_iterations")
 	}
+	if cfg.Worktree.RetentionHours < 0 {
+		return fmt.Errorf("config: field %q must not be negative", "worktree.retention_hours")
+	}
 	if err := validateContextConfig(cfg.Agent.Context); err != nil {
 		return err
 	}

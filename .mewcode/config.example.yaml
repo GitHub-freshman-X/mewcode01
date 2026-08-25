@@ -22,6 +22,10 @@ agent:
     recent_message_minimum: 5
 permissions:
   mode: default
+worktree:
+  local_files: []
+  symlink_directories: []
+  retention_hours: 0
 
 # Hook 规则也可写在项目级 .mewcode/config.yaml 或本地级
 # .mewcode/config.local.yaml；三者按用户、项目、本地顺序追加。

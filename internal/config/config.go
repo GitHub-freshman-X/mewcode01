@@ -32,6 +32,7 @@ type Config struct {
 	Agent       AgentConfig                `yaml:"agent,omitempty"`
 	Permissions PermissionConfig           `yaml:"permissions,omitempty"`
 	MCPServers  map[string]MCPServerConfig `yaml:"mcp_servers,omitempty"`
+	Worktree    WorktreeConfig             `yaml:"worktree,omitempty"`
 }
 
 type MCPTransportType string
@@ -83,6 +84,12 @@ const (
 
 type PermissionConfig struct {
 	Mode PermissionMode `yaml:"mode,omitempty"`
+}
+
+type WorktreeConfig struct {
+	LocalFiles         []string `yaml:"local_files,omitempty"`
+	SymlinkDirectories []string `yaml:"symlink_directories,omitempty"`
+	RetentionHours     int      `yaml:"retention_hours,omitempty"`
 }
 
 func (c *Config) applyDefaults() {

@@ -38,9 +38,8 @@ func TestAgentToolDispatchesStableSchema(t *testing.T) {
 	}
 }
 
-func TestAgentToolRejectsUnsupportedIsolation(t *testing.T) {
-	result := NewAgentTool().Execute(context.Background(), []byte(`{"prompt":"x","description":"y","isolation":"worktree"}`))
-	if result.Success || result.Error == nil || result.Error.Type != ErrorValidation {
-		t.Fatalf("result=%+v", result)
-	}
+func TestAgentToolAcceptsWorktreeIsolation(t *testing.T) {
+	host := &fakeSubAgentHost{}
+	result := NewAgentTool().Execute(WithSubAgentHost(context.Background(), host), []byte(`{"prompt":"x","description":"y","isolation":"worktree"}`))
+	if !result.Success || host.input.Isolation != "worktree" { t.Fatalf("result=%+v input=%+v", result, host.input) }
 }

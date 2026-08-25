@@ -26,6 +26,16 @@ func TestParseDefinition(t *testing.T) {
 	}
 }
 
+func TestParseDefinitionWorktreeIsolation(t *testing.T) {
+	definition, err := ParseDefinition("isolated.md", "---\nname: isolated\ndescription: role\nisolation: worktree\n---\nRole body.\n", SourceProject)
+	if err != nil || definition.Isolation != "worktree" {
+		t.Fatalf("definition=%+v err=%v", definition, err)
+	}
+	if _, err := ParseDefinition("bad.md", "---\nname: bad\ndescription: role\nisolation: container\n---\nRole body.\n", SourceProject); err == nil {
+		t.Fatal("invalid isolation accepted")
+	}
+}
+
 func TestDefinitionRejectsReservedForkName(t *testing.T) {
 	for _, name := range []string{"fork", " Fork ", "FORK"} {
 		content := "---\nname: " + name + "\ndescription: role\n---\nRole body.\n"

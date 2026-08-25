@@ -20,6 +20,8 @@ MewCode 是一个用 Go 编写的全屏终端 AI Agent。它通过 Anthropic Mes
 | [第 10 章：斜杠命令](docs/ch10-slash_command/spec.md) | 命令注册、解析、Tab 补全、模式状态和会话级 Token 统计。 |
 | [第 11 章：Skill](docs/ch11-skills/spec.md) | 项目级/用户级 Skill 发现、按需加载、动态命令、工具白名单、inline 与 fork 执行。 |
 | [第 12 章：Hook](docs/ch12-hook/spec.md) | 生命周期事件、条件匹配、命令/提示词/HTTP 动作，以及 `pre_tool_use` 工具拦截。 |
+| [第 13 章：SubAgent](docs/ch13-subagent/spec.md) | 定义式与 Fork 子 Agent、后台任务、通知与权限隔离。 |
+| [第 14 章：Worktree](docs/ch14-worktree/spec.md) | Git Worktree 生命周期、显式工作目录与隔离子 Agent 文件系统。 |
 
 ## 快速开始
 
@@ -74,6 +76,9 @@ api_key: replace-with-your-api-key
 | `thinking.enabled` / `thinking.budget_tokens` | 仅 Anthropic；预算至少 `1024` 且小于 `max_tokens`。OpenAI 配置中不要设置 `thinking`。 |
 | `agent.max_iterations` | 单个 Agent 任务最多循环次数，默认 `20`。 |
 | `agent.enable_verification_agent` | 是否加载内置 `Verification` 子 Agent，默认 `false`。 |
+| `worktree.local_files` | 创建 Worktree 时尽力复制的主工作区本地文件列表。 |
+| `worktree.symlink_directories` | 创建 Worktree 时尽力链接的主工作区大型依赖目录列表。 |
+| `worktree.retention_hours` | 临时 Worktree 的过期清理保留时长；`0` 表示不执行过期清理。 |
 | `agent.context` | 上下文窗口、摘要预留、安全余量，以及单工具结果和单消息结果预算。完整字段与默认值见模板。 |
 | `permissions.mode` | 无规则命中时的权限策略：`strict`、`default`（默认）或 `relaxed`。 |
 | `mcp_servers` | MCP 服务映射；`stdio` 使用 `command`、`args`、`env`，`http` 使用 `url`、`headers`。值中的 `${VAR}` 会从环境变量展开。 |
@@ -103,6 +108,7 @@ api_key: replace-with-your-api-key
 | `/session [list\|new\|resume <id>\|delete <id>]` | 查看、创建、恢复或删除会话（别名：`/s`）。 |
 | `/memory [list\|add <类别> <内容>\|clear]` | 管理记忆（别名：`/m`）；清空时须再次输入确认。 |
 | `/status` | 显示本地诊断快照：模式、工作目录、日志目录、权限、会话、累计 Token、工具/Skill/记忆/SubAgent 数量及运行中后台任务。 |
+| `/worktree [create <name>\|list\|enter <name>\|exit\|remove <name> --discard]` | 创建、列出、进入、退出或安全删除 Git Worktree。未提交修改或新增提交需要 `--discard` 才能删除。 |
 | `/skills reload` | 重新发现 Skill 并刷新对应命令。 |
 | `/<skill-name> [参数]` | 执行已发现的 Skill；内置 `commit`、`review`、`test`。 |
 | `/exit` | 空闲时退出 MewCode。 |
@@ -116,6 +122,7 @@ api_key: replace-with-your-api-key
 | 会话与大工具结果 | — | `<项目根>/.mewcode/sessions/`、`<项目根>/.mewcode/context/` |
 | Skill | `<用户配置目录>/mewcode/skills/` | `<项目根>/.mewcode/skills/` |
 | SubAgent 定义 | `<用户配置目录>/mewcode/agents/` | `<项目根>/.mewcode/agents/` |
+| Worktree | — | `<项目根>/.mewcode/worktrees/` |
 | 权限规则 | `<用户配置目录>/mewcode/permissions.yaml` | `<项目根>/.mewcode/permissions.yaml` |
 | Hook | `<用户配置目录>/mewcode/config.yaml` | `<项目根>/.mewcode/config.yaml` |
 
@@ -140,7 +147,7 @@ Hook 配置可在用户主配置或项目 `.mewcode/config.yaml` 的 `hooks` 顶
 
 主 Agent 可通过固定的 `agent` 工具委派子任务。定义式子 Agent 从上表的用户级、项目级目录发现；同名定义按项目级、用户级、内置级、插件级的顺序覆盖。定义文件使用 YAML frontmatter（`name`、`description`、`tools`、`disallowedTools`、`model`、`maxTurns`、`permissionMode`）和 Markdown 操作说明。
 
-内置 `Explore`、`Plan`、`general-purpose` 始终可用；`Verification` 需设置 `agent.enable_verification_agent: true`。定义式子 Agent 使用独立对话和权限记录；省略 `subagent_type` 或设为 `fork` 的 Fork 子 Agent 继承父对话并始终后台运行，`fork` 是不可用于角色定义的保留名称。显式后台、运行 120 秒自动后台及按 `Esc` 都会创建或接管进程内任务，完成结果以通知回传主对话。后台任务不会跨会话持久化，且暂不支持 `isolation: worktree`、Fork 再 Fork 或后台任务再派生子 Agent。
+内置 `Explore`、`Plan`、`general-purpose` 始终可用；`Verification` 需设置 `agent.enable_verification_agent: true`。定义式子 Agent 使用独立对话和权限记录；省略 `subagent_type` 或设为 `fork` 的 Fork 子 Agent 继承父对话并始终后台运行，`fork` 是不可用于角色定义的保留名称。显式后台、运行 120 秒自动后台及按 `Esc` 都会创建或接管进程内任务，完成结果以通知回传主对话。后台任务不会跨会话持久化，也不支持 Fork 再 Fork 或后台任务再派生子 Agent。Fork 子 Agent 始终在唯一的临时 Worktree 中执行；定义式 Agent 可在 frontmatter 或调用参数设置 `isolation: worktree`。隔离任务完成后，干净临时目录自动清理；存在未提交修改或新提交时保留目录以保护成果。
 
 ## 权限与安全
 

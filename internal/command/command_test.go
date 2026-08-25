@@ -2,6 +2,9 @@ package command
 
 import (
 	"context"
+	"os"
+	"os/exec"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -11,6 +14,7 @@ import (
 	"github.com/GitHub-freshman-X/mewcode01/internal/provider"
 	"github.com/GitHub-freshman-X/mewcode01/internal/skills"
 	"github.com/GitHub-freshman-X/mewcode01/internal/status"
+	"github.com/GitHub-freshman-X/mewcode01/internal/worktree"
 )
 
 func TestRegistryRejectsConflicts(t *testing.T) {
@@ -126,6 +130,37 @@ func TestExitCommandRequestsExitWithoutAgent(t *testing.T) {
 	}
 	if !u.exit || len(u.requests) != 0 || len(u.messages) != 0 {
 		t.Fatalf("exit=%v requests=%v messages=%v", u.exit, u.requests, u.messages)
+	}
+}
+
+func TestWorktreeCommandLifecycle(t *testing.T) {
+	root := t.TempDir()
+	for _, args := range [][]string{{"init"}, {"config", "user.email", "test@example.com"}, {"config", "user.name", "Test"}} {
+		commandGit(t, root, args...)
+	}
+	if err := os.WriteFile(filepath.Join(root, "README"), []byte("base"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	commandGit(t, root, "add", "README")
+	commandGit(t, root, "commit", "-m", "base")
+	ui := &fakeUI{}
+	ctx := CommandContext{Context: context.Background(), UI: ui, Worktrees: worktree.NewManager(root)}
+	for _, input := range []string{"/worktree create review", "/worktree list", "/worktree enter review", "/worktree exit", "/worktree remove review"} {
+		if err := Dispatch(DefaultRegistry(), Parse(input), ctx); err != nil {
+			t.Fatalf("%s: %v", input, err)
+		}
+	}
+	if len(ui.messages) != 5 || !strings.Contains(ui.messages[0], "worktrees") || !strings.Contains(ui.messages[1], "review") || !strings.Contains(ui.messages[4], "已删除") {
+		t.Fatalf("messages=%v", ui.messages)
+	}
+}
+
+func commandGit(t *testing.T, dir string, args ...string) {
+	t.Helper()
+	cmd := exec.Command("git", args...)
+	cmd.Dir = dir
+	if output, err := cmd.CombinedOutput(); err != nil {
+		t.Fatalf("git %v: %v: %s", args, err, output)
 	}
 }
 

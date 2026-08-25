@@ -25,6 +25,7 @@ func DefaultCommands() []Command {
 		{Name: "session", Aliases: []string{"s"}, Description: "管理会话", Usage: "/session [list|new|resume <id>|delete <id>]", ArgPrompt: "用法: /session resume <id>", Kind: KindLocal, Handler: sessionCommand},
 		{Name: "memory", Aliases: []string{"m"}, Description: "管理记忆", Usage: "/memory [list|add <类别> <内容>|clear]", ArgPrompt: "用法: /memory add <类别> <内容>", Kind: KindLocal, Handler: memoryCommand},
 		{Name: "status", Description: "显示当前状态", Usage: "/status", Kind: KindLocal, Handler: statusCommand},
+		{Name: "worktree", Description: "管理 Git Worktree", Usage: "/worktree [create <name>|list|enter <name>|exit|remove <name> --discard]", Kind: KindLocal, Handler: worktreeCommand},
 	}
 }
 
@@ -82,7 +83,7 @@ func Dispatch(registry *Registry, invocation Invocation, ctx CommandContext) err
 		return nil
 	}
 	started := time.Now()
-	err := command.Handler(CommandContext{Context: ctx.Context, UI: ctx.UI, Registry: registry, Sessions: ctx.Sessions, Memory: ctx.Memory, Skills: ctx.Skills, Status: ctx.Status, Logger: ctx.Logger, Hooks: ctx.Hooks, Args: invocation.Args})
+	err := command.Handler(CommandContext{Context: ctx.Context, UI: ctx.UI, Registry: registry, Sessions: ctx.Sessions, Memory: ctx.Memory, Skills: ctx.Skills, Status: ctx.Status, Logger: ctx.Logger, Hooks: ctx.Hooks, Worktrees: ctx.Worktrees, Args: invocation.Args})
 	if ctx.Hooks != nil {
 		ctx.Hooks.Run(ctx.Context, hooks.EventCommandExecute, hooks.Context{Message: "/" + command.Name + " " + invocation.Args})
 	}

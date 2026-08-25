@@ -46,7 +46,7 @@ func (t *AgentTool) Metadata() Metadata {
 			"model":             map[string]any{"type": "string", "description": "Optional model override."},
 			"run_in_background": map[string]any{"type": "boolean", "description": "Run without blocking the caller."},
 			"name":              map[string]any{"type": "string", "description": "Optional task name."},
-			"isolation":         map[string]any{"type": "string", "description": "Optional isolation mode; worktree is not supported in this chapter."},
+			"isolation":         map[string]any{"type": "string", "description": "Optional isolation mode; use worktree for an isolated Git worktree."},
 		},
 		"required": []string{"prompt", "description"},
 	}}
@@ -66,10 +66,7 @@ func (t *AgentTool) Execute(ctx context.Context, input json.RawMessage) Result {
 	if request.Prompt == "" || request.Description == "" {
 		return Failure(t.Metadata().Name, ErrorValidation, "prompt and description are required", nil)
 	}
-	if request.Isolation != "" && request.Isolation != "none" {
-		if request.Isolation == "worktree" {
-			return Failure(t.Metadata().Name, ErrorValidation, "worktree isolation is not supported in this chapter", nil)
-		}
+	if request.Isolation != "" && request.Isolation != "none" && request.Isolation != "worktree" {
 		return Failure(t.Metadata().Name, ErrorValidation, fmt.Sprintf("unsupported isolation %q", request.Isolation), nil)
 	}
 	host, ok := SubAgentHostFromContext(ctx)

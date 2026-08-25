@@ -54,6 +54,32 @@ func TestDefaultRegistryAndCoreTools(t *testing.T) {
 	runTool(t, registry, "run_command", map[string]any{"command": command, "args": args}, true)
 }
 
+func TestRegistryRebindWorkspaceIsolatesLocalTools(t *testing.T) {
+	first, second := t.TempDir(), t.TempDir()
+	if err := os.WriteFile(filepath.Join(first, "same.txt"), []byte("first"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(second, "same.txt"), []byte("second"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	registry, err := NewDefaultRegistry(first)
+	if err != nil {
+		t.Fatal(err)
+	}
+	workspace, err := NewWorkspace(second)
+	if err != nil {
+		t.Fatal(err)
+	}
+	registry, err = registry.RebindWorkspace(workspace)
+	if err != nil {
+		t.Fatal(err)
+	}
+	result := runTool(t, registry, "read_file", map[string]any{"path": "same.txt"}, true)
+	if result.Data["content"] != "second" {
+		t.Fatalf("content=%q", result.Data["content"])
+	}
+}
+
 func TestFindFilesAcceptsAbsolutePatternsAndReturnsDirectories(t *testing.T) {
 	root := t.TempDir()
 	if err := os.Mkdir(filepath.Join(root, ".mewcode"), 0o755); err != nil {
