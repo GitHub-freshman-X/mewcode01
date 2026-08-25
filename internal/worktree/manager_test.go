@@ -96,6 +96,11 @@ func TestEnterExitAndRecover(t *testing.T) {
 
 func TestCreateInitializesConfiguredAndIncludedFiles(t *testing.T) {
 	root := testRepo(t)
+	if err := os.WriteFile(filepath.Join(root, ".gitignore"), []byte(".local.env\nruntime.json\nnode_modules/\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	runGit(t, root, "add", ".gitignore")
+	runGit(t, root, "commit", "-m", "ignore runtime files")
 	if err := os.WriteFile(filepath.Join(root, ".local.env"), []byte("secret"), 0o600); err != nil {
 		t.Fatal(err)
 	}
@@ -127,6 +132,26 @@ func TestCreateInitializesConfiguredAndIncludedFiles(t *testing.T) {
 	hooks, err := m.gitText(context.Background(), wt.Path, "config", "core.hooksPath")
 	if err != nil || hooks != ".githooks" {
 		t.Fatalf("hooks path = %q, %v", hooks, err)
+	}
+	changed, err := m.changed(context.Background(), wt.Path, wt.Name)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if changed {
+		t.Fatal("configured dependency symlink made worktree appear changed")
+	}
+	if err := m.Remove(context.Background(), wt.Name, false); err != nil {
+		t.Fatalf("remove clean worktree with configured dependency symlink: %v", err)
+	}
+	changedWorktree, err := m.Create(context.Background(), "init-changed")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(changedWorktree.Path, "user.txt"), []byte("change"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := m.Remove(context.Background(), changedWorktree.Name, false); err == nil {
+		t.Fatal("removed worktree with configured dependency symlink and user change")
 	}
 }
 

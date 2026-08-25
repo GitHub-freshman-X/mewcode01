@@ -211,6 +211,19 @@ func (m *Manager) Remove(ctx context.Context, name string, discard bool) error {
 		}
 	}
 	args := []string{"worktree", "remove"}
+	cleanup := func() {}
+	if !discard {
+		excludeFile, removeExcludeFile, err := m.removalExcludeFile(path)
+		if err != nil {
+			m.log("worktree_remove", "refused_unverified", "manual")
+			return fmt.Errorf("prepare worktree removal safety check: %w", err)
+		}
+		cleanup = removeExcludeFile
+		defer cleanup()
+		if excludeFile != "" {
+			args = append([]string{"-c", "core.excludesFile=" + excludeFile}, args...)
+		}
+	}
 	if discard {
 		args = append(args, "--force")
 	}
@@ -276,12 +289,17 @@ func (m *Manager) log(stage, status, kind string) {
 }
 
 func (m *Manager) changed(ctx context.Context, path, name string) (bool, error) {
-	status, err := m.gitText(ctx, path, "status", "--porcelain")
+	status, err := m.git(ctx, path, "status", "--porcelain=v1", "-z")
 	if err != nil {
 		return false, err
 	}
-	if status != "" {
-		return true, nil
+	for _, entry := range strings.Split(string(status), "\x00") {
+		if entry == "" {
+			continue
+		}
+		if !strings.HasPrefix(entry, "?? ") || !m.isConfiguredSymlink(path, entry[3:]) {
+			return true, nil
+		}
 	}
 	base, err := m.gitText(ctx, path, "rev-parse", m.baseRef(name))
 	if err != nil {
@@ -292,6 +310,60 @@ func (m *Manager) changed(ctx context.Context, path, name string) (bool, error) 
 		return false, err
 	}
 	return ahead != "0", nil
+}
+
+func (m *Manager) isConfiguredSymlink(worktreePath, relativePath string) bool {
+	for _, name := range m.Options.SymlinkDirectories {
+		source := filepath.Clean(filepath.Join(m.RepoRoot, name))
+		target := filepath.Clean(filepath.Join(worktreePath, name))
+		if !within(m.RepoRoot, source) || !within(worktreePath, target) {
+			continue
+		}
+		rel, err := filepath.Rel(worktreePath, target)
+		if err != nil || rel != relativePath {
+			continue
+		}
+		info, err := os.Lstat(target)
+		if err != nil || info.Mode()&os.ModeSymlink == 0 {
+			continue
+		}
+		link, err := os.Readlink(target)
+		if err == nil && filepath.Clean(link) == source {
+			return true
+		}
+	}
+	return false
+}
+
+func (m *Manager) removalExcludeFile(worktreePath string) (string, func(), error) {
+	var paths []string
+	for _, name := range m.Options.SymlinkDirectories {
+		target := filepath.Clean(filepath.Join(worktreePath, name))
+		if !within(worktreePath, target) {
+			continue
+		}
+		rel, err := filepath.Rel(worktreePath, target)
+		if err == nil && m.isConfiguredSymlink(worktreePath, rel) {
+			paths = append(paths, rel)
+		}
+	}
+	if len(paths) == 0 {
+		return "", func() {}, nil
+	}
+	file, err := os.CreateTemp("", "mewcode-worktree-exclude-*")
+	if err != nil {
+		return "", nil, err
+	}
+	if _, err := file.WriteString(strings.Join(paths, "\n") + "\n"); err != nil {
+		_ = file.Close()
+		_ = os.Remove(file.Name())
+		return "", nil, err
+	}
+	if err := file.Close(); err != nil {
+		_ = os.Remove(file.Name())
+		return "", nil, err
+	}
+	return file.Name(), func() { _ = os.Remove(file.Name()) }, nil
 }
 
 func (m *Manager) sessionPath() string {

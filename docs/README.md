@@ -24,7 +24,7 @@ chNN-topic/
 | `ch10-slash_command` | Slash Command：注册、解析、补全与 TUI 命令分流 | [Spec](ch10-slash_command/spec.md) · [Plan](ch10-slash_command/plan.md) · [Tasks](ch10-slash_command/task.md) · [Checklist](ch10-slash_command/checklist.md) · [Manual scenarios](ch10-slash_command/manual_scenarios.md) · [Reference](ch10-slash_command/理论学习：Slash%20Command%20命令框架.md) |
 | `ch12-hook` | Hook：生命周期自动化、工具前拦截与动作执行 | [Spec](ch12-hook/spec.md) · [Plan](ch12-hook/plan.md) · [Tasks](ch12-hook/task.md) · [Checklist](ch12-hook/checklist.md) · [Manual scenarios](ch12-hook/manual_scenarios.md) · [Reference](ch12-hook/理论学习：Hook%20生命周期钩子.md) |
 | `ch13-subagent` | SubAgent：独立子任务、角色定义、后台任务与 TUI 通知 | [Spec](ch13-subagent/spec.md) · [Plan](ch13-subagent/plan.md) · [Tasks](ch13-subagent/task.md) · [Checklist](ch13-subagent/checklist.md) · [Reference](ch13-subagent/理论学习：SubAgent%20子任务分发.md) |
-| `ch14-worktree` | Git Worktree：文件系统隔离、生命周期与 SubAgent 接入 | [Spec](ch14-worktree/spec.md) · [Plan](ch14-worktree/plan.md) · [Tasks](ch14-worktree/task.md) · [Checklist](ch14-worktree/checklist.md) · [Reference](ch14-worktree/理论学习：Git%20Worktree%20并行隔离.md) |
+| `ch14-worktree` | Git Worktree：文件系统隔离、生命周期与 SubAgent 接入 | [Spec](ch14-worktree/spec.md) · [Plan](ch14-worktree/plan.md) · [Tasks](ch14-worktree/task.md) · [Checklist](ch14-worktree/checklist.md) · [Manual scenarios](ch14-worktree/manual_scenarios.md) · [Reference](ch14-worktree/理论学习：Git%20Worktree%20并行隔离.md) |
 
 新增章节时继续采用 `chNN-topic` 格式，并在本页追加索引。
 
