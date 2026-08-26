@@ -13,3 +13,9 @@ logs/
 .env
 superpowers/
 .DS_Store
+sessions/
+memory/
+context/
+skills/
+agents/
+worktrees/

@@ -62,9 +62,17 @@ func buildRequest(model string, req provider.ChatRequest) (requestBody, error) {
 	if req.Thinking.Enabled {
 		body.Thinking = &thinkingConfig{Type: "enabled", BudgetTokens: req.Thinking.BudgetTokens}
 	}
-	for _, tool := range req.Tools {
+	lastCacheableTool := -1
+	if req.Prompt.CachePolicy.Enable && req.Prompt.CachePolicy.StableTools {
+		for i, tool := range req.Tools {
+			if tool.Cacheable {
+				lastCacheableTool = i
+			}
+		}
+	}
+	for i, tool := range req.Tools {
 		requestTool := requestTool{Name: tool.Name, Description: tool.Description, InputSchema: tool.Schema}
-		if req.Prompt.CachePolicy.Enable && req.Prompt.CachePolicy.StableTools && tool.Cacheable {
+		if i == lastCacheableTool {
 			requestTool.CacheControl = &cacheControl{Type: "ephemeral"}
 		}
 		body.Tools = append(body.Tools, requestTool)

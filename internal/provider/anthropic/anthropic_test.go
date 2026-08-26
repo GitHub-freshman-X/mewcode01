@@ -3,6 +3,7 @@ package anthropic
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
@@ -90,6 +91,30 @@ func TestBuildRequestPromptSystemAndCache(t *testing.T) {
 	}
 	if len(body.Messages) != 1 || body.Messages[0].Content[0].Text != "user task" {
 		t.Fatalf("messages wrong: %+v", body.Messages)
+	}
+}
+
+func TestBuildRequestCachesOnlyLastStableTool(t *testing.T) {
+	tools := make([]provider.ToolDefinition, 6)
+	for i := range tools {
+		tools[i] = provider.ToolDefinition{Name: fmt.Sprintf("tool_%d", i), Description: "Tool", Schema: map[string]any{"type": "object"}, Cacheable: true}
+	}
+	body, err := buildRequest("claude", provider.ChatRequest{
+		Prompt:   provider.PromptBundle{StableSystem: "stable system", CachePolicy: provider.CachePolicy{Enable: true, StableSystem: true, StableTools: true}},
+		Messages: []provider.Message{{Role: provider.RoleUser, Blocks: []provider.ContentBlock{{Type: provider.BlockText, Text: "user task"}}}},
+		Tools:    tools,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if body.System[0].CacheControl == nil {
+		t.Fatal("stable system missing cache control")
+	}
+	for i, tool := range body.Tools {
+		wantCached := i == len(body.Tools)-1
+		if (tool.CacheControl != nil) != wantCached {
+			t.Fatalf("tool %d cache control=%v, want cached=%v", i, tool.CacheControl != nil, wantCached)
+		}
 	}
 }
 
