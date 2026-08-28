@@ -46,6 +46,9 @@ var (
 func main() { os.Exit(run(os.Args[1:], os.Stderr)) }
 
 func run(args []string, stderr io.Writer) int {
+	if len(args) > 0 && args[0] == "run" {
+		return runNonInteractive(args[1:], os.Stdout, stderr)
+	}
 	flags := flag.NewFlagSet("mewcode", flag.ContinueOnError)
 	flags.SetOutput(stderr)
 	configPath := flags.String("config", "", "path to YAML configuration")
@@ -56,6 +59,14 @@ func run(args []string, stderr io.Writer) int {
 		fmt.Fprintln(stderr, "unexpected positional arguments")
 		return 2
 	}
+	return launch(*configPath, nil, os.Stdout, stderr)
+}
+
+type launchOptions struct {
+	nonInteractive *runOptions
+}
+
+func launch(configPath string, options *launchOptions, stdout, stderr io.Writer) int {
 	root, err := os.Getwd()
 	if err != nil {
 		fmt.Fprintln(stderr, err)
@@ -83,7 +94,7 @@ func run(args []string, stderr io.Writer) int {
 			logger.Info("dotenv variable skipped", logging.Fields{"status": "system_preferred", "variable": key})
 		}
 	}
-	path := *configPath
+	path := configPath
 	if path == "" {
 		var err error
 		path, err = defaultConfigPath()
@@ -119,15 +130,22 @@ func run(args []string, stderr io.Writer) int {
 		fmt.Fprintln(stderr, "memory:", err)
 		return 1
 	}
-	sessionStore := conversation.NewSessionStore(instructionPaths.Sessions)
-	if _, err := sessionStore.CleanupExpired(time.Now()); err != nil {
-		fmt.Fprintln(stderr, "session cleanup:", err)
-		return 1
-	}
-	session, sessionMeta, err := sessionStore.Create()
-	if err != nil {
-		fmt.Fprintln(stderr, "session create:", err)
-		return 1
+	session := conversation.NewSession()
+	var sessionStore *conversation.SessionStore
+	var sessionID string
+	if options == nil || options.nonInteractive == nil {
+		sessionStore = conversation.NewSessionStore(instructionPaths.Sessions)
+		if _, err := sessionStore.CleanupExpired(time.Now()); err != nil {
+			fmt.Fprintln(stderr, "session cleanup:", err)
+			return 1
+		}
+		var sessionMeta conversation.SessionMeta
+		session, sessionMeta, err = sessionStore.Create()
+		if err != nil {
+			fmt.Fprintln(stderr, "session create:", err)
+			return 1
+		}
+		sessionID = sessionMeta.ID
 	}
 	definitions, err := subagent.Discover(subagent.DiscoverOptions{
 		ProjectDir:              filepath.Join(root, ".mewcode", "agents"),
@@ -149,6 +167,9 @@ func run(args []string, stderr io.Writer) int {
 	}
 	subAgentRuntime := agent.NewSubAgentRuntime(definitions, subagent.NewTaskManager())
 	subAgentRuntime.Worktrees = worktreeManager
+	if options != nil && options.nonInteractive != nil {
+		subAgentRuntime.DisableBackground = true
+	}
 	workspaceRoot := root
 	if current := worktreeManager.Current(); current != nil {
 		workspaceRoot = current.WorktreePath
@@ -211,7 +232,16 @@ func run(args []string, stderr io.Writer) int {
 		Paths:   paths,
 	}
 	executor := tools.NewExecutor(30 * time.Second)
-	bridge := tui.NewPermissionBridge()
+	var bridge *tui.PermissionBridge
+	if options == nil || options.nonInteractive == nil {
+		bridge = tui.NewPermissionBridge()
+	}
+	var memoryService *memory.Service
+	if options == nil || options.nonInteractive == nil {
+		memoryService = memory.NewService(memoryPaths, memory.ServiceOptions{
+			Caller: providerMemoryCaller{provider: p}, Sessions: memorySessionLister{store: sessionStore}, Logger: logger,
+		})
+	}
 	runner := agent.NewRunner(p, session, registry, executor, agent.Options{
 		MaxIterations:   cfg.Agent.MaxIterations,
 		MaxTokens:       cfg.MaxTokens,
@@ -219,7 +249,7 @@ func run(args []string, stderr io.Writer) int {
 		Thinking:        provider.ThinkingOptions{Enabled: cfg.Thinking.Enabled, BudgetTokens: cfg.Thinking.BudgetTokens},
 		Workspace:       workspaceRoot,
 		LogDirectory:    filepath.Join(root, "logs"),
-		SessionID:       sessionMeta.ID,
+		SessionID:       sessionID,
 		SessionStore:    sessionStore,
 		Permissions:     gate,
 		Confirmer:       bridge,
@@ -229,11 +259,12 @@ func run(args []string, stderr io.Writer) int {
 		Hooks:           hookEngine,
 		SubAgents:       subAgentRuntime,
 		OptionalModules: prompt.OptionalModules{CustomInstructions: nonEmpty(customInstructions), LongTermMemory: memoryIndexes},
-		Memory: memory.NewService(memoryPaths, memory.ServiceOptions{
-			Caller: providerMemoryCaller{provider: p}, Sessions: memorySessionLister{store: sessionStore}, Logger: logger,
-		}),
+		Memory:          memoryService,
 	})
 	hookEngine.SetAgentRunner(hookSubAgentRunner{})
+	if options != nil && options.nonInteractive != nil {
+		return executeNonInteractive(runner, *options.nonInteractive, stdout, stderr)
+	}
 	if err := runTUI(runner, session, bridge); err != nil {
 		fmt.Fprintln(stderr, "tui:", err)
 		return 1

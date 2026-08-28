@@ -113,6 +113,19 @@ api_key: replace-with-your-api-key
 | /<skill-name> [参数] | 执行已发现的 Skill；内置 commit、review、test。 |
 | /exit | 空闲时退出 MewCode。 |
 
+### 非交互式单任务
+
+`mewcode run` 在当前工作目录执行一条普通 Agent 任务，适合脚本和自动化调用。它不创建可恢复会话，也不会写入长期记忆：
+
+~~~sh
+mewcode run --config ./.mewcode/config.yaml --prompt "修复当前项目的测试失败"
+mewcode run --config ./.mewcode/config.yaml --prompt-file ./task.md --json
+~~~
+
+任务必须且只能通过 `--prompt` 或 `--prompt-file` 之一提供。`--timeout` 默认是 `30m`，使用 `--timeout 0` 可关闭总超时；`--json` 会在任务结束时向标准输出写入一个 JSON 结果，默认模式则实时输出 Agent 文本。所有诊断写入标准错误。
+
+非交互模式沿用项目的指令、Hook、Skill、MCP 和权限规则，但不会等待人工确认：需要确认的工具调用会自动作为拒绝结果返回给 Agent。前台子 Agent 可以完成，后台和 Fork 子 Agent 请求会被拒绝。退出码为：`0` 完成、`1` 启动/参数/运行失败、`2` 取消、`3` 总超时、`4` 迭代或未知工具安全停止。
+
 ## 项目约定与扩展
 
 | 用途 | 用户级位置 | 项目级位置 |

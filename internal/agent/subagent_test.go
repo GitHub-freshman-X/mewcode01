@@ -205,6 +205,20 @@ func TestForkTypeRecognizesOmittedAndAlias(t *testing.T) {
 	}
 }
 
+func TestSubAgentRuntimeDisableBackgroundRejectsBackgroundAndFork(t *testing.T) {
+	runtime := NewSubAgentRuntime(nil, subagent.NewTaskManager())
+	runtime.DisableBackground = true
+	for _, input := range []tools.AgentInput{
+		{Prompt: "inspect", Description: "inspect", SubagentType: "general-purpose", RunInBackground: true},
+		{Prompt: "inspect", Description: "inspect", SubagentType: "fork"},
+	} {
+		result, err := runtime.dispatch(context.Background(), &Runner{}, input)
+		if err != nil || result.Success || result.Error == nil || result.Error.Type != tools.ErrorPermission {
+			t.Fatalf("input=%+v result=%+v err=%v", input, result, err)
+		}
+	}
+}
+
 func TestForkSubAgentPreservesHistoryAndRunsBackground(t *testing.T) {
 	p := &scriptedProvider{rounds: []scriptedRound{
 		toolRound(provider.ToolCall{ID: "agent-call", Name: "agent", Arguments: []byte(`{"prompt":"inspect","description":"inspect code","subagent_type":"fork"}`)}),

@@ -22,10 +22,11 @@ You are a forked worker, not the primary agent. Do not fork again, do not ask th
 </fork_boilerplate>`
 
 type SubAgentRuntime struct {
-	Definitions    *subagent.Registry
-	Tasks          *subagent.TaskManager
-	AutoBackground time.Duration
-	Worktrees      *worktree.Manager
+	Definitions       *subagent.Registry
+	Tasks             *subagent.TaskManager
+	AutoBackground    time.Duration
+	Worktrees         *worktree.Manager
+	DisableBackground bool
 
 	mu         sync.Mutex
 	foreground map[*Runner]*foregroundSubAgent
@@ -76,6 +77,9 @@ func (r *SubAgentRuntime) dispatch(ctx context.Context, parent *Runner, input to
 		return tools.Failure("agent", tools.ErrorPermission, "forked subagents cannot fork again", nil), nil
 	}
 	background := input.RunInBackground || fork
+	if background && r.DisableBackground {
+		return tools.Failure("agent", tools.ErrorPermission, "background subagents are disabled", nil), nil
+	}
 	child, err := r.newChild(parent, input, fork, background)
 	if err != nil {
 		return tools.Result{}, err
@@ -118,7 +122,7 @@ func (r *SubAgentRuntime) dispatch(ctx context.Context, parent *Runner, input to
 	timer := time.NewTimer(timeout)
 	defer timer.Stop()
 	var timerC <-chan time.Time
-	if child.isolated {
+	if child.isolated && !r.DisableBackground {
 		timerC = timer.C
 	}
 	select {
