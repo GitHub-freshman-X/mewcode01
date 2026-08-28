@@ -15,7 +15,7 @@ type Executor struct {
 
 func NewExecutor(timeout time.Duration) *Executor {
 	if timeout <= 0 {
-		timeout = 30 * time.Second
+		timeout = 600 * time.Second
 	}
 	return &Executor{Timeout: timeout}
 }

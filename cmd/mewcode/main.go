@@ -231,7 +231,7 @@ func launch(configPath string, options *launchOptions, stdout, stderr io.Writer)
 		Sandbox: sandbox,
 		Paths:   paths,
 	}
-	executor := tools.NewExecutor(30 * time.Second)
+	executor := tools.NewExecutor(600 * time.Second)
 	var bridge *tui.PermissionBridge
 	if options == nil || options.nonInteractive == nil {
 		bridge = tui.NewPermissionBridge()

@@ -239,6 +239,37 @@ func TestExecutorDoesNotApplyGeneralTimeoutToAgent(t *testing.T) {
 	}
 }
 
+func TestRunCommandTimeoutSchema(t *testing.T) {
+	root := t.TempDir()
+	registry, err := NewDefaultRegistry(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	tool, ok := registry.Get("run_command")
+	if !ok {
+		t.Fatal("missing run_command tool")
+	}
+	props, ok := tool.Metadata().Schema["properties"].(map[string]any)
+	if !ok {
+		t.Fatalf("schema properties = %+v", tool.Metadata().Schema)
+	}
+	timeoutSchema, ok := props["timeout_ms"].(map[string]any)
+	if !ok {
+		t.Fatalf("timeout_ms schema = %+v", props)
+	}
+	if got := timeoutSchema["maximum"]; got != float64(600_000) {
+		t.Fatalf("timeout_ms maximum = %v, want 600000", got)
+	}
+	longOK := map[string]any{"command": "true", "timeout_ms": 300_000}
+	if _, verr := Validate(tool.Metadata().Schema, mustJSON(longOK)); verr != nil {
+		t.Fatalf("300000ms should be valid: %+v", verr)
+	}
+	overCap := map[string]any{"command": "true", "timeout_ms": 600_001}
+	if _, verr := Validate(tool.Metadata().Schema, mustJSON(overCap)); verr == nil {
+		t.Fatal("600001ms should be rejected")
+	}
+}
+
 func TestExecutorPanic(t *testing.T) {
 	registry := NewRegistry()
 	if err := registry.Register(panicTool{}); err != nil {

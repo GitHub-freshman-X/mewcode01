@@ -11,18 +11,21 @@ import (
 )
 
 type RunCommandTool struct {
-	workspace  *Workspace
-	MaxTimeout time.Duration
+	workspace *Workspace
+	// defaultTimeout 是未显式传 timeout_ms 时的执行上限，用于限制挂死命令。
+	// MaxTimeout 是 timeout_ms 允许申请的上限；完整测试套件等长命令需要显式传入更大的值。
+	defaultTimeout time.Duration
+	MaxTimeout     time.Duration
 }
 
 func NewRunCommandTool(workspace *Workspace) *RunCommandTool {
-	return &RunCommandTool{workspace: workspace, MaxTimeout: 30 * time.Second}
+	return &RunCommandTool{workspace: workspace, defaultTimeout: 30 * time.Second, MaxTimeout: 600 * time.Second}
 }
 
 func (t *RunCommandTool) Metadata() Metadata {
 	return Metadata{
 		Name:        "run_command",
-		Description: "Run a local command in the workspace using command and args without shell expansion.",
+		Description: "Run a local command in the workspace using command and args without shell expansion. Without timeout_ms the command is killed after 30s; full test suites and other long commands must request a larger timeout_ms (up to the schema maximum).",
 		Safety:      SafetySideEffect,
 		Permission:  PermissionMetadata{Target: PermissionTargetCommand},
 		Schema: Schema{"type": "object", "required": []any{"command"}, "properties": map[string]any{
@@ -42,7 +45,7 @@ func (t *RunCommandTool) Execute(ctx context.Context, input json.RawMessage) Res
 	if command == "" {
 		return Failure(t.Metadata().Name, ErrorValidation, "command must not be empty", nil)
 	}
-	timeout := t.MaxTimeout
+	timeout := t.defaultTimeout
 	if raw, ok := args["timeout_ms"]; ok {
 		if n, ok := numeric(raw); ok {
 			timeout = time.Duration(n) * time.Millisecond
