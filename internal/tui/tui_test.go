@@ -98,6 +98,20 @@ func TestStatusUsesSessionUsage(t *testing.T) {
 	}
 }
 
+func TestStatusShowsCacheHitRate(t *testing.T) {
+	session := conversation.NewSession()
+	if err := session.RecordUsage(provider.Usage{InputTokens: 10, CacheReadInputTokens: 20, CacheCreationInputTokens: 5}); err != nil {
+		t.Fatal(err)
+	}
+	m := NewModel(nil, session)
+	if got := m.statusText(); !strings.Contains(got, "缓存：57%") {
+		t.Fatalf("status=%q", got)
+	}
+	if got := cacheStatus(provider.Usage{}); got != "缓存：—" {
+		t.Fatalf("empty cache status=%q", got)
+	}
+}
+
 func TestExitCommandQuitsWithoutSessionWrite(t *testing.T) {
 	session := conversation.NewSession()
 	m := NewModel(nil, session)

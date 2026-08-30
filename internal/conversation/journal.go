@@ -33,8 +33,12 @@ type ToolResultRecord struct {
 }
 
 type UsageRecord struct {
-	InputTokens  int `json:"input_tokens"`
-	OutputTokens int `json:"output_tokens"`
+	InputTokens                int   `json:"input_tokens"`
+	OutputTokens               int   `json:"output_tokens"`
+	CacheReadInputTokens       int   `json:"cache_read_input_tokens"`
+	CacheCreationInputTokens   int   `json:"cache_creation_input_tokens"`
+	CacheTokensIncludedInInput *int  `json:"cache_tokens_included_in_input,omitempty"`
+	CacheUsageKnown            *bool `json:"cache_usage_known,omitempty"`
 }
 
 type JournalRecord struct {
@@ -122,10 +126,12 @@ func (j *JSONLJournal) AppendUsage(usage provider.Usage) error {
 	if j.writer == nil {
 		return errors.New("journal writer is nil")
 	}
-	if usage.InputTokens < 0 || usage.OutputTokens < 0 {
+	if usage.InputTokens < 0 || usage.OutputTokens < 0 || usage.CacheReadInputTokens < 0 || usage.CacheCreationInputTokens < 0 || usage.CacheTokensIncludedInInput < 0 {
 		return errors.New("usage tokens must be non-negative")
 	}
-	record := JournalRecord{Purpose: JournalPurposeUsage, Usage: &UsageRecord{InputTokens: usage.InputTokens, OutputTokens: usage.OutputTokens}, Timestamp: j.now().Unix()}
+	known := !usage.CacheUnavailable
+	included := usage.CacheTokensIncludedInInput
+	record := JournalRecord{Purpose: JournalPurposeUsage, Usage: &UsageRecord{InputTokens: usage.InputTokens, OutputTokens: usage.OutputTokens, CacheReadInputTokens: usage.CacheReadInputTokens, CacheCreationInputTokens: usage.CacheCreationInputTokens, CacheTokensIncludedInInput: &included, CacheUsageKnown: &known}, Timestamp: j.now().Unix()}
 	encoded, err := json.Marshal(record)
 	if err != nil {
 		return err

@@ -265,7 +265,7 @@ func readJournalRecords(path string) ([]JournalRecord, error) {
 
 func validJournalRecord(record JournalRecord) bool {
 	if record.Purpose == JournalPurposeUsage {
-		return record.Role == "" && record.Usage != nil && record.Usage.InputTokens >= 0 && record.Usage.OutputTokens >= 0 && record.Timestamp > 0
+		return record.Role == "" && record.Usage != nil && record.Usage.InputTokens >= 0 && record.Usage.OutputTokens >= 0 && record.Usage.CacheReadInputTokens >= 0 && record.Usage.CacheCreationInputTokens >= 0 && (record.Usage.CacheTokensIncludedInInput == nil || *record.Usage.CacheTokensIncludedInInput >= 0) && record.Timestamp > 0
 	}
 	if (record.Role != provider.RoleUser && record.Role != provider.RoleAssistant) || (record.Purpose != JournalPurposeHistory && record.Purpose != JournalPurposePlan) || record.Timestamp <= 0 {
 		return false
@@ -391,7 +391,11 @@ func sessionUsage(records []JournalRecord) provider.Usage {
 	var usage provider.Usage
 	for _, record := range records {
 		if record.Purpose == JournalPurposeUsage && record.Usage != nil {
-			usage.Add(provider.Usage{InputTokens: record.Usage.InputTokens, OutputTokens: record.Usage.OutputTokens})
+			included := 0
+			if record.Usage.CacheTokensIncludedInInput != nil {
+				included = *record.Usage.CacheTokensIncludedInInput
+			}
+			usage.Add(provider.Usage{InputTokens: record.Usage.InputTokens, OutputTokens: record.Usage.OutputTokens, CacheReadInputTokens: record.Usage.CacheReadInputTokens, CacheCreationInputTokens: record.Usage.CacheCreationInputTokens, CacheTokensIncludedInInput: included, CacheUnavailable: record.Usage.CacheUsageKnown == nil || !*record.Usage.CacheUsageKnown || record.Usage.CacheTokensIncludedInInput == nil})
 		}
 	}
 	return usage

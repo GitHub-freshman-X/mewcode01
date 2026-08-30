@@ -8,6 +8,7 @@ import (
 	"github.com/GitHub-freshman-X/mewcode01/internal/agent"
 	"github.com/GitHub-freshman-X/mewcode01/internal/hooks"
 	"github.com/GitHub-freshman-X/mewcode01/internal/logging"
+	"github.com/GitHub-freshman-X/mewcode01/internal/provider"
 	"github.com/GitHub-freshman-X/mewcode01/internal/skills"
 	"github.com/GitHub-freshman-X/mewcode01/internal/status"
 )
@@ -305,6 +306,9 @@ func statusCommand(ctx CommandContext) error {
 		fmt.Sprintf("权限模式：%s", permissionMode),
 		fmt.Sprintf("会话：%s", session),
 		fmt.Sprintf("Token：in:%d out:%d", usage.InputTokens, usage.OutputTokens),
+		fmt.Sprintf("缓存读取：%d", usage.CacheReadInputTokens),
+		fmt.Sprintf("缓存写入：%d", usage.CacheCreationInputTokens),
+		fmt.Sprintf("缓存命中率：%s", cacheHitRate(usage)),
 		fmt.Sprintf("工具：%d · Skill：%d · 记忆：%s · SubAgent 定义：%d", toolCount, skillCount, memory, definitionCount),
 		fmt.Sprintf("后台任务：%d", len(background)),
 	)
@@ -313,5 +317,12 @@ func statusCommand(ctx CommandContext) error {
 	}
 	ctx.systemf("%s", strings.Join(lines, "\n"))
 	return nil
+}
+
+func cacheHitRate(usage provider.Usage) string {
+	if rate, ok := usage.CacheHitRate(); ok {
+		return fmt.Sprintf("%d%%", rate)
+	}
+	return "—"
 }
 func DefaultRegistry() *Registry { r, _ := NewRegistry(DefaultCommands()...); return r }

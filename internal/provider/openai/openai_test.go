@@ -155,14 +155,14 @@ func TestBuildRequestPromptSystemOrder(t *testing.T) {
 }
 
 func TestParseCachedTokensUsage(t *testing.T) {
-	event, emit, err := parseEvent([]byte(`{"type":"response.completed","response":{"usage":{"input_tokens":9,"output_tokens":2,"input_tokens_details":{"cached_tokens":6}}}}`))
+	event, emit, err := parseEvent([]byte(`{"type":"response.completed","response":{"usage":{"input_tokens":9,"output_tokens":2,"input_tokens_details":{"cached_tokens":6,"cache_write_tokens":1}}}}`))
 	if err != nil {
 		t.Fatal(err)
 	}
 	if !emit || event.Type != provider.EventCompleted || event.Usage == nil {
 		t.Fatalf("event=%+v emit=%v", event, emit)
 	}
-	if event.Usage.InputTokens != 9 || event.Usage.OutputTokens != 2 || event.Usage.CacheReadInputTokens != 6 {
+	if event.Usage.InputTokens != 9 || event.Usage.OutputTokens != 2 || event.Usage.CacheReadInputTokens != 6 || event.Usage.CacheCreationInputTokens != 1 || event.Usage.CacheTokensIncludedInInput != 7 {
 		t.Fatalf("usage=%+v", event.Usage)
 	}
 }

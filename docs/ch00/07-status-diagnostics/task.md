@@ -106,3 +106,81 @@ T1 ─┬→ T2 ─┐
     ├→ T3 ─┼→ T4 → T5 → T6
     └──────┘
 ```
+
+## 缓存命中率扩展任务
+
+### 文件清单
+
+| 操作 | 文件 | 职责 |
+|---|---|---|
+| 修改 | `internal/conversation/journal.go`、`session.go`、`store.go` | usage 记录缓存字段、累计/恢复与旧记录未知状态 |
+| 修改 | `internal/conversation/*_test.go` | 公式、持久化、旧日志兼容与非负校验 |
+| 修改 | `internal/tui/view.go`、`tui_test.go` | 四类状态栏增加统一缓存片段 |
+| 修改 | `internal/command/builtins.go`、`command_test.go` | `/status` 输出缓存读/写与命中率 |
+| 修改 | `README.md`、本章 `checklist.md` | 用户可见行为与验收证据同步 |
+
+### T7：扩展会话缓存用量与持久化
+
+**文件：** `internal/conversation/journal.go`、`session.go`、`store.go`、`*_test.go`
+
+**依赖：** 无
+
+**步骤：**
+
+1. 在 usage JSONL 记录中加入缓存读取、缓存写入和“缓存细分是否已包含在输入总数中”的计量口径，以及能区分新版记录和旧记录的安全字段。
+2. 将 Session 的累计、非负校验和恢复逻辑扩展至缓存 Token；追加日志失败时内存累计不得变化。
+3. 新建会话把缓存统计视为已知；恢复只有旧格式 usage 记录的会话时保留 in/out，并将缓存统计标记未知。
+4. 定义并测试共享的缓存命中率计算：按 Provider 计量口径得到去重后的实际总输入；未知或零分母返回不可显示。
+5. 覆盖 OpenAI 输入总数含缓存读取/写入、Claude 读取加写入独立计量、多轮累计、写入失败、旧日志恢复及包含新版记录的恢复。
+
+**验证：** `go test ./internal/conversation -run 'Test.*(Usage|Cache|Session)' -count=1` 通过。
+
+### T8：在状态栏显示会话累计命中率
+
+**文件：** `internal/tui/view.go`、`internal/tui/tui_test.go`
+
+**依赖：** T7
+
+**步骤：**
+
+1. 从既有 `TokenUsage()` 累计快照取得缓存用量与可用性，调用共享格式化逻辑生成 `缓存：NN%` 或 `缓存：—`。
+2. 在 idle、流式、终态和前台子 Agent 状态栏文案中使用相同缓存片段，不改变取消、权限和模式提示。
+3. 覆盖当前会话累计、当前轮临时用量、零分母、旧会话未知状态及窄窗口渲染。
+
+**验证：** `go test ./internal/tui -run 'Test.*(Status|Token|Cache)' -count=1` 通过。
+
+### T9：在 `/status` 输出缓存统计
+
+**文件：** `internal/command/builtins.go`、`internal/command/command_test.go`
+
+**依赖：** T7
+
+**步骤：**
+
+1. 在保留既有 `Token：in/out` 行的前提下，增加固定顺序的缓存读取、缓存写入、缓存命中率字段。
+2. 缓存未知或不可计算时输出 `—`，其余 `/status` 诊断字段与本地命令行为不变。
+3. 覆盖 OpenAI/Claude 聚合数值、零分母、旧会话未知和敏感标记不泄露。
+
+**验证：** `go test ./internal/command -run 'Test.*Status' -count=1` 通过。
+
+### T10：同步文档并完成回归
+
+**文件：** `README.md`、`docs/ch00/07-status-diagnostics/checklist.md`
+
+**依赖：** T8、T9
+
+**步骤：**
+
+1. 更新 README 的状态栏和 `/status` 说明，写明显示的是当前会话累计缓存命中率及未知值语义。
+2. 将实际执行的验证命令和结果填入本章验收清单；未覆盖的手工窄窗口验证明确标记。
+3. 格式化变更 Go 文件，运行相关包测试、完整测试与构建；如发现实际 bug，按 `bugs/README.md` 的规则同步记录。
+
+**验证：** `go test ./internal/conversation ./internal/tui ./internal/command -count=1 && go test ./... -count=1 && go build ./cmd/mewcode` 通过。
+
+### 执行顺序（缓存扩展）
+
+```text
+T7 → T8 ─┐
+         ├→ T10
+T7 → T9 ─┘
+```

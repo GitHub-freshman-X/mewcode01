@@ -60,29 +60,36 @@ func TestJSONLJournalEncodesProviderNeutralRound(t *testing.T) {
 	}
 }
 
-func TestSessionRecordUsagePersistsOnlyTokenCounts(t *testing.T) {
+func TestSessionRecordUsagePersistsCacheTokenCounts(t *testing.T) {
 	var output bytes.Buffer
 	journal := NewJSONLJournal(&output)
 	journal.now = func() time.Time { return time.Unix(1_700_000_000, 0) }
 	session := NewSession(journal)
-	if err := session.RecordUsage(provider.Usage{InputTokens: 12, OutputTokens: 5, CacheReadInputTokens: 3}); err != nil {
+	if err := session.RecordUsage(provider.Usage{InputTokens: 12, OutputTokens: 5, CacheReadInputTokens: 3, CacheCreationInputTokens: 2, CacheTokensIncludedInInput: 5}); err != nil {
 		t.Fatal(err)
 	}
 	if err := session.RecordUsage(provider.Usage{InputTokens: 8, OutputTokens: 2}); err != nil {
 		t.Fatal(err)
 	}
-	if got := session.Usage(); got.InputTokens != 20 || got.OutputTokens != 7 {
+	if got := session.Usage(); got.InputTokens != 20 || got.OutputTokens != 7 || got.CacheReadInputTokens != 3 || got.CacheCreationInputTokens != 2 || got.CacheTokensIncludedInInput != 5 {
 		t.Fatalf("usage=%+v", got)
 	}
 	var record JournalRecord
 	if err := json.Unmarshal([]byte(strings.TrimSpace(strings.Split(output.String(), "\n")[0])), &record); err != nil {
 		t.Fatal(err)
 	}
-	if record.Purpose != JournalPurposeUsage || record.Usage == nil || record.Usage.InputTokens != 12 || record.Usage.OutputTokens != 5 || record.Role != "" {
+	if record.Purpose != JournalPurposeUsage || record.Usage == nil || record.Usage.InputTokens != 12 || record.Usage.OutputTokens != 5 || record.Usage.CacheReadInputTokens != 3 || record.Usage.CacheCreationInputTokens != 2 || record.Usage.CacheTokensIncludedInInput == nil || *record.Usage.CacheTokensIncludedInInput != 5 || record.Usage.CacheUsageKnown == nil || !*record.Usage.CacheUsageKnown || record.Role != "" {
 		t.Fatalf("record=%+v", record)
 	}
-	if strings.Contains(output.String(), "CacheRead") {
-		t.Fatalf("journal contains unsupported usage fields: %s", output.String())
+	if !strings.Contains(output.String(), "cache_read_input_tokens") {
+		t.Fatalf("journal omits cache usage fields: %s", output.String())
+	}
+}
+
+func TestSessionRecordUsageRejectsNegativeCacheTokens(t *testing.T) {
+	session := NewSession()
+	if err := session.RecordUsage(provider.Usage{CacheReadInputTokens: -1}); err == nil {
+		t.Fatal("negative cache read tokens accepted")
 	}
 }
 

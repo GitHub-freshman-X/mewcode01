@@ -2,6 +2,7 @@ package provider
 
 import (
 	"fmt"
+	"math"
 	"strings"
 )
 
@@ -23,9 +24,10 @@ type Usage struct {
 	InputTokens  int
 	OutputTokens int
 
-	CacheReadInputTokens     int
-	CacheCreationInputTokens int
-	CacheUnavailable         bool
+	CacheReadInputTokens       int
+	CacheCreationInputTokens   int
+	CacheTokensIncludedInInput int
+	CacheUnavailable           bool
 }
 
 func (u *Usage) Add(other Usage) {
@@ -36,7 +38,19 @@ func (u *Usage) Add(other Usage) {
 	u.OutputTokens += other.OutputTokens
 	u.CacheReadInputTokens += other.CacheReadInputTokens
 	u.CacheCreationInputTokens += other.CacheCreationInputTokens
+	u.CacheTokensIncludedInInput += other.CacheTokensIncludedInInput
 	u.CacheUnavailable = u.CacheUnavailable || other.CacheUnavailable
+}
+
+func (u Usage) CacheHitRate() (int, bool) {
+	if u.CacheUnavailable {
+		return 0, false
+	}
+	denominator := u.InputTokens + u.CacheReadInputTokens + u.CacheCreationInputTokens - u.CacheTokensIncludedInInput
+	if denominator == 0 {
+		return 0, false
+	}
+	return int(math.Round(float64(u.CacheReadInputTokens) * 100 / float64(denominator))), true
 }
 
 type StreamEvent struct {

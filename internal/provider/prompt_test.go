@@ -56,3 +56,24 @@ func TestUsageAddIncludesCacheFields(t *testing.T) {
 		t.Fatalf("cache unavailable should be preserved when either side reports it")
 	}
 }
+
+func TestUsageCacheHitRate(t *testing.T) {
+	for _, tc := range []struct {
+		name  string
+		usage Usage
+		rate  int
+		ok    bool
+	}{
+		{name: "claude", usage: Usage{InputTokens: 10, CacheReadInputTokens: 20, CacheCreationInputTokens: 5}, rate: 57, ok: true},
+		{name: "openai", usage: Usage{InputTokens: 6222, CacheReadInputTokens: 4118, CacheTokensIncludedInInput: 4118}, rate: 66, ok: true},
+		{name: "zero", usage: Usage{}, ok: false},
+		{name: "unknown", usage: Usage{CacheReadInputTokens: 20, CacheUnavailable: true}, ok: false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			rate, ok := tc.usage.CacheHitRate()
+			if rate != tc.rate || ok != tc.ok {
+				t.Fatalf("CacheHitRate()=(%d,%t), want (%d,%t)", rate, ok, tc.rate, tc.ok)
+			}
+		})
+	}
+}

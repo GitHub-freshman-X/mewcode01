@@ -240,18 +240,26 @@ func (m *Model) statusText() string {
 	if m.task != nil {
 		usage := m.TokenUsage()
 		if m.runner != nil && m.runner.HasForegroundSubAgent() {
-			return fmt.Sprintf("%s · 子 Agent 前台运行 · ESC 转后台 · Ctrl+C 取消 · tokens in:%d out:%d", mode, usage.InputTokens, usage.OutputTokens)
+			return fmt.Sprintf("%s · 子 Agent 前台运行 · ESC 转后台 · Ctrl+C 取消 · tokens in:%d out:%d · %s", mode, usage.InputTokens, usage.OutputTokens, cacheStatus(usage))
 		}
-		return fmt.Sprintf("%s · iteration %d · %s · tokens in:%d out:%d · Ctrl+C 取消", mode, m.current.iteration, m.current.phase, usage.InputTokens, usage.OutputTokens)
+		return fmt.Sprintf("%s · iteration %d · %s · tokens in:%d out:%d · %s · Ctrl+C 取消", mode, m.current.iteration, m.current.phase, usage.InputTokens, usage.OutputTokens, cacheStatus(usage))
 	}
 	if m.current.terminal != nil {
 		usage := m.TokenUsage()
-		return fmt.Sprintf("%s · %s · %s · %d iterations · tokens in:%d out:%d · 可继续输入", mode, m.current.terminalTy, m.current.terminal.Reason, m.current.terminal.Iterations, usage.InputTokens, usage.OutputTokens)
+		return fmt.Sprintf("%s · %s · %s · %d iterations · tokens in:%d out:%d · %s · 可继续输入", mode, m.current.terminalTy, m.current.terminal.Reason, m.current.terminal.Iterations, usage.InputTokens, usage.OutputTokens, cacheStatus(usage))
 	}
 	if m.current.err != nil {
 		return mode + " · failed · " + provider.UserError(m.current.err) + " · 可继续输入"
 	}
-	return mode + " · idle · tokens in:" + fmt.Sprint(m.TokenUsage().InputTokens) + " out:" + fmt.Sprint(m.TokenUsage().OutputTokens) + " · Enter 发送 · /help"
+	usage := m.TokenUsage()
+	return mode + " · idle · tokens in:" + fmt.Sprint(usage.InputTokens) + " out:" + fmt.Sprint(usage.OutputTokens) + " · " + cacheStatus(usage) + " · Enter 发送 · /help"
+}
+
+func cacheStatus(usage provider.Usage) string {
+	if rate, ok := usage.CacheHitRate(); ok {
+		return fmt.Sprintf("缓存：%d%%", rate)
+	}
+	return "缓存：—"
 }
 
 func (m *Model) hasThinking() bool {

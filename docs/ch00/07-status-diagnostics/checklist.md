@@ -38,3 +38,15 @@
 ## 构建与回归
 
 - [ ] **格式化、竞态、全量测试与构建**：变更 Go 文件已格式化，相关竞态测试、全量测试和可执行程序构建均通过。（验证：`gofmt -w $(git diff --name-only -- '*.go') && go test -race ./internal/status ./internal/subagent ./internal/agent ./internal/memory ./internal/command ./internal/tui && go test ./... -count=1 && go build ./cmd/mewcode`。）
+
+## 缓存命中率扩展验收
+
+- [x] **Provider 用量归一化（AC8）**：OpenAI 返回的 `cached_tokens` 累计为缓存读取；Claude 返回的 `cache_read_input_tokens` 和 `cache_creation_input_tokens` 分别累计为缓存读取和缓存写入。（证据：既有 provider adapter 测试与 `go test ./... -count=1` 于 2026-08-30 通过。）
+- [x] **累计公式（AC8、AC9）**：会话命中率等于缓存读取占去重后的实际总输入；OpenAI 的缓存读取/写入已包含在 `input_tokens` 中，Claude 的缓存读取/写入独立计量。多轮累加后按总量计算，而非平均每轮百分比；百分比按整数四舍五入。（证据：`TestUsageCacheHitRate` 与 `go test ./internal/conversation ./internal/provider -count=1` 于 2026-08-30 通过。）
+- [x] **无数据与未知历史（AC9、AC11）**：新会话尚无用量、分母为零以及由旧格式日志恢复的会话，状态栏和 `/status` 均显示 `缓存：—` 或等价缓存命中率 `—`，不显示虚假的 `0%`，且不 panic。（证据：`TestUsageCacheHitRate`、旧记录恢复测试和相关包测试于 2026-08-30 通过。）
+- [x] **新会话持久化（AC11）**：新增 usage JSONL 记录包含缓存读取、缓存写入及可用性所需元数据；重新恢复后 in/out、缓存读/写和命中率与写入前一致。（证据：`TestSessionRecordUsagePersistsCacheTokenCounts`、`TestSessionStoreRestoreAggregatesKnownCacheUsage` 通过。）
+- [x] **旧日志兼容（AC11）**：不含缓存字段的既有 usage JSONL 仍能恢复原有 in/out Token；缓存统计标记为未知，不修改原文件。（证据：`TestSessionStoreRestoreAggregatesUsageAndIgnoresItForMetadata` 通过。）
+- [ ] **状态栏展示（AC3、AC9）**：idle、流式、终态和前台子 Agent 四种状态均显示相同的会话累计 `缓存：NN%`；窄窗口仍可渲染、滚动和继续输入。（自动化证据：`TestStatusShowsCacheHitRate` 与 `go test ./internal/tui -count=1` 于 2026-08-30 通过；真实 Provider 场景见 `manual_scenarios.md`，窄窗口检查未执行。）
+- [x] **`/status` 展示（AC4、AC10）**：保留 `Token：in/out`，并固定顺序显示“缓存读取”“缓存写入”“缓存命中率”；命令不访问 Provider 或增加 Agent 迭代。（证据：`TestStatusCommandRendersSafeRuntimeSnapshot` 与 `go test ./internal/command -count=1` 于 2026-08-30 通过。）
+- [x] **聚合数据安全（AC11、AC12）**：缓存日志记录、状态栏和 `/status` 只含 Token 数与百分比；植入 Prompt、工具结果、API Key、原始响应标记后均不泄露。（证据：持久化 schema 仅含聚合 Token，沿用 `/status` 安全输出测试；`go test ./... -count=1` 于 2026-08-30 通过。）
+- [x] **回归与构建（AC12）**：格式化后，conversation、provider、command、TUI 相关测试、全量测试和 `mewcode` 构建均通过。（证据：`go test ./... -count=1 && go build ./cmd/mewcode && git diff --check` 于 2026-08-30 通过。）

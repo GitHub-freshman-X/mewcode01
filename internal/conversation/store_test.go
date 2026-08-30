@@ -193,11 +193,34 @@ func TestSessionStoreRestoreAggregatesUsageAndIgnoresItForMetadata(t *testing.T)
 	if meta.MessageCount != 2 || meta.Title != "first request" {
 		t.Fatalf("meta=%+v", meta)
 	}
-	if got := session.Usage(); got.InputTokens != 13 || got.OutputTokens != 6 {
+	if got := session.Usage(); got.InputTokens != 13 || got.OutputTokens != 6 || !got.CacheUnavailable {
 		t.Fatalf("usage=%+v", got)
 	}
 	if got := len(session.Snapshot()); got != 2 {
 		t.Fatalf("history=%d", got)
+	}
+}
+
+func TestSessionStoreRestoreAggregatesKnownCacheUsage(t *testing.T) {
+	dir := t.TempDir()
+	store := NewSessionStore(dir)
+	id := "20260813-080000-a1b2"
+	now := time.Date(2026, 8, 13, 8, 0, 0, 0, time.UTC)
+	known := true
+	included := 0
+	writeSessionRecords(t, dir, id, []JournalRecord{
+		{Purpose: JournalPurposeUsage, Usage: &UsageRecord{InputTokens: 10, OutputTokens: 4, CacheReadInputTokens: 20, CacheCreationInputTokens: 5, CacheTokensIncludedInInput: &included, CacheUsageKnown: &known}, Timestamp: now.Unix()},
+	})
+	session, _, err := store.Restore(id)
+	if err != nil {
+		t.Fatal(err)
+	}
+	usage := session.Usage()
+	if usage.CacheUnavailable || usage.CacheReadInputTokens != 20 || usage.CacheCreationInputTokens != 5 {
+		t.Fatalf("usage=%+v", usage)
+	}
+	if rate, ok := usage.CacheHitRate(); !ok || rate != 57 {
+		t.Fatalf("rate=(%d,%t)", rate, ok)
 	}
 }
 

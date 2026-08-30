@@ -50,7 +50,7 @@ func (s *Session) Usage() provider.Usage {
 }
 
 func (s *Session) RecordUsage(usage provider.Usage) error {
-	if usage.InputTokens < 0 || usage.OutputTokens < 0 {
+	if usage.InputTokens < 0 || usage.OutputTokens < 0 || usage.CacheReadInputTokens < 0 || usage.CacheCreationInputTokens < 0 || usage.CacheTokensIncludedInInput < 0 {
 		return errors.New("usage tokens must be non-negative")
 	}
 	s.mu.Lock()

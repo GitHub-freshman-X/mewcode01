@@ -188,7 +188,7 @@ func TestSessionListUsesTitle(t *testing.T) {
 }
 
 func TestStatusCommandRendersSafeRuntimeSnapshot(t *testing.T) {
-	ui := &fakeUI{usage: provider.Usage{InputTokens: 12, OutputTokens: 4}}
+	ui := &fakeUI{usage: provider.Usage{InputTokens: 12, OutputTokens: 4, CacheReadInputTokens: 8, CacheCreationInputTokens: 4}}
 	ctx := CommandContext{Context: context.Background(), UI: ui, Sessions: fakeSessions{current: SessionMeta{ID: "session-1", MessageCount: 3}}, Status: fakeStatus{snapshot: status.Snapshot{
 		Workspace: "/fixture", LogDirectory: "/fixture/logs", PermissionMode: "default",
 		ToolCount: 8, SkillCount: 2, UserMemoryCount: 1, ProjectMemoryCount: 3, MemoryAvailable: true,
@@ -201,7 +201,7 @@ func TestStatusCommandRendersSafeRuntimeSnapshot(t *testing.T) {
 	if len(ui.messages) != 1 {
 		t.Fatalf("messages=%v", ui.messages)
 	}
-	for _, want := range []string{"MewCode 状态", "工作目录：/fixture", "日志目录：/fixture/logs", "会话：session-1（3 条消息）", "Token：in:12 out:4", "工具：8 · Skill：2 · 记忆：用户 1 · 项目 3 · SubAgent 定义：4", "后台任务：1", "subagent-1 · verify · running · 3s"} {
+	for _, want := range []string{"MewCode 状态", "工作目录：/fixture", "日志目录：/fixture/logs", "会话：session-1（3 条消息）", "Token：in:12 out:4", "缓存读取：8", "缓存写入：4", "缓存命中率：33%", "工具：8 · Skill：2 · 记忆：用户 1 · 项目 3 · SubAgent 定义：4", "后台任务：1", "subagent-1 · verify · running · 3s"} {
 		if !strings.Contains(ui.messages[0], want) {
 			t.Fatalf("status missing %q: %q", want, ui.messages[0])
 		}

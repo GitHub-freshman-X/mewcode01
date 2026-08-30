@@ -107,7 +107,7 @@ api_key: replace-with-your-api-key
 | /do | 执行当前会话累积的待执行计划。 |
 | /session | 列出、创建、恢复或删除会话（别名：/s）。 |
 | /memory | 管理记忆（别名：/m）；清空需再次确认。 |
-| /status | 查看模式、工作目录、日志、权限、会话、Token、扩展和后台任务。 |
+| /status | 查看模式、工作目录、日志、权限、会话、Token、累计缓存读取/写入与命中率、扩展和后台任务；旧会话缓存历史未知时显示 `—`。 |
 | /worktree | 创建、列出、进入、退出或删除 Git Worktree。 |
 | /skills reload | 重新发现 Skill 并刷新动态命令。 |
 | /<skill-name> [参数] | 执行已发现的 Skill；内置 commit、review、test。 |

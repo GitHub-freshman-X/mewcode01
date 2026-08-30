@@ -37,7 +37,8 @@ type streamEnvelope struct {
 			InputTokens        int `json:"input_tokens"`
 			OutputTokens       int `json:"output_tokens"`
 			InputTokensDetails struct {
-				CachedTokens int `json:"cached_tokens"`
+				CachedTokens     int `json:"cached_tokens"`
+				CacheWriteTokens int `json:"cache_write_tokens"`
 			} `json:"input_tokens_details"`
 		} `json:"usage"`
 	} `json:"response"`
@@ -108,9 +109,11 @@ func parseEvent(data []byte) (provider.StreamEvent, bool, error) {
 		event := provider.StreamEvent{Type: provider.EventCompleted}
 		if e.Response.Usage != nil {
 			event.Usage = &provider.Usage{
-				InputTokens:          e.Response.Usage.InputTokens,
-				OutputTokens:         e.Response.Usage.OutputTokens,
-				CacheReadInputTokens: e.Response.Usage.InputTokensDetails.CachedTokens,
+				InputTokens:                e.Response.Usage.InputTokens,
+				OutputTokens:               e.Response.Usage.OutputTokens,
+				CacheReadInputTokens:       e.Response.Usage.InputTokensDetails.CachedTokens,
+				CacheCreationInputTokens:   e.Response.Usage.InputTokensDetails.CacheWriteTokens,
+				CacheTokensIncludedInInput: e.Response.Usage.InputTokensDetails.CachedTokens + e.Response.Usage.InputTokensDetails.CacheWriteTokens,
 			}
 		}
 		return event, true, nil
