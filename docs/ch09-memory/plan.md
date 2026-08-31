@@ -57,6 +57,12 @@ type SessionStore interface {
 
 `Journal.Append` 在 `conversation.Session.CommitRound` 和 `CommitPlan` 更新内存前写入 JSONL。JSONL 记录使用 `role`、`content`、`tool_uses`、`tool_results`、`ts` 与最小用途字段；用途字段区分普通模型历史和 `/plan` 的展示记录。普通记录恢复为模型历史，规划记录恢复展示历史和待执行计划，不污染普通聊天上下文。`ReplaceHistory` 仅用于第八章压缩后的工作集，不回写 JSONL。
 
+### 过期会话与大工具结果联动清理
+
+`SessionStore` 从 `sessionsDir` 的父目录推导同项目的 `contextDir`，即 `<项目根>/.mewcode/context`；不新增配置项或构造参数。`CleanupExpired` 保持 `(int, error)` 接口：对每个最后活跃严格超过 30 天、且经既有扫描校验的会话，先删除 `<contextDir>/<session-id>`，目录不存在视为成功；仅在该步骤成功后删除对应 JSONL。任一删除失败立即返回，已删除的 context 搭配保留的 JSONL 可在下次启动继续收敛。
+
+目录目标只由已校验的会话 ID 生成，并验证为 context 根目录的直接子路径；不扫描或删除没有对应 JSONL 的孤儿目录。手动 `Delete` 继续只删除 JSONL。`SessionStore` 使用既有 Logger 记录成功、context 缺失和失败的阶段、状态与计数，不记录会话 ID、路径或内容。
+
 ### 自动记忆
 
 ```go
@@ -95,7 +101,7 @@ type MemoryService interface {
 
 ### `internal/conversation`
 
-**职责：** 扩展 `Session` 的 Journal 依赖，在普通提交和计划提交写入内存前持久化；新增 JSONL 编解码、创建、扫描、恢复、删除、过期清理能力。
+**职责：** 扩展 `Session` 的 Journal 依赖，在普通提交和计划提交写入内存前持久化；新增 JSONL 编解码、创建、扫描、恢复、删除、过期清理能力。启动期过期清理将同 ID 的 context 大工具结果目录与 JSONL 视为一个可重试清理单元，顺序为 context 后 JSONL。
 
 **恢复规则：** 逐行读取并跳过无效 JSON；从第一个未配对工具调用开始丢弃该调用及其后续记录；从文件名获得创建时间，扫描记录获得最后活跃时间、标题和消息数；恢复超过 24 小时未活跃的会话时插入时间跨度提醒。每次启动仍调用 `Create`，恢复方法仅供第十章会话命令使用。
 
@@ -119,7 +125,7 @@ type MemoryService interface {
 
 ```text
 启动：
-main → Paths → SessionStore.CleanupExpired → SessionStore.Create
+main → Paths → SessionStore.CleanupExpired（context/<id> → sessions/<id>.jsonl） → SessionStore.Create
      → InstructionLoader.Load + MemoryIndexLoader.Load
      → Runner(PromptOptions, MemoryService) → 首轮 BuildBundle
 
@@ -144,7 +150,7 @@ internal/
 │   ├── session.go
 │   ├── journal.go
 │   ├── store.go
-│   └── store_test.go
+│   └── store_test.go       — 会话与 context 联动清理测试
 ├── memory/
 │   ├── paths.go
 │   ├── index.go
@@ -158,7 +164,7 @@ internal/
 └── prompt/
     └── (复用既有 OptionalModules)
 
-cmd/mewcode/main.go
+cmd/mewcode/main.go          — 注入会话清理 Logger
 docs/ch09-memory/plan.md
 docs/ch09-memory/task.md
 docs/ch09-memory/checklist.md
@@ -177,22 +183,25 @@ docs/ch09-memory/checklist.md
 | LLM 写文件权限 | 模型只产出受限 JSON 操作；本地验证后执行 | LLM 负责语义与去重，程序负责路径、类别、文件名和格式安全。 |
 | 提取与治理并发 | 终态后 goroutine；治理使用原子锁文件 | 不阻塞 UI；阻止多个实例同时整理。 |
 | 配置 | 不新增 YAML 配置项 | 目录、格式、治理门槛和索引上限均为固定产品行为。 |
+| 过期清理顺序 | 先 context、后 JSONL | context 删除失败时保留 JSONL，保证下一次启动可安全重试。 |
+| context 根目录 | 由 sessions 目录的同级位置推导 | 两类数据已固定在同一项目 `.mewcode` 下，避免新增配置和路径来源分叉。 |
+| 手动删除 | 保持只删 JSONL | 本次仅修复启动期自动清理，不扩大用户命令语义。 |
 
 ## 测试策略
 
 1. **指令加载器单测：** 验证两层顺序、缺失文件、多层引用、循环去重、五层限制、越界和缺失标记。
-2. **会话存储单测：** 验证同秒 ID 唯一性、JSONL 追加、Provider 无关工具块、坏行跳过、未配对调用截断、元信息扫描、24 小时提醒、30 天清理和追加失败不更新内存。
+2. **会话存储单测：** 验证同秒 ID 唯一性、JSONL 追加、Provider 无关工具块、坏行跳过、未配对调用截断、元信息扫描、24 小时提醒、追加失败不更新内存，以及超过 30 天时 context 与 JSONL 的联动清理、缺失 context、删除失败重试、30 天边界与相邻/孤儿目录隔离。
 3. **记忆服务单测：** 验证类别目录映射、frontmatter、索引更新及双上限、非法操作拒绝、无操作不写入、锁竞争、节流、时间门和会话门。
 4. **Runner 集成测试：** 验证首轮注入内容，普通聊天、`/do`、`/plan` 的异步提取，`/compact`/取消/失败不提取，后台失败不改变主任务终态，以及恢复会话与第八章压缩的衔接。
-5. **启动入口测试：** 验证每次启动创建新会话、初始化清理过期会话、用户级路径由 `os.UserConfigDir` 派生而非 `--config` 位置。
+5. **启动入口测试：** 验证每次启动创建新会话、初始化联动清理过期会话、安全日志注入，以及用户级路径由 `os.UserConfigDir` 派生而非 `--config` 位置。
 
 ## Spec 覆盖
 
 | Spec | 实现归属 |
 |---|---|
 | F1–F2 | `internal/instructions`、启动入口、Prompt OptionalModules |
-| F3–F5 | `internal/conversation`、启动入口、现有第八章 Context Manager 衔接 |
+| F3–F5 | `internal/conversation`、启动入口、现有第八章 Context Manager 衔接；过期 context 与 JSONL 联动清理 |
 | F6–F9 | `internal/memory`、Runner 后台编排 |
 | N1–N2 | Journal 写入顺序、Provider 无关 JSONL 记录 |
-| N3–N5 | 后台 goroutine、路径校验、既有 logging 安全字段 |
+| N3–N5、N8 | 后台 goroutine、路径校验、既有 logging 安全字段与过期清理安全元数据 |
 | N6–N7 | 固定行为不增配置；临时目录、可控时钟、Provider 测试替身 |

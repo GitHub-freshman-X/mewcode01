@@ -2,6 +2,7 @@ package conversation
 
 import (
 	"encoding/json"
+	"errors"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -9,6 +10,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/GitHub-freshman-X/mewcode01/internal/logging"
 	"github.com/GitHub-freshman-X/mewcode01/internal/provider"
 )
 
@@ -259,6 +261,133 @@ func TestSessionStoreDeleteAndCleanupExpiredOnlyTouchValidSessionFiles(t *testin
 	}
 	if _, err := os.Stat(filepath.Join(dir, "20260813-120000-e5f6.jsonl")); !os.IsNotExist(err) {
 		t.Fatalf("valid session not deleted: %v", err)
+	}
+}
+
+func TestSessionStoreCleanupExpiredRemovesMatchingContextOnly(t *testing.T) {
+	root := t.TempDir()
+	sessions := filepath.Join(root, "sessions")
+	contextRoot := filepath.Join(root, "context")
+	store := NewSessionStore(sessions)
+	now := time.Date(2026, 8, 13, 12, 0, 0, 0, time.UTC)
+	oldID := "20260714-115959-a1b2"
+	boundaryID := "20260714-120000-c3d4"
+	newID := "20260813-120000-e5f6"
+	for _, entry := range []struct {
+		id     string
+		active time.Time
+	}{
+		{oldID, now.Add(-30*24*time.Hour - time.Second)},
+		{boundaryID, now.Add(-30 * 24 * time.Hour)},
+		{newID, now},
+	} {
+		writeSessionRecords(t, sessions, entry.id, []JournalRecord{journalText(provider.RoleUser, JournalPurposeHistory, entry.id, entry.active)})
+		if err := os.MkdirAll(filepath.Join(contextRoot, entry.id, "tool-results"), 0700); err != nil {
+			t.Fatal(err)
+		}
+	}
+	orphan := filepath.Join(contextRoot, "orphan")
+	if err := os.MkdirAll(orphan, 0700); err != nil {
+		t.Fatal(err)
+	}
+
+	removed, err := store.CleanupExpired(now)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if removed != 1 {
+		t.Fatalf("removed=%d", removed)
+	}
+	for _, path := range []string{filepath.Join(sessions, oldID+".jsonl"), filepath.Join(contextRoot, oldID)} {
+		if _, err := os.Stat(path); !os.IsNotExist(err) {
+			t.Fatalf("expired path remains %q: %v", path, err)
+		}
+	}
+	for _, id := range []string{boundaryID, newID} {
+		for _, path := range []string{filepath.Join(sessions, id+".jsonl"), filepath.Join(contextRoot, id)} {
+			if _, err := os.Stat(path); err != nil {
+				t.Fatalf("retained path missing %q: %v", path, err)
+			}
+		}
+	}
+	if _, err := os.Stat(orphan); err != nil {
+		t.Fatalf("orphan context removed: %v", err)
+	}
+}
+
+func TestSessionStoreCleanupExpiredRetriesAfterDeleteFailures(t *testing.T) {
+	root := t.TempDir()
+	sessions := filepath.Join(root, "sessions")
+	contextRoot := filepath.Join(root, "context")
+	store := NewSessionStore(sessions)
+	now := time.Date(2026, 8, 13, 12, 0, 0, 0, time.UTC)
+	id := "20260714-115959-a1b2"
+	writeSessionRecords(t, sessions, id, []JournalRecord{journalText(provider.RoleUser, JournalPurposeHistory, "old", now.Add(-30*24*time.Hour-time.Second))})
+	contextPath := filepath.Join(contextRoot, id)
+	if err := os.MkdirAll(contextPath, 0700); err != nil {
+		t.Fatal(err)
+	}
+	store.removeAll = func(string) error { return errors.New("context delete failed") }
+	if _, err := store.CleanupExpired(now); err == nil {
+		t.Fatal("context deletion failure was accepted")
+	}
+	if _, err := os.Stat(filepath.Join(sessions, id+".jsonl")); err != nil {
+		t.Fatalf("session removed after context failure: %v", err)
+	}
+	store.removeAll = os.RemoveAll
+	store.removeFile = func(string) error { return errors.New("session delete failed") }
+	if _, err := store.CleanupExpired(now); err == nil {
+		t.Fatal("session deletion failure was accepted")
+	}
+	if _, err := os.Stat(contextPath); !os.IsNotExist(err) {
+		t.Fatalf("context remains after session deletion failure: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(sessions, id+".jsonl")); err != nil {
+		t.Fatalf("session removed after session failure: %v", err)
+	}
+	store.removeFile = os.Remove
+	removed, err := store.CleanupExpired(now)
+	if err != nil || removed != 1 {
+		t.Fatalf("retry=(%d,%v)", removed, err)
+	}
+}
+
+func TestSessionStoreCleanupExpiredLogsOnlySafeMetadata(t *testing.T) {
+	root := t.TempDir()
+	sessions := filepath.Join(root, "sessions")
+	store := NewSessionStore(sessions)
+	now := time.Date(2026, 8, 13, 12, 0, 0, 0, time.UTC)
+	id := "20260714-115959-a1b2"
+	writeSessionRecords(t, sessions, id, []JournalRecord{journalText(provider.RoleUser, JournalPurposeHistory, "tool-result-canary", now.Add(-30*24*time.Hour-time.Second))})
+	logger, err := logging.New(root, func() time.Time { return now }, 123)
+	if err != nil {
+		t.Fatal(err)
+	}
+	store.Logger = logger
+	if _, err := store.CleanupExpired(now); err != nil {
+		t.Fatal(err)
+	}
+	if err := logger.Close(); err != nil {
+		t.Fatal(err)
+	}
+	matches, err := filepath.Glob(filepath.Join(root, "logs", "*", "*", "*", "*.jsonl"))
+	if err != nil || len(matches) != 1 {
+		t.Fatalf("logs=%v err=%v", matches, err)
+	}
+	data, err := os.ReadFile(matches[0])
+	if err != nil {
+		t.Fatal(err)
+	}
+	content := string(data)
+	for _, expected := range []string{"session_cleanup", "context_not_found", "completed"} {
+		if !strings.Contains(content, expected) {
+			t.Fatalf("log missing %q: %s", expected, content)
+		}
+	}
+	for _, secret := range []string{id, "tool-result-canary", filepath.Join(root, "context")} {
+		if strings.Contains(content, secret) {
+			t.Fatalf("log exposes %q: %s", secret, content)
+		}
 	}
 }
 

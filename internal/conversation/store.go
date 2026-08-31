@@ -16,6 +16,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/GitHub-freshman-X/mewcode01/internal/logging"
 	"github.com/GitHub-freshman-X/mewcode01/internal/provider"
 )
 
@@ -38,11 +39,23 @@ type SessionMeta struct {
 
 type SessionStore struct {
 	sessionsDir string
+	contextDir  string
 	now         func() time.Time
+	Logger      *logging.Logger
+	removeAll   func(string) error
+	removeFile  func(string) error
 }
 
 func NewSessionStore(sessionsDir string) *SessionStore {
-	return &SessionStore{sessionsDir: filepath.Clean(sessionsDir), now: time.Now}
+	sessions := filepath.Clean(sessionsDir)
+	return &SessionStore{
+		sessionsDir: sessions,
+		contextDir:  filepath.Join(filepath.Dir(sessions), "context"),
+		now:         time.Now,
+		Logger:      logging.Nop(),
+		removeAll:   os.RemoveAll,
+		removeFile:  os.Remove,
+	}
 }
 
 func (s *SessionStore) Create() (*Session, SessionMeta, error) {
@@ -162,7 +175,7 @@ func (s *SessionStore) Delete(id string) error {
 	if !info.Mode().IsRegular() {
 		return errors.New("session file is not regular")
 	}
-	return os.Remove(s.pathForID(id))
+	return s.removeSessionFile(s.pathForID(id))
 }
 
 func (s *SessionStore) CleanupExpired(now time.Time) (int, error) {
@@ -175,12 +188,78 @@ func (s *SessionStore) CleanupExpired(now time.Time) (int, error) {
 		if now.Sub(meta.LastActiveAt) <= sessionMaxAge {
 			continue
 		}
+		if err := s.removeExpiredContext(meta.ID); err != nil {
+			s.logCleanup("failed", logging.Fields{"count": removed, "error_type": "context_remove"})
+			return removed, err
+		}
 		if err := s.Delete(meta.ID); err != nil {
+			s.logCleanup("failed", logging.Fields{"count": removed, "error_type": "session_remove"})
 			return removed, err
 		}
 		removed++
+		s.logCleanup("completed", logging.Fields{"count": 1})
 	}
 	return removed, nil
+}
+
+func (s *SessionStore) removeExpiredContext(id string) error {
+	path, err := s.contextPath(id)
+	if err != nil {
+		return err
+	}
+	if _, err := os.Lstat(path); errors.Is(err, os.ErrNotExist) {
+		s.logCleanup("context_not_found", logging.Fields{"count": 1})
+		return nil
+	} else if err != nil {
+		return err
+	}
+	if err := s.removeContextDirectory(path); err != nil {
+		return err
+	}
+	s.logCleanup("context_removed", logging.Fields{"count": 1})
+	return nil
+}
+
+func (s *SessionStore) contextPath(id string) (string, error) {
+	if !validSessionID(id) {
+		return "", errors.New("session ID is invalid")
+	}
+	root := filepath.Clean(s.contextDir)
+	path := filepath.Join(root, id)
+	rel, err := filepath.Rel(root, path)
+	if err != nil || rel != id {
+		return "", errors.New("context directory is outside session storage")
+	}
+	return path, nil
+}
+
+func (s *SessionStore) removeContextDirectory(path string) error {
+	if s.removeAll == nil {
+		return os.RemoveAll(path)
+	}
+	return s.removeAll(path)
+}
+
+func (s *SessionStore) removeSessionFile(path string) error {
+	if s.removeFile == nil {
+		return os.Remove(path)
+	}
+	return s.removeFile(path)
+}
+
+func (s *SessionStore) logCleanup(status string, fields logging.Fields) {
+	if s == nil || s.Logger == nil {
+		return
+	}
+	s.Logger.Info("session cleanup", appendCleanupFields(status, fields))
+}
+
+func appendCleanupFields(status string, fields logging.Fields) logging.Fields {
+	result := logging.Fields{"stage": "session_cleanup", "status": status}
+	for key, value := range fields {
+		result[key] = value
+	}
+	return result
 }
 
 func (s *SessionStore) currentTime() time.Time {

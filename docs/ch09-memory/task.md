@@ -149,3 +149,79 @@ T4 ──────┘         ├─→ T6 ───────────�
 - T3 和 T4 完成后执行 T5。
 - T2 和 T5 完成后执行 T6。
 - T7 负责真实启动入口集成及全量验证。
+
+---
+
+## 过期会话联动清理补充任务
+
+## 文件清单
+
+| 操作 | 文件 | 职责 |
+|---|---|---|
+| 修改 | `internal/conversation/store.go` | 将超期会话的 context 目录纳入启动期清理，并保留失败重试语义。 |
+| 修改 | `internal/conversation/store_test.go` | 使用临时目录、固定时钟与可注入删除失败覆盖联动清理。 |
+| 修改 | `cmd/mewcode/main.go` | 将既有 Logger 注入 SessionStore。 |
+| 修改 | `cmd/mewcode/main_test.go` | 验证启动路径传入 Logger 且不改变新会话创建顺序。 |
+| 修改 | `docs/ch09-memory/checklist.md` | 记录自动化验收项与证据。 |
+| 修改 | `bugs/2026-08-31/001-expired-session-context-orphaned.md` | 记录修复方案、验证和最终状态。 |
+
+## T8：实现可重试的会话与 context 联动清理
+
+**文件：** `internal/conversation/store.go`、`internal/conversation/store_test.go`
+
+**依赖：** 无
+
+**步骤：**
+
+1. 从现有 `sessionsDir` 推导同级 `context` 根目录；为有效会话 ID 构造并校验该根目录的直接子路径。
+2. 令 `CleanupExpired` 对每个超期会话先清理 context 目录（缺失视为成功）、再调用既有 JSONL 删除；仅两步均成功时增加清理计数。
+3. 保持 `Delete` 的手动删除语义不变；context 删除失败立即返回并保留 JSONL，JSONL 删除失败则保留 JSONL 供下一次清理重试。
+4. 为目录与文件删除增加仅包内测试可替换的函数边界，避免依赖权限位或操作系统差异来模拟失败。
+5. 使用临时目录和固定时钟先编写测试，再完成最小实现：成功联动删除、context 缺失、context 失败保留 JSONL、JSONL 失败可重试、刚好 30 天、未过期、无效 JSONL、其他会话和孤儿 context 均不受影响。
+
+**验证：** `go test ./internal/conversation -run 'TestSessionStore.*Cleanup|TestSessionStoreDelete' -count=1` 通过。
+
+## T9：接入安全日志并验证启动顺序
+
+**文件：** `internal/conversation/store.go`、`internal/conversation/store_test.go`、`cmd/mewcode/main.go`、`cmd/mewcode/main_test.go`
+
+**依赖：** T8
+
+**步骤：**
+
+1. 为 SessionStore 注入既有 Logger，默认使用 Nop；成功、context 缺失和失败仅记录阶段、状态、清理数量与错误类别，不记录会话 ID、目录路径或内容。
+2. 在交互式启动路径创建 SessionStore 后、`CleanupExpired` 前注入已创建的 Logger；保持非交互入口不创建持久会话的现有行为。
+3. 以真实 Logger 指向临时项目目录，断言日志包含安全状态字段，且刻意植入的会话 ID、路径标记和工具结果标记均不出现。
+4. 扩展启动测试，断言过期清理仍发生在创建新 JSONL 前；不连接真实 Provider、不读取用户目录。
+
+**验证：** `go test ./internal/conversation ./cmd/mewcode -run 'Test.*(Cleanup|Expired|SessionStore|Run)' -count=1` 通过。
+
+## T10：章节、Bug 记录与回归验证
+
+**文件：** `docs/ch09-memory/checklist.md`、`bugs/2026-08-31/001-expired-session-context-orphaned.md`
+
+**依赖：** T8、T9
+
+**步骤：**
+
+1. 以实际命令和结果更新 checklist 的 AC5 与安全日志验收证据，明确本项全部由自动化测试覆盖、无需真实 Provider 手工测试。
+2. 将 Bug 记录更新为已修复，写入实际根因、删除顺序、失败重试语义、已通过命令和未验证事项；若任一验证失败，改为待处理并说明原因。
+3. 运行格式化、关联包回归、完整回归、静态检查和补丁检查；仅清理由本轮验证产生且确认无关的运行目录或日志目录。
+
+**验证：**
+
+```bash
+gofmt -w internal/conversation/store.go internal/conversation/store_test.go cmd/mewcode/main.go cmd/mewcode/main_test.go
+go test ./internal/conversation ./cmd/mewcode -count=1
+go test ./... -count=1
+go vet ./...
+git diff --check
+```
+
+期望：所有命令退出码为 0；若既有无关失败阻塞全量回归，应在 Bug 记录中明确区分。
+
+## 补充执行顺序
+
+```text
+T8 → T9 → T10
+```

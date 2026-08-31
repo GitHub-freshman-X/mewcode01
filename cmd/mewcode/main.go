@@ -135,6 +135,7 @@ func launch(configPath string, options *launchOptions, stdout, stderr io.Writer)
 	var sessionID string
 	if options == nil || options.nonInteractive == nil {
 		sessionStore = conversation.NewSessionStore(instructionPaths.Sessions)
+		sessionStore.Logger = logger
 		if _, err := sessionStore.CleanupExpired(time.Now()); err != nil {
 			fmt.Fprintln(stderr, "session cleanup:", err)
 			return 1

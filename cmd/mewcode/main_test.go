@@ -103,6 +103,18 @@ func TestRunCreatesChapterNineSessionAndInjectsMemoryModules(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(root, ".mewcode", "MEWCODE.md"), []byte("project rule"), 0o600); err != nil {
 		t.Fatal(err)
 	}
+	expiredID := "20200101-000000-a1b2"
+	expiredSession := filepath.Join(root, ".mewcode", "sessions", expiredID+".jsonl")
+	if err := os.MkdirAll(filepath.Dir(expiredSession), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(expiredSession, []byte(`{"role":"user","content":"old","purpose":"history","ts":1}`+"\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	expiredContext := filepath.Join(root, ".mewcode", "context", expiredID, "tool-results")
+	if err := os.MkdirAll(expiredContext, 0o700); err != nil {
+		t.Fatal(err)
+	}
 	if err := os.MkdirAll(filepath.Join(userRoot, "mewcode", "memory"), 0o755); err != nil {
 		t.Fatal(err)
 	}
@@ -140,6 +152,9 @@ func TestRunCreatesChapterNineSessionAndInjectsMemoryModules(t *testing.T) {
 	entries, err := os.ReadDir(filepath.Join(root, ".mewcode", "sessions"))
 	if err != nil || len(entries) != 1 {
 		t.Fatalf("sessions=%v err=%v", entries, err)
+	}
+	if _, err := os.Stat(expiredContext); !os.IsNotExist(err) {
+		t.Fatalf("expired context remains: %v", err)
 	}
 }
 

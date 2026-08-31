@@ -12,7 +12,8 @@
 
 - [ ] **AC3 JSONL 追加与 Provider 中立**：含工具调用的一轮任务结束后，会话 JSONL 可重建用户、助手、工具调用和工具结果；记录不含厂商协议特有的原始请求格式。模拟末行中断时，完整前缀仍可恢复。（验证：运行 `go test ./internal/conversation -run 'Journal|RoundTrip|Partial|Provider' -count=1`，期望记录字段和恢复断言通过）
 - [ ] **AC4 容错恢复与上下文衔接**：恢复会跳过坏行、从首个未配对工具调用处截断，超过 24 小时加入时间跨度提醒；恢复后的超长历史在下一次模型调用前仍触发第八章压缩。（验证：运行 `go test ./internal/conversation ./internal/agent -run 'Restore|Malformed|Unpaired|TimeGap|Recovered.*Compact' -count=1`，期望历史、提醒和压缩请求断言通过）
-- [ ] **AC5 生命周期与清理**：创建的会话 ID 满足 `YYYYMMDD-HHMMSS-xxxx` 且同秒不冲突；扫描仅凭 JSONL 得到列表元信息；启动清理删除最后活跃超过 30 天的会话，保留未过期会话。（验证：运行 `go test ./internal/conversation ./cmd/mewcode -run 'Create|List|Cleanup|Expired|SessionID|Run' -count=1`，期望文件和元信息断言通过）
+- [x] **AC5 生命周期与联动清理**：创建的会话 ID 满足 `YYYYMMDD-HHMMSS-xxxx` 且同秒不冲突；扫描仅凭 JSONL 得到列表元信息；启动清理删除最后活跃严格超过 30 天的会话 JSONL 及同 ID context 目录，保留未过期和恰好 30 天的会话及其 context。（证据：`go test ./internal/conversation ./cmd/mewcode -count=1` 于 2026-08-31 通过；会话存储与启动测试覆盖文件和元信息。）
+- [x] **联动清理失败可重试**：context 目录不存在时仍删除 JSONL；context 删除失败时 JSONL 保留；JSONL 删除失败时 JSONL 保留且下次清理在 context 缺失状态下继续完成。无效 JSONL、相邻会话、其他会话 context 和没有对应 JSONL 的孤儿 context 均不被触碰。（证据：`TestSessionStoreCleanupExpiredRemovesMatchingContextOnly` 与 `TestSessionStoreCleanupExpiredRetriesAfterDeleteFailures` 使用临时目录和删除函数替身覆盖，2026-08-31 通过。）
 - [ ] **崩溃写入顺序**：Journal 追加失败时，history、display 和 pending plans 均不变；第八章的 `ReplaceHistory` 不重写原始 JSONL。（验证：运行 `go test ./internal/conversation -run 'Journal.*Failure|ReplaceHistory' -count=1`，期望内存快照和文件内容不变）
 
 ## 自动记忆与治理
@@ -24,9 +25,14 @@
 ## 安全、配置与回归
 
 - [ ] **AC9 安全日志与路径隔离**：日志只含阶段、状态、数量、类型、时长或大小等元数据，不含指令、会话、记忆、工具结果或密钥正文；所有写入均在用户级或项目级记忆目录、会话目录内。（验证：运行 `go test ./internal/instructions ./internal/conversation ./internal/memory ./internal/agent -run 'Log|Path|Containment|Safe' -count=1`，期望敏感文本缺失且越界写入被拒绝）
+- [x] **过期清理安全日志**：启动期 context 联动清理记录阶段、状态、数量和错误类别，但不写入会话 ID、context 路径或工具结果 canary。（证据：`TestSessionStoreCleanupExpiredLogsOnlySafeMetadata` 读取真实临时 JSONL 日志并断言安全字段与 canary 缺失；`go test ./internal/conversation ./cmd/mewcode -count=1` 于 2026-08-31 通过。）
 - [ ] **固定配置约定**：用户级根目录由 `os.UserConfigDir()/mewcode` 派生，而非 `--config` 路径；本章未新增 YAML 配置项。若实现时新增配置项，则配置加载、校验和 `.mewcode/config.example.yaml` 必须同步通过。（验证：运行 `go test ./cmd/mewcode ./internal/config -run 'UserConfig|DefaultPath|Config' -count=1`，期望路径和配置断言通过）
-- [ ] **离线全量回归**：所有新增自动化测试不访问真实模型或用户目录，既有 Provider、Prompt、Agent、TUI 与上下文管理测试保持通过。（验证：运行 `go test ./... -count=1`，期望退出码 0）
-- [ ] **静态与格式检查**：Go 文件经过格式化，静态检查与补丁空白检查通过。（验证：运行 `gofmt -d internal/instructions internal/conversation internal/memory internal/agent cmd/mewcode && go vet ./... && git diff --check`，期望无格式输出且全部退出码为 0）
+- [x] **离线全量回归**：所有新增自动化测试不访问真实模型或用户目录，既有 Provider、Prompt、Agent、TUI 与上下文管理测试保持通过。（证据：`go test ./... -count=1` 于 2026-08-31 通过。）
+- [x] **静态与格式检查**：Go 文件经过格式化，静态检查与补丁空白检查通过。（证据：`gofmt -d`、`go vet ./...` 与 `git diff --check` 于 2026-08-31 通过。）
+
+## 本次修复的离线验收
+
+- [x] **无需人工 Provider 测试**：所有联动清理场景只依赖临时项目目录、固定时钟、删除函数测试替身与本地 Logger；不创建网络连接、不调用模型、不读取真实用户配置目录。（证据：新增测试均使用 `t.TempDir`、固定时间、stub Provider 和本地 Logger；`go test ./internal/conversation ./cmd/mewcode -count=1` 于 2026-08-31 通过。）
 
 ## 端到端场景
 
