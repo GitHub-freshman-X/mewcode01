@@ -65,7 +65,7 @@ func (s *Session) Request(ctx context.Context, method string, params any, result
 			return received.err
 		}
 		if received.response.Error != nil {
-			return fmt.Errorf("mcp: JSON-RPC error %d: %s", received.response.Error.Code, received.response.Error.Message)
+			return &RPCError{Code: received.response.Error.Code, Message: received.response.Error.Message}
 		}
 		if result == nil {
 			return nil

@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"bytes"
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -14,6 +15,10 @@ import (
 
 var ErrSessionExpired = errors.New("mcp HTTP session expired")
 
+type HTTPStatusError struct{ Status int }
+
+func (e *HTTPStatusError) Error() string { return fmt.Sprintf("mcp HTTP status %d", e.Status) }
+
 type HTTPTransport struct {
 	url       string
 	headers   map[string]string
@@ -22,6 +27,7 @@ type HTTPTransport struct {
 	mu        sync.Mutex
 	sessionID string
 	version   string
+	modern    bool
 	closed    bool
 }
 
@@ -29,15 +35,28 @@ func NewHTTPTransport(url string, headers map[string]string, client *http.Client
 	if client == nil {
 		client = http.DefaultClient
 	}
-	return &HTTPTransport{url: url, headers: cloneStrings(headers), client: client, inbound: make(chan Inbound, 16), version: protocolVersion}
+	return &HTTPTransport{url: url, headers: cloneStrings(headers), client: client, inbound: make(chan Inbound, 16), version: legacyProtocolVersion}
 }
+
+func (t *HTTPTransport) SetModern(modern bool) {
+	t.mu.Lock()
+	t.modern = modern
+	if modern {
+		t.sessionID = ""
+		t.version = modernProtocolVersion
+	} else {
+		t.version = legacyProtocolVersion
+	}
+	t.mu.Unlock()
+}
+
 func (t *HTTPTransport) Send(ctx context.Context, message []byte) error {
 	t.mu.Lock()
 	if t.closed {
 		t.mu.Unlock()
 		return ErrSessionClosed
 	}
-	sessionID, version := t.sessionID, t.version
+	sessionID, version, modern := t.sessionID, t.version, t.modern
 	t.mu.Unlock()
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, t.url, bytes.NewReader(message))
 	if err != nil {
@@ -48,7 +67,22 @@ func (t *HTTPTransport) Send(ctx context.Context, message []byte) error {
 	}
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("Accept", "application/json, text/event-stream")
-	if sessionID != "" {
+	if modern {
+		var envelope struct {
+			Method string `json:"method"`
+			Params struct {
+				Name string `json:"name"`
+			} `json:"params"`
+		}
+		if err := json.Unmarshal(message, &envelope); err != nil {
+			return fmt.Errorf("mcp HTTP request metadata: %w", err)
+		}
+		req.Header.Set("MCP-Protocol-Version", modernProtocolVersion)
+		req.Header.Set("Mcp-Method", envelope.Method)
+		if envelope.Method == "tools/call" && envelope.Params.Name != "" {
+			req.Header.Set("Mcp-Name", envelope.Params.Name)
+		}
+	} else if sessionID != "" {
 		req.Header.Set("MCP-Session-Id", sessionID)
 		req.Header.Set("MCP-Protocol-Version", version)
 	}
@@ -61,14 +95,24 @@ func (t *HTTPTransport) Send(ctx context.Context, message []byte) error {
 		return ErrSessionExpired
 	}
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		return fmt.Errorf("mcp HTTP status %d", resp.StatusCode)
+		body, readErr := io.ReadAll(io.LimitReader(resp.Body, 4<<20))
+		if readErr != nil {
+			return fmt.Errorf("mcp HTTP error response: %w", readErr)
+		}
+		if _, decodeErr := DecodeResponse(body); decodeErr == nil {
+			t.inbound <- Inbound{Message: body}
+			return nil
+		}
+		return &HTTPStatusError{Status: resp.StatusCode}
 	}
-	if id := resp.Header.Get("MCP-Session-Id"); id != "" {
+	if !modern && resp.Header.Get("MCP-Session-Id") != "" {
+		id := resp.Header.Get("MCP-Session-Id")
 		t.mu.Lock()
 		t.sessionID = id
 		t.mu.Unlock()
 	}
-	if version := resp.Header.Get("MCP-Protocol-Version"); version != "" {
+	if !modern && resp.Header.Get("MCP-Protocol-Version") != "" {
+		version := resp.Header.Get("MCP-Protocol-Version")
 		t.mu.Lock()
 		t.version = version
 		t.mu.Unlock()
@@ -119,9 +163,9 @@ func (t *HTTPTransport) Close(ctx context.Context) error {
 		return nil
 	}
 	t.closed = true
-	sessionID := t.sessionID
+	sessionID, modern := t.sessionID, t.modern
 	t.mu.Unlock()
-	if sessionID == "" {
+	if modern || sessionID == "" {
 		return nil
 	}
 	req, err := http.NewRequestWithContext(ctx, http.MethodDelete, t.url, nil)

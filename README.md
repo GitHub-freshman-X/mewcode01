@@ -14,7 +14,7 @@ MewCode 是一个用 Go 构建的全屏终端 AI Agent。它通过 Anthropic Mes
 | [第 4 章](docs/ch04-loop/spec.md) | Agent Loop | 多步 ReAct 循环，只读工具并发、有副作用工具串行，以及 /plan、/do 工作流。 |
 | [第 5 章](docs/ch05-system_prompt/spec.md) | System Prompt | 模块化系统指令、运行环境与模式注入、稳定/动态内容分离和缓存用量观测。 |
 | [第 6 章](docs/ch06-permissions/spec.md) | 权限与安全 | 真实路径工作区沙箱、高危命令拦截、分层规则与交互确认。 |
-| [第 7 章](docs/ch07-mcp/spec.md) | MCP Client | stdio 与 Streamable HTTP 服务、变量展开、工具发现、远端调用和连接生命周期。 |
+| [第 7 章](docs/ch07-mcp/spec.md) | MCP Client | stdio 与 Streamable HTTP 服务、变量展开、工具发现、远端调用，以及新版优先、旧版自动降级的生命周期兼容。 |
 | [第 8 章](docs/ch08-context/spec.md) | 上下文管理 | 大工具结果按需落盘、消息预算、自动/手动/强制/紧急压缩和历史重建。 |
 | [第 9 章](docs/ch09-memory/spec.md) | 会话与记忆 | JSONL 会话存档与恢复、用户/项目指令、跨会话记忆、异步提取和惰性治理。 |
 | [第 10 章](docs/ch10-slash_command/spec.md) | 斜杠命令 | 命令注册、解析、Tab 补全、模式切换、会话管理和 Token 统计。 |
@@ -84,6 +84,8 @@ api_key: replace-with-your-api-key
 | worktree | 本地文件复制、依赖目录链接及临时 Worktree 保留时间。 |
 
 主配置的 mcp_servers 只取自本次选定的主配置文件；项目级配置不会追加它。发现后的 MCP 工具名固定为 <server>__<tool>，默认按有副作用工具处理，仍须通过权限检查。
+
+MewCode 不需要为 MCP 协议版本新增配置：连接每个 Server 时会先尝试 `2026-07-28` 的无状态 `server/discover` 生命周期；Server 不支持该方法或探测超时时，自动降级到既有 `initialize` 握手。认证、网络、TLS、限流和服务端错误不会触发降级。新版与旧版都继续支持 `stdio` 和 Streamable HTTP；本项目不支持已弃用的独立 HTTP+SSE transport。
 
 ## 日常使用
 

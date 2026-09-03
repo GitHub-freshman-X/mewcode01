@@ -71,9 +71,9 @@ func (m *Manager) ConnectAndRegister(ctx context.Context, registry *tools.Regist
 		}
 		logger.Info("MCP server connected", logging.Fields{"stage": "connect", "status": "connected"})
 		client := NewClient(transport, logger)
-		if err := client.Initialize(ctx); err != nil {
+		if err := client.Negotiate(ctx); err != nil {
 			_ = client.Close(ctx)
-			diagnostics = m.report(diagnostics, Diagnostic{name, "initialize", err})
+			diagnostics = m.report(diagnostics, Diagnostic{name, "negotiate", err})
 			continue
 		}
 		remotes, err := client.ListTools(ctx)

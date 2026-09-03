@@ -13,6 +13,15 @@ type JSONRPCError struct {
 	Data    json.RawMessage `json:"data,omitempty"`
 }
 
+type RPCError struct {
+	Code    int
+	Message string
+}
+
+func (e *RPCError) Error() string {
+	return fmt.Sprintf("mcp: JSON-RPC error %d: %s", e.Code, e.Message)
+}
+
 type Response struct {
 	ID     uint64
 	Result json.RawMessage

@@ -50,6 +50,41 @@ func TestManagerRegistersHealthyServerAndIsolatesBrokenServer(t *testing.T) {
 	}
 }
 
+func TestManagerRegistersModernServer(t *testing.T) {
+	var methods []string
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		defer r.Body.Close()
+		var request struct {
+			ID     any    `json:"id"`
+			Method string `json:"method"`
+		}
+		_ = json.NewDecoder(r.Body).Decode(&request)
+		methods = append(methods, request.Method)
+		result := any(map[string]any{})
+		switch request.Method {
+		case "server/discover":
+			result = map[string]any{"supportedVersions": []string{modernProtocolVersion}, "capabilities": map[string]any{}}
+		case "tools/list":
+			result = map[string]any{"tools": []any{map[string]any{"name": "search", "description": "Search", "inputSchema": map[string]any{"type": "object"}}}}
+		default:
+			t.Fatalf("unexpected method %q", request.Method)
+		}
+		_ = json.NewEncoder(w).Encode(map[string]any{"jsonrpc": "2.0", "id": request.ID, "result": result})
+	}))
+	defer server.Close()
+	registry := tools.NewRegistry()
+	manager := NewManager(server.Client(), nil)
+	if diagnostics := manager.ConnectAndRegister(context.Background(), registry, map[string]config.MCPServerConfig{"modern": {Type: config.MCPTransportHTTP, URL: server.URL}}); len(diagnostics) != 0 {
+		t.Fatalf("diagnostics=%v", diagnostics)
+	}
+	if _, ok := registry.Get("modern__search"); !ok || len(methods) != 2 || methods[0] != "server/discover" || methods[1] != "tools/list" {
+		t.Fatalf("methods=%v tools=%v", methods, registry.List())
+	}
+	if err := manager.Close(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+}
+
 func TestManagerLogsSuccessfulRegistration(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		var request struct {
