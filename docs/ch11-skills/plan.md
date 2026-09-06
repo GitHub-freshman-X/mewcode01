@@ -6,7 +6,7 @@
 
 `agent.Runner` 持有一个 `skills.Manager` 和原始工具注册表。每轮调用模型前，Runner 从 Manager 取得稳定快照：轻量目录、已激活 SOP、当前任务的执行模式及白名单；据此构建环境补充、生成可见工具的受限注册表，并向 Provider 发送同一视图的工具定义。工具执行也使用这份受限注册表，保证模型可见工具与实际可执行工具一致。
 
-`LoadSkill` 是由 Skill Manager 适配为 `tools.Tool` 的系统级工具。它被固定添加到每一轮工具视图，执行时激活指定 Skill 并返回安全的名称、模式与说明；下一轮模型请求才看到完整 SOP。该顺序避免在同一轮内改变已发送的 prompt 与工具定义。
+`load_skill` 与 `run_skill` 是由 Skill Manager 适配的系统级工具。前者仅激活 inline Skill；遇到 fork Skill 时只返回安全元信息和“需要执行”的标记，绝不把 SOP 写入主会话。后者接收 fork Skill 名称和子任务，由 Runner 注入的执行桥创建独立会话并将最终摘要作为工具结果返回。两者都固定加入每轮工具视图。
 
 命令层从静态默认命令改为“内置命令 + 当前 Skill 命令”的可替换注册表。TUI 持有 Skill 服务，`/skills reload` 调用原子刷新并替换命令表；`/commit`、`/review`、`/test` 默认以 inline 方式构造带 Skill 名称和参数的 Agent 请求，以保留已讨论的需求与偏好。创建、恢复或清空会话时清除激活状态，不影响已发现的 Skill。
 
@@ -82,7 +82,18 @@ type Runtime struct {
 }
 ```
 
-Manager 从 `Snapshot` 和某次请求的显式 Skill 选择构建 Runtime。每项激活 Skill 的正文在这里将 `{{args}}` 替换为调用参数，并按名称包裹成可辨识的 SOP 段落。多项白名单取交集，防止任一激活 Skill 扩大工具面；若交集为空，仍保留 `load_skill`。多项指定模型不同时返回可诊断错误，而非静默选择其一。
+Manager 从 `Snapshot` 和某次请求的显式 Skill 选择构建 Runtime。只有 inline activation 的正文在这里将 `{{args}}` 替换为调用参数，并按名称包裹成可辨识的 SOP 段落。多项白名单取交集，防止任一激活 Skill 扩大工具面；若交集为空，仍保留 `load_skill` 与 `run_skill`。多项指定模型不同时返回可诊断错误，而非静默选择其一。
+
+### `skills.ForkSkillHost`
+
+```go
+type ForkSkillInput struct { Name, Prompt string }
+type ForkSkillHost interface {
+    ExecuteForkSkill(context.Context, ForkSkillInput) (tools.Result, error)
+}
+```
+
+`run_skill` 从 context 取得这个仅运行期接口，领域模块不依赖 `agent`。Runner 在调度器调用前将执行桥置入 context；桥复用同一套 fork 执行器，负责 context scope、取消、权限、Token 累计和最终摘要。没有该桥时工具返回结构化配置错误。
 
 ### Agent 请求与 Provider 请求
 
@@ -105,9 +116,9 @@ type SkillInvocation struct {
 
 ### `internal/skills`
 
-**职责：** 定义 YAML frontmatter 格式；扫描两级路径；解析并校验单文件和目录型入口；执行优先级合并；管理原子 Catalog、激活列表、轻量目录和运行时视图；提供 `LoadSkill` 工具和样板 Skill。
+**职责：** 定义 YAML frontmatter 格式；扫描两级路径；解析并校验单文件和目录型入口；执行优先级合并；管理原子 Catalog、激活列表、轻量目录和运行时视图；提供 `load_skill`、`run_skill` 工具和样板 Skill。
 
-**对外接口：** `NewManager`、`Discover`、`Reload`、`Snapshot`、`Activate`、`ClearActivations`、`RuntimeFor`、`DirectoryPrompt`、`NewLoadTool`、`BuiltinFS`。
+**对外接口：** `NewManager`、`Discover`、`Reload`、`Snapshot`、`Activate`、`ClearActivations`、`RuntimeFor`、`DirectoryPrompt`、`NewLoadTool`、`NewRunTool`、`WithForkSkillHost`、`BuiltinFS`。
 
 **依赖：** 标准库文件系统与同步原语、`go.yaml.in/yaml/v4`、`internal/tools` 的 Tool 接口。它不依赖 agent、command、tui 或 provider，避免循环依赖。
 
@@ -129,7 +140,7 @@ type SkillInvocation struct {
 
 **inline 路径：** 显式 invocation 先激活 Skill；每轮从 Manager Snapshot 生成 `prompt.OptionalModules.ActiveSkills`，并把轻量目录以独立可选模块注入系统 prompt。Runner 对当前 Runtime 的工具集合调用 `CollectEnvironment`、`Definitions`、调度器与执行器。
 
-**fork 路径：** 对应 Skill 不进入主 Runner 的普通 round 提交路径。Runner 创建无 journal 的临时 `conversation.Session`，按 context scope 复制历史，使用同一 Provider、权限引擎、工具执行器与 Skill Runtime 完成任务；将最终回答裁剪为摘要后以合成的用户请求和助手摘要原子提交主会话。fork 产生的 Provider Token 用量仍累加到主会话，确保状态栏反映用户发起的实际成本。
+**fork 路径：** Runner 将临时 Session 执行抽为共享内部操作。显式 Slash Command 在成功后以合成请求和助手摘要提交主会话；自动 `run_skill` 作为主 Agent 的一次工具调用，其工具结果携带同一摘要，因此由正常工具轮次写入主会话。两条路径都不向主会话写入子会话中间历史，且 fork 产生的 Provider Token 用量都累加到主会话。
 
 **模型选择：** 运行时指定的 `Model` 写入所有该任务的 `provider.ChatRequest`，包括 fork；上下文压缩与后台记忆仍使用默认模型，避免 Skill 的局部模型意外影响既有后台任务。
 
@@ -172,10 +183,11 @@ type SkillInvocation struct {
 
 普通自然语言任务
   ├─ Runner Snapshot → 可用 Skill 轻量清单 + 当前已激活 SOP
-  ├─ Runtime 工具白名单 → tools.Subset(..., load_skill)
+  ├─ Runtime 工具白名单 → tools.Subset(..., load_skill, run_skill)
   ├─ Provider 接收同一工具视图与 prompt
   ├─ Agent 调用 load_skill(name)
-  └─ 下一轮 Snapshot 注入完整 SOP 并按白名单继续
+  ├─ inline：下一轮 Snapshot 注入完整 SOP 并按白名单继续
+  └─ fork：Agent 调用 run_skill(name, prompt) → 独立会话执行 → 摘要作为 ToolResult 回流
 
 /skill-name args
   ├─ command 查 Catalog，创建 SkillInvocation
@@ -197,7 +209,7 @@ internal/skills/
 ├── discover.go              — 两级发现、frontmatter 解析、优先级与校验
 ├── manager.go               — Catalog、激活状态、快照与原子刷新
 ├── runtime.go               — SOP 渲染、{{args}} 替换、白名单交集
-├── load_tool.go             — 系统级 LoadSkill 工具
+├── load_tool.go             — 系统级 load_skill、run_skill 和执行桥
 ├── builtins.go              — 内置样板来源与发现适配
 ├── testdata/                — 单文件、目录型、错误与覆盖样例
 └── skills_test.go           — 发现、校验、刷新、激活与运行时测试
@@ -234,7 +246,7 @@ docs/ch11-skills/*           — 本章正式文档与人工场景
 | frontmatter 解析 | `go.yaml.in/yaml/v4` | 项目已有依赖，避免新增解析器。 |
 | 刷新机制 | `/skills reload` 的候选 Catalog 原子替换 | 行为可预测；失败可完整回滚到旧内存状态。 |
 | 完整 SOP 位置 | Prompt 的稳定“已激活 Skill”模块，优先级高于其他可选模块 | 每轮稳定存在且在环境补充中醒目，满足持续注入。 |
-| 自动发现 | 轻量目录 + 固定 `load_skill` 工具 | 启动低成本，模型按意图选择后才读取 SOP。 |
+| 自动发现 | 轻量目录 + `load_skill` / `run_skill` 工具 | inline 按需注入 SOP；fork 以显式工具边界启动隔离执行，避免主会话污染。 |
 | 工具收窄 | 每轮从原始 Registry 生成受限视图，prompt、定义、调度共享该视图 | 防止“模型看不见但仍可执行”或反向不一致。 |
 | 多 Skill 白名单 | 白名单交集；空白名单表示不额外限制 | 多项 SOP 同时生效时取最小权限集合，避免权限面扩大。 |
 | fork 实现 | 临时无 journal Session 执行，最终摘要提交主 Session | 隔离上下文和中间过程，同时保留用户可追溯的结果与 Token 成本。 |

@@ -141,7 +141,7 @@ mewcode run --config ./.mewcode/config.yaml --prompt-file ./task.md --json
 | Worktree | — | <项目根>/.mewcode/worktrees/ |
 | Hook | 用户主配置 | <项目根>/.mewcode/config.yaml |
 
-项目级同名 Skill、子 Agent 定义和权限规则优先于用户级定义。Skill 可以是单个 Markdown 文件，也可以是含 SKILL.md 的目录；正文只会在激活后作为 SOP 加载。Skill 的工具白名单只能缩小模型可见工具范围，不能提高权限；编辑后运行 /skills reload。
+项目级同名 Skill、子 Agent 定义和权限规则优先于用户级定义。Skill 可以是单个 Markdown 文件，也可以是含 SKILL.md 的目录；inline Skill 的正文只会在激活后作为主会话 SOP 加载。模型自动选择 fork Skill 时，先获取其执行信息，再在独立会话中运行，主会话只接收最终摘要；Skill 的工具白名单只能缩小模型可见工具范围，不能提高权限；编辑后运行 /skills reload。
 
 内置 Explore、Plan、general-purpose 子 Agent 始终可用，Verification 需在配置中启用。定义式子 Agent 使用独立对话和权限记录；Fork 子 Agent 继承父对话、始终后台运行，并在唯一临时 Worktree 中执行。定义式 Agent 可声明 isolation: worktree；干净目录会自动清理，有未提交修改或新提交的目录会被保留以保护成果。
 

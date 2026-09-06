@@ -24,6 +24,7 @@
 - [ ] **AC12 会话级 Token 用量**：同一会话内的普通对话、计划、执行与压缩调用的 Provider 输入/输出 Token 会累加；`/status` 与状态栏读到相同的会话累计值。新会话从零开始，切换会话显示目标会话自己的值，恢复原会话后恢复原值；旧 JSONL 无用量行时显示零并可继续累加。本地命令不会改变用量。（验证：go test ./internal/conversation ./internal/agent ./internal/command ./internal/tui -run 'Test.*(Usage|Token|Session.*Resume)' -count=1，期望 JSONL、恢复、界面与零 Provider 请求断言通过）
 - [ ] **AC13 恢复后的压缩时机**：`/session resume` 本身不启动 Provider 或压缩任务；恢复后提交第一条 Agent 消息时，在任何 Provider 请求前，仍按恢复历史的上下文长度触发或跳过既有自动压缩。会话累计 Token 不得影响该决定。（验证：go test ./internal/agent ./internal/tui -run 'Test.*(Restore.*Compact|Resume.*NoProvider|Session.*Resume)' -count=1，期望调用顺序、压缩触发与零恢复请求断言通过）
 - [ ] **AC14 `/exit` 退出**：空闲时输入 `/exit` 返回 TUI 退出命令；不启动 Agent、不调用 Provider、不写入 Session、Display Journal 或 JSONL。`/help` 与 Tab 补全可发现该命令；任务或权限确认状态继续沿用 `Ctrl+C` 的取消/退出语义，不在这些状态执行 `/exit`。（验证：go test ./internal/command ./internal/tui -run 'Test.*(Exit|CommandList|Completion|Permission)' -count=1，期望退出命令、零副作用及状态守卫断言通过）
+- [ ] **AC15 命令后 Worktree 同步边界**：动态 inline/fork Skill 与其他会启动 Agent 的 Slash Command 能正常进入任务事件消费，且不显示“cannot change worktree while an agent task is active”；Runner 空闲时的 `/worktree enter`、`exit` 仍使后续工具使用对应显式工作区。（验证：go test ./internal/tui ./internal/agent -run 'Test.*(Command.*Worktree|Skill.*Worktree|Worktree.*Sync)' -count=1，期望任务启动、同步与错误反馈断言通过）
 - [ ] **记忆管理**：/memory 显示用户级和项目级概要；list、add <类别> <内容> 与 clear 只影响既有记忆目录及索引；未知类别、空内容和目录外文件被拒绝。（验证：go test ./internal/memory ./internal/command -run 'Test.*(Memory|Command.*Memory)' -count=1，期望文件范围、索引及错误提示断言通过）
 - [ ] **清空确认**：/memory clear 先提供确认提示；未经明确确认不得删除任何记忆文件或索引。（验证：go test ./internal/command ./internal/tui -run 'Test.*Memory.*Clear.*Confirm' -count=1，期望确认前后目录快照断言通过）
 
@@ -39,3 +40,4 @@
 - [ ] **从计划到执行**：启动默认 TUI，执行 /plan，观察 [PLAN]；输入需求，观察 ModePlan 请求和待执行计划；执行 /do，观察 [DEFAULT]，并由 ModeDo 处理已保存计划。（验证：go test ./internal/tui ./internal/agent -run 'Test.*EndToEnd.*Plan.*Do' -count=1，期望模式、请求和计划消费断言通过）
 - [ ] **本地快车道与提示词快捷方式**：依次提交 /status、/help、/review 特别注意并发安全。前两项仅产生系统消息且不启动任务，最后一项启动普通 Agent 请求，prompt 同时包含审查基线和额外关注点。（验证：go test ./internal/command ./internal/tui -run 'Test.*EndToEnd.*(Local|Review)' -count=1，期望任务计数与 prompt 断言通过）
 - [ ] **发现与纠错流程**：输入 / 后用 Tab 查看并选择候选；输入未知命令并看到 /help 引导；输入缺参的会话或记忆子命令并看到用法提示。（验证：go test ./internal/tui ./internal/command -run 'Test.*EndToEnd.*(Completion|Unknown|ArgPrompt)' -count=1，期望菜单、提示和输入框断言通过)
+- [ ] **Skill 与 Worktree 共存**：在已配置 Worktree Manager 的 TUI 中输入 `/isolated-review`；任务开始并消费事件，不出现 active-worktree 错误。随后执行空闲 `/worktree` 命令，后续文件工具使用切换后的显式路径。（验证：自动化 TUI 集成测试；真实 Provider 手工验证作为补充。）

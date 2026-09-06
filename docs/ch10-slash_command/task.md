@@ -176,10 +176,26 @@
 
 **验证：** `go test ./internal/command ./internal/tui -run 'Test.*(Exit|CommandList|Completion|Permission)' -count=1` 通过。
 
+## T13：限制命令后 Worktree 同步时机
+
+**文件：** `internal/tui/update.go`、`internal/tui/tui_test.go`、`docs/ch10-slash_command/{spec,plan,task,checklist}.md`
+
+**依赖：** T5、T6
+
+**步骤：**
+
+1. 调整命令分发后的分支：若 Handler 已创建 `m.task`，立即返回任务事件等待命令，不调用 `SyncWorktreeWorkspace`。
+2. 保留 Runner 空闲时的同步调用，使 `/worktree create`、`enter`、`exit` 等本地命令继续将工具 Registry 重绑到当前 Worktree 或主工作区。
+3. 在既有 TUI 测试中构造带 Worktree Manager 的 Runner，执行动态 fork Skill 命令并断言不会显示 active-worktree 错误且任务事件被消费。
+4. 覆盖空闲 `/worktree` 命令同步和同步失败反馈，确认不会吞掉本地命令错误或改变普通文本输入路径。
+5. 更新本章正式文档并在 `bugs/` 记录修复方案和验证结果。
+
+**验证：** `go test ./internal/tui ./internal/agent -run 'Test.*(Worktree|Skill|Command)' -count=1` 通过。
+
 ## T12：索引更新与章节级验证
 
 **文件：** docs/README.md、docs/ch10-slash_command/{spec,plan,task,checklist}.md  
-**依赖：** T1–T11
+**依赖：** T1–T11、T13
 
 **步骤：**
 
@@ -202,7 +218,7 @@
 
     T1 → T2 ────────────┐
     T3 ─────────────────┼→ T5 → T6 → T7 → T8 ─┐
-    T4 ─────────────────┘                        ├→ T12
+    T4 ─────────────────┘          └→ T13 ──────┼→ T12
            └────────────→ T9 ────────────────────┤
                          T10 ─────────────────────┤
                                T11 ───────────────┘
@@ -210,4 +226,4 @@
 - T1、T3、T4 可并行执行。
 - T2 依赖 T1。
 - T5 依赖命令、会话切换与记忆服务。
-- T6、T7、T8 按顺序接入 TUI；T9 可在 T2 后独立完成；T10 依赖会话切换、命令装配和 TUI 状态；T11 依赖命令与 TUI 分流；T12 更新索引并做全量验证。
+- T6、T7、T8 按顺序接入 TUI；T9 可在 T2 后独立完成；T10 依赖会话切换、命令装配和 TUI 状态；T11 依赖命令与 TUI 分流；T13 依赖命令分流与 TUI 装配；T12 等待所有实现任务完成后更新索引并做全量验证。

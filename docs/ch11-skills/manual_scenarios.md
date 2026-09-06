@@ -134,6 +134,10 @@ EOF
 
 通过条件：不会出现“fork skills are not implemented”；中间工具调用和回复不会写入主会话；完成后主会话只显示 `/isolated-review` 与最终审查摘要。内置 `/review` 默认使用 inline，以保留当前对话中的需求与偏好。
 
+## 场景 G：自动选择 fork Skill
+
+使用与场景 F 相同的 `isolated-review`，但不要输入 Slash Command；改为以自然语言要求“独立审查当前变更”。通过条件：模型先调用 `load_skill("isolated-review")`，其结果显示 `mode: fork` 和需要执行的标记，主会话后续请求不包含该 Skill 的 SOP；模型再调用 `run_skill` 提交审查任务，独立会话得到 SOP 与指定 context，最终摘要作为工具结果回流主会话。取消或失败时不得产生成功摘要。
+
 ## 结果记录模板
 
 | 场景 | 输入/命令 | 可见证据 | 安全/文件证据 | 结果 |
@@ -144,6 +148,7 @@ EOF
 | D 刷新 |  | 成功和失败诊断 | 旧命令保留 | 通过/失败 |
 | E 会话清理 |  | 新会话 help 与答复 | 不继承激活 SOP | 通过/失败 |
 | F fork |  | 摘要与 Token | 主历史隔离 | 通过/失败 |
+| G 自动 fork |  | load_skill 后 run_skill | SOP 不进入主会话 | 通过/失败/模型未匹配 |
 
 ## 清理
 

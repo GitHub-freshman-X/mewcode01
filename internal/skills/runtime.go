@@ -54,7 +54,7 @@ func DirectoryPrompt(directory []Metadata) []string {
 	if len(directory) == 0 {
 		return nil
 	}
-	lines := []string{"可以使用以下 Skill；当用户请求匹配时，调用 load_skill 加载对应流程："}
+	lines := []string{"可以使用以下 Skill；当用户请求匹配时，先调用 load_skill。若结果的 mode 为 fork，请再调用 run_skill 并提供完整子任务："}
 	for _, metadata := range directory {
 		lines = append(lines, "- "+metadata.Name+"："+metadata.Description)
 	}

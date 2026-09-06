@@ -107,11 +107,11 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				err := command.Dispatch(m.commands, invocation, command.CommandContext{Context: m.ctx, UI: m, Sessions: m, Memory: m, Skills: m.runner, Status: m.runner, Hooks: m.runner.Hooks(), Worktrees: m.runner.WorktreeManager()})
 				if err != nil {
 					m.AddSystemMessage("错误: " + err.Error())
-				} else if err := m.runner.SyncWorktreeWorkspace(); err != nil {
-					m.AddSystemMessage("错误: " + err.Error())
 				} else if m.task != nil {
 					m.refreshContent()
 					return m, waitForAgent(m.task.Events)
+				} else if err := m.runner.SyncWorktreeWorkspace(); err != nil {
+					m.AddSystemMessage("错误: " + err.Error())
 				}
 				if m.exitRequested {
 					m.exitRequested = false

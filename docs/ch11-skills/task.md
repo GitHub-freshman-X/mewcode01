@@ -230,10 +230,26 @@
 
 **验证：** `gofmt -w` 后 `go test ./...` 与 `go build ./cmd/mewcode` 均通过；`git status --short` 仅包含本章预期文件。
 
+## T14: 统一自动 fork Skill 调度
+
+**文件：** `internal/skills/load_tool.go`、`internal/skills/runtime.go`、`internal/agent/runner.go`、现有 `internal/agent/runner_test.go`
+
+**依赖：** T4、T8、T9
+
+**步骤：**
+
+1. 调整 `load_skill`：仅激活 inline Skill；fork Skill 返回安全元信息和需调用 `run_skill` 的状态，不写入 activation。
+2. 新增系统级 `run_skill`，只接受 fork Skill 名称与子任务，并从 context 的执行桥获取独立执行结果。
+3. 将显式 fork 的临时 Session 逻辑抽为共享执行器；自动执行通过该共享路径返回摘要、累计用量，并保留权限、取消及失败语义。
+4. 每轮将两个系统工具加入受限 Registry 和 Provider 工具定义；轻量目录说明 fork 的两步调用方式。
+5. 在既有 Runner 测试中覆盖自动 fork 的 SOP 隔离、`none` 历史、摘要 ToolResult、用量累计与失败不污染主会话。
+
+**验证：** `go test ./internal/agent -run 'ForkSkill|SkillFork|Auto.*Fork' -count=1` 通过。
+
 ## 执行顺序
 
 ```text
 T1 → T2 → T3 → T4 → T5 ─┐
-                 T6 ───┼→ T8 → T9 → T10 → T11 → T12 → T13
+                 T6 ───┼→ T8 → T9 → T14 → T10 → T11 → T12 → T13
 T7 ─────────────────────┘
 ```

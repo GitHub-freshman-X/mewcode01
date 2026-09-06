@@ -191,6 +191,63 @@ func TestRunnerForkSkillReturnsOnlyFinalSummaryToMainSession(t *testing.T) {
 	}
 }
 
+func TestRunnerAutoForkSkillKeepsSOPOutOfMainSession(t *testing.T) {
+	for _, tc := range []struct {
+		name         string
+		context      string
+		priorRounds  int
+		forkMessages int
+	}{
+		{name: "none", context: "none", forkMessages: 1},
+		{name: "full", context: "full", priorRounds: 1, forkMessages: 6},
+		{name: "recent", context: "recent", priorRounds: 3, forkMessages: 6},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			project := t.TempDir()
+			body := "---\nname: review\ndescription: Review changes independently.\nmode: fork\ncontext: " + tc.context + "\n---\nFORK-SOP-9c31\n"
+			if err := os.WriteFile(filepath.Join(project, "review.md"), []byte(body), 0600); err != nil {
+				t.Fatal(err)
+			}
+			manager, err := skills.NewManager(skills.DiscoverOptions{ProjectDir: project})
+			if err != nil {
+				t.Fatal(err)
+			}
+			p := &scriptedProvider{rounds: []scriptedRound{
+				toolRound(provider.ToolCall{ID: "load", Name: skills.LoadToolName, Arguments: []byte(`{"name":"review"}`)}),
+				toolRound(provider.ToolCall{ID: "run", Name: skills.RunToolName, Arguments: []byte(`{"name":"review","prompt":"review current changes"}`)}),
+				textRound("fork summary", provider.Usage{InputTokens: 7, OutputTokens: 3}),
+				textRound("reported summary", provider.Usage{}),
+			}}
+			runner, session := testRunner(t, p, Options{Skills: manager})
+			for i := 0; i < tc.priorRounds; i++ {
+				if err := session.CommitRound(&provider.Message{Role: provider.RoleUser, Blocks: []provider.ContentBlock{{Type: provider.BlockText, Text: "prior request"}}}, provider.Message{Role: provider.RoleAssistant, Blocks: []provider.ContentBlock{{Type: provider.BlockText, Text: "prior answer"}}}, nil); err != nil {
+					t.Fatal(err)
+				}
+			}
+			task, err := runner.Start(context.Background(), Request{Mode: ModeAct, Prompt: "review current changes"})
+			if err != nil {
+				t.Fatal(err)
+			}
+			events := drainTask(t, task)
+			if events[len(events)-1].Type != EventCompleted || len(p.requests) != 4 {
+				t.Fatalf("events=%+v requests=%d", events, len(p.requests))
+			}
+			if strings.Contains(p.requests[1].Prompt.StableSystem, "FORK-SOP-9c31") {
+				t.Fatalf("fork SOP leaked into main prompt: %s", p.requests[1].Prompt.StableSystem)
+			}
+			if len(p.requests[2].Messages) != tc.forkMessages || !strings.Contains(p.requests[2].Prompt.StableSystem, "FORK-SOP-9c31") {
+				t.Fatalf("fork request=%+v", p.requests[2])
+			}
+			if history := session.Snapshot(); strings.Contains(allMessageText(history), "FORK-SOP-9c31") || !strings.Contains(allMessageText(history), "fork summary") {
+				t.Fatalf("main history=%+v", history)
+			}
+			if usage := session.Usage(); usage.InputTokens != 7 || usage.OutputTokens != 3 {
+				t.Fatalf("usage=%+v", usage)
+			}
+		})
+	}
+}
+
 func TestBuiltinReviewUsesInlineMode(t *testing.T) {
 	for _, skill := range skills.Builtins() {
 		if skill.Name == "review" && skill.Mode == skills.ModeInline {

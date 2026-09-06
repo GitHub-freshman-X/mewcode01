@@ -14,6 +14,8 @@
 - [ ] 首次请求仅包含每项 Skill 的名称和说明，既不包含 SOP 正文，也不包含样板附属资源。（验证：捕获首次 Provider 请求并比较系统 prompt。）
 - [ ] `load_skill` 始终出现在模型可见工具中；调用后只返回安全元数据，不回显 SOP、调用参数或目录资源。（验证：检查工具定义和 ToolResult。）
 - [ ] `load_skill` 成功后，下一轮请求包含被激活 Skill 的完整 SOP；同一任务后续每轮仍包含该 SOP。（验证：脚本 Provider 先调用工具再继续，比较连续请求。）
+- [x] 对 `mode: fork` Skill，`load_skill` 只返回名称、说明、模式和需执行标记，不激活该 Skill，也不使 SOP 出现在主会话后续请求中。（验证：`go test ./internal/agent -run TestRunnerAutoForkSkillKeepsSOPOutOfMainSession -count=1`，2026-09-06 通过。）
+- [x] `run_skill` 可执行已选择的 fork Skill，并将独立会话最终摘要作为 ToolResult 返回；它始终对模型可见且不受 Skill 白名单收窄。（验证：`go test ./internal/agent -run TestRunnerAutoForkSkillKeepsSOPOutOfMainSession -count=1`，2026-09-06 通过。）
 - [ ] 多项 Skill 可同时激活，SOP 按激活顺序稳定注入。（验证：激活两项并比较连续请求中的模块顺序。）
 - [ ] `/skill-name 参数` 仅替换该 Skill SOP 中的 `{{args}}`；自然语言加载的 `{{args}}` 为空。（验证：比较显式调用与 `load_skill` 调用后的请求内容。）
 
@@ -36,6 +38,7 @@
 - [x] fork Skill 的临时执行不会把中间用户消息、工具调用、工具结果或回复写入主历史；完成后主历史只收到最终摘要。（验证：`go test ./internal/agent -run TestRunnerForkSkillReturnsOnlyFinalSummaryToMainSession -count=1`，2026-08-18 通过。）
 - [ ] fork 的 `full`、`recent`、`none` 分别传入完整历史、最近五条消息和空历史；其 Provider Token 用量仍计入主会话。（验证：预置超过五条的会话并检查 fork 首次请求和会话 usage。）
 - [ ] fork 取消或失败时不向主历史写入伪摘要，并保持现有取消/错误显示语义。（验证：脚本 Provider 返回错误或取消任务，检查主 Session。）
+- [x] 自动 fork 与显式 fork 一样应用 `full`、`recent`、`none`，累计子会话 Token，且不会因主 Runner 已运行而死锁。（验证：`go test ./internal/agent -run TestRunnerAutoForkSkillKeepsSOPOutOfMainSession -count=1` 于 2026-09-06 通过，测试覆盖三个 context scope。）
 - [ ] 新建、恢复或 `/clear` 之后已激活 Skill 不再注入；发现的 Skill 命令仍可再次激活。（验证：激活 Skill 后切换会话，检查下一请求与 `/help`。）
 
 ## 安全、兼容性与回归

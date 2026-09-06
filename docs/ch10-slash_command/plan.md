@@ -91,7 +91,7 @@ type Handler func(CommandContext) error
 
 ### TUI 状态
 
-`tui.Model` 增加当前计划模式、按会话消息位置锚定的临时展示条目、补全候选与选中索引、命令注册中心及会话/记忆运行依赖。临时条目包含展示角色（用户命令或系统反馈）、内容与锚点位置；任务仍由现有 `task` 字段追踪。活跃任务或待确认权限时维持既有输入限制。
+`tui.Model` 增加当前计划模式、按会话消息位置锚定的临时展示条目、补全候选与选中索引、命令注册中心及会话/记忆运行依赖。临时条目包含展示角色（用户命令或系统反馈）、内容与锚点位置；任务仍由现有 `task` 字段追踪。命令分发后，若 Handler 已启动任务，TUI 必须直接订阅任务事件；仅在 Runner 空闲时才同步 Worktree 的显式工具工作区。活跃任务或待确认权限时维持既有输入限制。
 
 ### `command.SessionMeta`
 
@@ -174,7 +174,7 @@ func (s *Session) RecordUsage(provider.Usage) error
 2. TUI 在 Enter 时修剪输入；空输入直接返回。
 3. `command.Parse` 判定非命令时，TUI 根据当前计划模式启动 `ModeAct` 或 `ModePlan` 请求。
 4. 对命令输入，TUI 调用 `Registry.Find`：输入 `/` 显示可见命令；未知命令写入带 `/help` 引导的系统消息；缺少参数时显示 `ArgPrompt`。
-5. 命中命令后，`Dispatch` 记录安全日志并调用 Handler。Handler 通过 `UIController` 写系统消息、改变模式或启动任务。若分发后未启动 Agent 任务，TUI 将本次输入作为用户命令条目插入，并把本次产生的系统反馈紧随其后；若启动任务，则复用既有任务转录，避免重复显示命令。
+5. 命中命令后，`Dispatch` 记录安全日志并调用 Handler。Handler 通过 `UIController` 写系统消息、改变模式或启动任务。若分发后已启动 Agent，TUI 立即订阅任务事件且跳过 Worktree 同步；若未启动任务，TUI 同步当前 Worktree 的显式工作区，再将本次输入作为用户命令条目插入，并把本次产生的系统反馈紧随其后。
 6. `/plan` 更新模式后可启动 `ModePlan`；`/do` 先更新为默认模式，再启动 `ModeDo`。任务事件仍由既有 `applyAgentEvent` 消费。
 7. `/clear` 与 `/session resume` 成功创建或恢复会话后，TUI 调用 Runner 会话替换方法，再同步更新 `Model.session` 与视图。
 8. Tab 触发 `Registry.Complete`：零候选保持输入；一项候选直接替换；多项候选显示菜单，方向键改变选择，Tab 或 Enter 写入选中项。
@@ -222,6 +222,7 @@ cmd/mewcode/main_test.go       — 启动装配测试
 | 恢复后压缩 | 下一条 Agent 任务的既有上下文估算 | 切换会话不增加延迟或 API 调用；累计账单用量不能代表当前上下文长度。 |
 | Tab 多候选 | TUI 内部菜单，方向键选择、Tab/Enter 接受 | 保持键盘优先且无需新增渲染依赖。 |
 | 会话切换 | Runner 空闲时原子替换 | 防止活跃任务向旧会话写入或跨会话串数据。 |
+| 命令后 Worktree 同步 | 仅在 Runner 空闲路径执行 | 防止命令已启动任务后重绑工具根目录，同时保留 `/worktree` 本地命令的同步语义。 |
 | 记忆管理 | 复用第 9 章目录与 Markdown 格式 | 不创建第二套数据源或改变自动提取、治理行为。 |
 | 日志内容 | 仅元数据 | 满足可观测性且避免记录参数、prompt、Token 与密钥。 |
 
@@ -240,6 +241,7 @@ cmd/mewcode/main_test.go       — 启动装配测试
 | F12、N8、AC12 | `conversation` 用量 Journal/恢复聚合、`agent.Runner` 增量记账、`tui` 会话级状态展示 |
 | F13、AC13 | `agent.ReplaceSession` 后的 Manager 初始化与恢复历史压缩时机回归测试 |
 | F14、AC14 | `command` 退出 Handler、`tui.Update` 退出命令与活跃状态守卫测试 |
+| F15、N9、AC15 | `tui.Update` 仅在空闲命令路径同步 Worktree，TUI 动态 Skill 与 `/worktree` 回归测试 |
 | N2 | 本地 Registry 操作与 Agent 请求边界测试 |
 | N4、AC9 | Dispatcher/TUI 生命周期日志及日志断言 |
 | N6 | 不新增配置，`config.example.yaml` 不改动 |

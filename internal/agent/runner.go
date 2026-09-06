@@ -91,6 +91,7 @@ func NewRunner(p provider.Provider, session *conversation.Session, registry *too
 	if opts.Skills != nil && registry != nil {
 		if copy, err := registry.Subset(nil, nil); err == nil {
 			if err := copy.Register(skills.NewLoadTool(opts.Skills)); err == nil {
+				_ = copy.Register(skills.NewRunTool(opts.Skills))
 				registry = copy
 			}
 		}
@@ -155,9 +156,38 @@ func (r *Runner) Start(ctx context.Context, req Request) (*Task, error) {
 }
 
 func (r *Runner) startFork(ctx context.Context, req Request) (*Task, error) {
+	r.mu.Lock()
+	if r.active {
+		r.mu.Unlock()
+		return nil, errors.New("an agent task is already active")
+	}
+	r.active = true
+	r.mu.Unlock()
+	taskCtx, cancel := context.WithCancel(ctx)
+	events := make(chan Event, 64)
+	go func() {
+		defer close(events)
+		defer func() { r.mu.Lock(); r.active = false; r.mu.Unlock() }()
+		terminal, err := r.executeFork(taskCtx, req)
+		if err != nil {
+			events <- Event{Type: EventFailed, Phase: PhaseFinishing, Err: err}
+			return
+		}
+		if terminal.Type == EventCompleted {
+			if err := r.session.CommitRound(&provider.Message{Role: provider.RoleUser, Blocks: []provider.ContentBlock{{Type: provider.BlockText, Text: skillInvocationLabel(req.Skill)}}}, provider.Message{Role: provider.RoleAssistant, Blocks: []provider.ContentBlock{{Type: provider.BlockText, Text: terminal.Text}}}, nil); err != nil {
+				events <- Event{Type: EventFailed, Phase: PhaseFinishing, Summary: terminal.Summary, Err: err}
+				return
+			}
+		}
+		events <- terminal
+	}()
+	return &Task{Events: events, Cancel: cancel}, nil
+}
+
+func (r *Runner) executeFork(ctx context.Context, req Request) (Event, error) {
 	snapshot, err := r.options.Skills.SnapshotWithActivation(req.Skill.Name, req.Skill.Args)
 	if err != nil {
-		return nil, err
+		return Event{}, err
 	}
 	skill := snapshot.Catalog.Skills[req.Skill.Name]
 	forkSession := conversation.NewSession()
@@ -172,19 +202,19 @@ func (r *Runner) startFork(ctx context.Context, req Request) (*Task, error) {
 		forkSession.ReplaceHistory(history)
 	case skills.ContextNone:
 	default:
-		return nil, fmt.Errorf("invalid fork context %q", skill.Context)
+		return Event{}, fmt.Errorf("invalid fork context %q", skill.Context)
 	}
 
 	names := r.registry.Names()
 	filtered := make([]string, 0, len(names))
 	for _, name := range names {
-		if name != skills.LoadToolName {
+		if name != skills.LoadToolName && name != skills.RunToolName {
 			filtered = append(filtered, name)
 		}
 	}
 	registry, err := r.registry.Subset(filtered, nil)
 	if err != nil {
-		return nil, err
+		return Event{}, err
 	}
 	options := r.options
 	options.Skills = skills.NewManagerFromSnapshot(snapshot)
@@ -193,46 +223,45 @@ func (r *Runner) startFork(ctx context.Context, req Request) (*Task, error) {
 	options.Memory = nil
 	forkRunner := NewRunner(r.provider, forkSession, registry, r.executor, options)
 
-	r.mu.Lock()
-	if r.active {
-		r.mu.Unlock()
-		return nil, errors.New("an agent task is already active")
+	inner, err := forkRunner.Start(ctx, Request{Mode: req.Mode, Prompt: req.Prompt})
+	if err != nil {
+		return Event{}, err
 	}
-	r.active = true
-	r.mu.Unlock()
-	taskCtx, cancel := context.WithCancel(ctx)
-	events := make(chan Event, 64)
-	go func() {
-		defer close(events)
-		defer func() { r.mu.Lock(); r.active = false; r.mu.Unlock() }()
-		inner, err := forkRunner.Start(taskCtx, Request{Mode: req.Mode, Prompt: req.Prompt})
-		if err != nil {
-			events <- Event{Type: EventFailed, Phase: PhaseFinishing, Err: err}
-			return
+	var terminal Event
+	for event := range inner.Events {
+		if isTerminal(event.Type) {
+			terminal = event
 		}
-		var terminal Event
-		for event := range inner.Events {
-			if isTerminal(event.Type) {
-				terminal = event
-			}
+	}
+	if terminal.Summary != nil {
+		if err := r.session.RecordUsage(terminal.Summary.Usage); err != nil {
+			return Event{}, err
 		}
-		if terminal.Summary != nil {
-			if err := r.session.RecordUsage(terminal.Summary.Usage); err != nil {
-				events <- Event{Type: EventFailed, Phase: PhaseFinishing, Summary: terminal.Summary, Err: err}
-				return
-			}
+	}
+	if terminal.Type == EventCompleted {
+		terminal.Text = forkSummary(forkSession.DisplaySnapshot())
+	}
+	return terminal, nil
+}
+
+type forkSkillHost struct {
+	runner *Runner
+	mode   Mode
+}
+
+func (h forkSkillHost) ExecuteForkSkill(ctx context.Context, input skills.ForkSkillInput) (tools.Result, error) {
+	terminal, err := h.runner.executeFork(ctx, Request{Mode: h.mode, Prompt: input.Prompt, Skill: &SkillInvocation{Name: input.Name}})
+	if err != nil {
+		return tools.Result{}, err
+	}
+	if terminal.Type != EventCompleted {
+		message := "fork skill did not complete"
+		if terminal.Err != nil {
+			message = terminal.Err.Error()
 		}
-		if terminal.Type == EventCompleted {
-			summary := forkSummary(forkSession.DisplaySnapshot())
-			if err := r.session.CommitRound(&provider.Message{Role: provider.RoleUser, Blocks: []provider.ContentBlock{{Type: provider.BlockText, Text: skillInvocationLabel(req.Skill)}}}, provider.Message{Role: provider.RoleAssistant, Blocks: []provider.ContentBlock{{Type: provider.BlockText, Text: summary}}}, nil); err != nil {
-				events <- Event{Type: EventFailed, Phase: PhaseFinishing, Summary: terminal.Summary, Err: err}
-				return
-			}
-			terminal.Text = summary
-		}
-		events <- terminal
-	}()
-	return &Task{Events: events, Cancel: cancel}, nil
+		return tools.Failure(skills.RunToolName, tools.ErrorExecution, message, nil), nil
+	}
+	return tools.Success(skills.RunToolName, map[string]any{"name": input.Name, "summary": terminal.Text}), nil
 }
 
 func skillInvocationLabel(invocation *SkillInvocation) string {
@@ -508,7 +537,7 @@ func (r *Runner) run(ctx context.Context, mode Mode, prepared preparedRequest, e
 				terminal(Event{Type: EventFailed, Iteration: iterations, Phase: PhaseFinishing, Summary: summary, Err: runtimeErr})
 				return
 			}
-			visibleRegistry, runtimeErr = prepared.registry.Subset(runtime.AllowedTools, []string{skills.LoadToolName})
+			visibleRegistry, runtimeErr = prepared.registry.Subset(runtime.AllowedTools, []string{skills.LoadToolName, skills.RunToolName})
 			if runtimeErr != nil {
 				summary := &Summary{Reason: StopStreamError, Iterations: iterations - 1, Usage: total, Partial: hasPartial}
 				terminal(Event{Type: EventFailed, Iteration: iterations, Phase: PhaseFinishing, Summary: summary, Err: runtimeErr})
@@ -540,7 +569,7 @@ func (r *Runner) run(ctx context.Context, mode Mode, prepared preparedRequest, e
 			bundle.StableSystem = r.options.SystemPrompt
 		}
 		r.rememberSystemPrompt(bundle.StableSystem)
-		definitions := prompt.EnhanceDefinitions(prepared.registry.Definitions(), promptMode)
+		definitions := prompt.EnhanceDefinitions(visibleRegistry.Definitions(), promptMode)
 		var round roundResult
 		for {
 			roundCtx, cancelRound := context.WithCancel(ctx)
@@ -641,6 +670,7 @@ func (r *Runner) run(ctx context.Context, mode Mode, prepared preparedRequest, e
 		scheduler := NewScheduler(visibleRegistry, r.executor, r.options.Permissions, r.options.Confirmer)
 		scheduler.Hooks = r.options.Hooks
 		scheduleCtx := ctx
+		scheduleCtx = skills.WithForkSkillHost(scheduleCtx, forkSkillHost{runner: r, mode: mode})
 		if r.options.SubAgents != nil {
 			scheduleCtx = tools.WithSubAgentHost(scheduleCtx, runnerSubAgentHost{runner: r, runtime: r.options.SubAgents})
 			if isForkSource(ctx) {

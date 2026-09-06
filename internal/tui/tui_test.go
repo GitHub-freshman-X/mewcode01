@@ -17,6 +17,7 @@ import (
 	"github.com/GitHub-freshman-X/mewcode01/internal/provider"
 	"github.com/GitHub-freshman-X/mewcode01/internal/subagent"
 	"github.com/GitHub-freshman-X/mewcode01/internal/tools"
+	"github.com/GitHub-freshman-X/mewcode01/internal/worktree"
 )
 
 type tuiScriptedProvider struct{}
@@ -38,17 +39,23 @@ func (tuiScriptedProvider) Stream(_ context.Context, _ provider.ChatRequest) (<-
 }
 
 func TestCommandPlanConsumesAgentEvents(t *testing.T) {
-	registry, err := tools.NewDefaultRegistry(t.TempDir())
+	workspace := t.TempDir()
+	registry, err := tools.NewDefaultRegistry(workspace)
 	if err != nil {
 		t.Fatal(err)
 	}
 	session := conversation.NewSession()
-	runner := agent.NewRunner(tuiScriptedProvider{}, session, registry, tools.NewExecutor(time.Second), agent.Options{})
+	runtime := agent.NewSubAgentRuntime(nil, subagent.NewTaskManager())
+	runtime.Worktrees = worktree.NewManager(workspace)
+	runner := agent.NewRunner(tuiScriptedProvider{}, session, registry, tools.NewExecutor(time.Second), agent.Options{Workspace: workspace, SubAgents: runtime})
 	m := NewModel(runner, session)
 	m.textarea.SetValue("/plan write a plan")
 	_, cmd := m.Update(tea.KeyPressMsg{Text: keySubmit})
 	if cmd == nil {
 		t.Fatal("/plan command did not schedule agent event consumption")
+	}
+	if view := stripANSI(m.View().Content); strings.Contains(view, "cannot change worktree while an agent task is active") {
+		t.Fatalf("/plan reported a worktree sync error: %q", view)
 	}
 	for cmd != nil && m.task != nil {
 		message := cmd()
