@@ -63,6 +63,7 @@ type Options struct {
 	Hooks           *hooks.Engine
 	SubAgents       *SubAgentRuntime
 	SystemPrompt    string
+	ToolSearch      provider.ToolSearchConfig
 }
 
 type PermissionBridge interface {

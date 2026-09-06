@@ -167,7 +167,7 @@ func (r *Registry) Definitions() []provider.ToolDefinition {
 	defs := make([]provider.ToolDefinition, 0, len(tools))
 	for _, tool := range tools {
 		meta := tool.Metadata()
-		defs = append(defs, provider.ToolDefinition{Name: meta.Name, Description: meta.Description, Schema: map[string]any(meta.Schema)})
+		defs = append(defs, provider.ToolDefinition{Name: meta.Name, Description: meta.Description, Schema: map[string]any(meta.Schema), MCPServer: meta.MCPServer, RemoteName: meta.RemoteName})
 	}
 	return defs
 }

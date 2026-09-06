@@ -243,6 +243,11 @@ func launch(configPath string, options *launchOptions, stdout, stderr io.Writer)
 			Caller: providerMemoryCaller{provider: p}, Sessions: memorySessionLister{store: sessionStore}, Logger: logger,
 		})
 	}
+	toolSearch, err := provider.ResolveToolSearch(string(cfg.Protocol), cfg.Model, cfg.BaseURL, provider.ToolSearchMode(cfg.ToolSearch))
+	if err != nil {
+		fmt.Fprintln(stderr, "config:", err)
+		return 1
+	}
 	runner := agent.NewRunner(p, session, registry, executor, agent.Options{
 		MaxIterations:   cfg.Agent.MaxIterations,
 		MaxTokens:       cfg.MaxTokens,
@@ -261,6 +266,7 @@ func launch(configPath string, options *launchOptions, stdout, stderr io.Writer)
 		SubAgents:       subAgentRuntime,
 		OptionalModules: prompt.OptionalModules{CustomInstructions: nonEmpty(customInstructions), LongTermMemory: memoryIndexes},
 		Memory:          memoryService,
+		ToolSearch:      toolSearch,
 	})
 	hookEngine.SetAgentRunner(hookSubAgentRunner{})
 	if options != nil && options.nonInteractive != nil {

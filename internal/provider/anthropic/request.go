@@ -48,9 +48,11 @@ type cacheControl struct {
 	Type string `json:"type"`
 }
 type requestTool struct {
-	Name         string         `json:"name"`
-	Description  string         `json:"description"`
-	InputSchema  map[string]any `json:"input_schema"`
+	Type         string         `json:"type,omitempty"`
+	Name         string         `json:"name,omitempty"`
+	Description  string         `json:"description,omitempty"`
+	InputSchema  map[string]any `json:"input_schema,omitempty"`
+	DeferLoading bool           `json:"defer_loading,omitempty"`
 	CacheControl *cacheControl  `json:"cache_control,omitempty"`
 }
 
@@ -71,11 +73,14 @@ func buildRequest(model string, req provider.ChatRequest) (requestBody, error) {
 		}
 	}
 	for i, tool := range req.Tools {
-		requestTool := requestTool{Name: tool.Name, Description: tool.Description, InputSchema: tool.Schema}
+		requestTool := requestTool{Name: tool.Name, Description: tool.Description, InputSchema: tool.Schema, DeferLoading: req.ToolSearch.Enabled && tool.MCPServer != ""}
 		if i == lastCacheableTool {
 			requestTool.CacheControl = &cacheControl{Type: "ephemeral"}
 		}
 		body.Tools = append(body.Tools, requestTool)
+	}
+	if req.ToolSearch.Enabled {
+		body.Tools = append(body.Tools, requestTool{Type: "tool_search_tool_bm25_20251119", Name: "tool_search_tool_bm25"})
 	}
 	if req.Prompt.StableSystem != "" {
 		block := systemBlock{Type: "text", Text: req.Prompt.StableSystem}

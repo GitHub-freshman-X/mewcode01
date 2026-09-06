@@ -29,11 +29,20 @@ type Config struct {
 	APIKey      string                     `yaml:"api_key"`
 	MaxTokens   int                        `yaml:"max_tokens,omitempty"`
 	Thinking    ThinkingConfig             `yaml:"thinking,omitempty"`
+	ToolSearch  ToolSearchMode             `yaml:"tool_search,omitempty"`
 	Agent       AgentConfig                `yaml:"agent,omitempty"`
 	Permissions PermissionConfig           `yaml:"permissions,omitempty"`
 	MCPServers  map[string]MCPServerConfig `yaml:"mcp_servers,omitempty"`
 	Worktree    WorktreeConfig             `yaml:"worktree,omitempty"`
 }
+
+type ToolSearchMode string
+
+const (
+	ToolSearchAuto     ToolSearchMode = "auto"
+	ToolSearchEnabled  ToolSearchMode = "enabled"
+	ToolSearchDisabled ToolSearchMode = "disabled"
+)
 
 type MCPTransportType string
 
@@ -102,6 +111,9 @@ func (c *Config) applyDefaults() {
 	c.Agent.Context.applyDefaults()
 	if c.Permissions.Mode == "" {
 		c.Permissions.Mode = PermissionModeDefault
+	}
+	if c.ToolSearch == "" {
+		c.ToolSearch = ToolSearchAuto
 	}
 }
 

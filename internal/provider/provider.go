@@ -8,12 +8,13 @@ type ThinkingOptions struct {
 }
 
 type ChatRequest struct {
-	Model     string
-	Prompt    PromptBundle
-	Messages  []Message
-	MaxTokens int
-	Thinking  ThinkingOptions
-	Tools     []ToolDefinition
+	Model      string
+	Prompt     PromptBundle
+	Messages   []Message
+	MaxTokens  int
+	Thinking   ThinkingOptions
+	Tools      []ToolDefinition
+	ToolSearch ToolSearchConfig
 }
 
 type Provider interface {
@@ -25,4 +26,10 @@ type ToolDefinition struct {
 	Description string
 	Schema      map[string]any
 	Cacheable   bool
+	MCPServer   string
+	RemoteName  string
+}
+
+type ToolSearchConfig struct {
+	Enabled bool
 }

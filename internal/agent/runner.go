@@ -568,6 +568,9 @@ func (r *Runner) run(ctx context.Context, mode Mode, prepared preparedRequest, e
 		if r.options.SystemPrompt != "" {
 			bundle.StableSystem = r.options.SystemPrompt
 		}
+		if r.options.ToolSearch.Enabled {
+			bundle.StableSystem += "\n\n当完成任务需要当前未见的 MCP 能力时，先使用 Tool Search 发现相关工具；不要因为当前工具列表未展示具体工具而放弃。"
+		}
 		r.rememberSystemPrompt(bundle.StableSystem)
 		definitions := prompt.EnhanceDefinitions(visibleRegistry.Definitions(), promptMode)
 		var round roundResult
@@ -579,7 +582,8 @@ func (r *Runner) run(ctx context.Context, mode Mode, prepared preparedRequest, e
 			stream, done := r.provider.Stream(roundCtx, provider.ChatRequest{
 				Model: model, Prompt: bundle,
 				Messages: requestMessages, MaxTokens: r.options.MaxTokens, Thinking: r.options.Thinking,
-				Tools: definitions,
+				Tools:      definitions,
+				ToolSearch: r.options.ToolSearch,
 			})
 			if !emit(Event{Type: EventProgress, Iteration: iterations, Phase: PhaseStreaming}) {
 				cancelRound()

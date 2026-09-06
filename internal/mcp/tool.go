@@ -20,7 +20,7 @@ func NewRemoteToolAdapter(server string, remote RemoteTool, client *Client, logg
 	return &RemoteToolAdapter{server: server, remote: remote, client: client, logger: normalizedLogger(loggers)}
 }
 func (t *RemoteToolAdapter) Metadata() tools.Metadata {
-	return tools.Metadata{Name: t.server + "__" + t.remote.Name, Description: t.remote.Description, Schema: t.remote.InputSchema, Safety: tools.SafetySideEffect, Permission: tools.PermissionMetadata{Target: tools.PermissionTargetNone}}
+	return tools.Metadata{Name: t.server + "__" + t.remote.Name, Description: t.remote.Description, Schema: t.remote.InputSchema, Safety: tools.SafetySideEffect, Permission: tools.PermissionMetadata{Target: tools.PermissionTargetNone}, MCPServer: t.server, RemoteName: t.remote.Name}
 }
 func (t *RemoteToolAdapter) Execute(ctx context.Context, input json.RawMessage) tools.Result {
 	meta := t.Metadata()

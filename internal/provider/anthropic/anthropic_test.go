@@ -130,3 +130,16 @@ func TestParseAnthropicCacheUsage(t *testing.T) {
 		t.Fatalf("usage=%+v", event.Usage)
 	}
 }
+
+func TestBuildRequestDefersOnlyMCPTools(t *testing.T) {
+	body, err := buildRequest("claude", provider.ChatRequest{Tools: []provider.ToolDefinition{
+		{Name: "read_file", Description: "Read", Schema: map[string]any{"type": "object"}},
+		{Name: "github__issue", Description: "Issue", Schema: map[string]any{"type": "object"}, MCPServer: "github"},
+	}, ToolSearch: provider.ToolSearchConfig{Enabled: true}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(body.Tools) != 3 || body.Tools[0].DeferLoading || !body.Tools[1].DeferLoading || body.Tools[2].Type != "tool_search_tool_bm25_20251119" {
+		t.Fatalf("tools=%+v", body.Tools)
+	}
+}

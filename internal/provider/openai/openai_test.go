@@ -3,6 +3,7 @@ package openai
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
@@ -164,5 +165,32 @@ func TestParseCachedTokensUsage(t *testing.T) {
 	}
 	if event.Usage.InputTokens != 9 || event.Usage.OutputTokens != 2 || event.Usage.CacheReadInputTokens != 6 || event.Usage.CacheCreationInputTokens != 1 || event.Usage.CacheTokensIncludedInInput != 7 {
 		t.Fatalf("usage=%+v", event.Usage)
+	}
+}
+
+func TestBuildRequestUsesNamespacesForDeferredMCPTools(t *testing.T) {
+	defs := []provider.ToolDefinition{{Name: "read_file", Description: "Read", Schema: map[string]any{"type": "object"}}}
+	for i := 0; i < 11; i++ {
+		defs = append(defs, provider.ToolDefinition{Name: fmt.Sprintf("github__tool_%02d", i), Description: "GitHub", Schema: map[string]any{"type": "object"}, MCPServer: "github"})
+	}
+	body, err := buildRequest("gpt-5.4", provider.ChatRequest{Tools: defs, ToolSearch: provider.ToolSearchConfig{Enabled: true}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(body.Tools) != 4 || body.Tools[0].Name != "read_file" || body.Tools[1].Type != "namespace" || len(body.Tools[1].Tools) != 10 || body.Tools[2].Name != "mcp_github_2" || len(body.Tools[2].Tools) != 1 || body.Tools[3].Type != "tool_search" || body.Tools[3].Execution != "server" {
+		t.Fatalf("tools=%+v", body.Tools)
+	}
+	if !body.Tools[1].Tools[0].DeferLoading || body.Tools[1].Tools[0].Name != "github__tool_00" {
+		t.Fatalf("namespace member=%+v", body.Tools[1].Tools[0])
+	}
+}
+
+func TestBuildRequestFallbackKeepsFlatTools(t *testing.T) {
+	body, err := buildRequest("gpt-4.1", provider.ChatRequest{Tools: []provider.ToolDefinition{{Name: "github__issue", Description: "Issue", Schema: map[string]any{"type": "object"}, MCPServer: "github"}}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(body.Tools) != 1 || body.Tools[0].Type != "function" || body.Tools[0].DeferLoading || len(body.Tools[0].Tools) != 0 {
+		t.Fatalf("tools=%+v", body.Tools)
 	}
 }

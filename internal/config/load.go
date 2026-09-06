@@ -34,6 +34,7 @@ func Load(path string) (Config, error) {
 		APIKey      string                     `yaml:"api_key"`
 		MaxTokens   *int                       `yaml:"max_tokens,omitempty"`
 		Thinking    ThinkingConfig             `yaml:"thinking,omitempty"`
+		ToolSearch  ToolSearchMode             `yaml:"tool_search,omitempty"`
 		Agent       rawAgentConfig             `yaml:"agent,omitempty"`
 		Permissions PermissionConfig           `yaml:"permissions,omitempty"`
 		MCPServers  map[string]MCPServerConfig `yaml:"mcp_servers,omitempty"`
@@ -44,7 +45,7 @@ func Load(path string) (Config, error) {
 	if err := loader.Load(&raw); err != nil {
 		return Config{}, fmt.Errorf("config: parse YAML: %w", err)
 	}
-	cfg := Config{Protocol: raw.Protocol, Model: raw.Model, BaseURL: raw.BaseURL, APIKey: raw.APIKey, Thinking: raw.Thinking, Agent: AgentConfig{MaxIterations: raw.Agent.MaxIterations, EnableVerificationAgent: raw.Agent.EnableVerificationAgent}, Permissions: raw.Permissions, MCPServers: raw.MCPServers, Worktree: raw.Worktree, MaxTokens: DefaultMaxTokens}
+	cfg := Config{Protocol: raw.Protocol, Model: raw.Model, BaseURL: raw.BaseURL, APIKey: raw.APIKey, Thinking: raw.Thinking, ToolSearch: raw.ToolSearch, Agent: AgentConfig{MaxIterations: raw.Agent.MaxIterations, EnableVerificationAgent: raw.Agent.EnableVerificationAgent}, Permissions: raw.Permissions, MCPServers: raw.MCPServers, Worktree: raw.Worktree, MaxTokens: DefaultMaxTokens}
 	cfg.applyDefaults()
 	raw.Agent.Context.apply(&cfg.Agent.Context)
 	if raw.MaxTokens != nil {

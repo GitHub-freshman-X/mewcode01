@@ -76,6 +76,7 @@ api_key: replace-with-your-api-key
 |---|---|
 | max_tokens | 单次模型回复上限，默认 4096。 |
 | thinking.enabled / thinking.budget_tokens | 仅 Anthropic 可用；预算至少 1024 且小于 max_tokens。 |
+| tool_search | `auto`（默认）、`enabled` 或 `disabled`；自动延迟 MCP 工具的模型上下文加载。 |
 | agent.max_iterations | 单个 Agent 任务的最大循环次数，默认 20。 |
 | agent.enable_verification_agent | 是否启用内置 Verification 子 Agent，默认 false。 |
 | agent.context | 上下文窗口、摘要预留、安全余量及工具结果预算。 |
@@ -84,6 +85,8 @@ api_key: replace-with-your-api-key
 | worktree | 本地文件复制、依赖目录链接及临时 Worktree 保留时间。 |
 
 主配置的 mcp_servers 只取自本次选定的主配置文件；项目级配置不会追加它。发现后的 MCP 工具名固定为 <server>__<tool>，默认按有副作用工具处理，仍须通过权限检查。
+
+`tool_search: auto` 仅在官方支持的 Anthropic 或 OpenAI Responses 模型上启用服务端 Tool Search。内置工具保持立即可用；MCP 工具可按需加载到模型上下文，但最终调用仍由本地 MCP Client 发起。未知模型、第三方 OpenAI 兼容网关和不支持模型会自动回退为完整工具定义；`enabled` 则在本地拒绝不支持的组合。
 
 MewCode 不需要为 MCP 协议版本新增配置：连接每个 Server 时会先尝试 `2026-07-28` 的无状态 `server/discover` 生命周期；Server 不支持该方法或探测超时时，自动降级到既有 `initialize` 握手。认证、网络、TLS、限流和服务端错误不会触发降级。新版与旧版都继续支持 `stdio` 和 Streamable HTTP；本项目不支持已弃用的独立 HTTP+SSE transport。
 

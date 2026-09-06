@@ -16,6 +16,8 @@ type Metadata struct {
 	Schema      Schema
 	Safety      Safety
 	Permission  PermissionMetadata
+	MCPServer   string
+	RemoteName  string
 }
 
 type Safety string
