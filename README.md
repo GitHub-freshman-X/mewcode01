@@ -64,10 +64,19 @@ go build -o mewcode.exe ./cmd/mewcode
 将 [配置模板](.mewcode/config.example.yaml) 复制到该位置或任意 --config 路径。最小配置如下：
 
 ~~~yaml
-protocol: openai # 或 anthropic
-model: your-model-name
-base_url: https://api.example.com
-api_key: replace-with-your-api-key
+# Anthropic：只填写官网根地址，程序自动请求 /v1/messages。
+protocol: anthropic
+model: claude-sonnet-4-6
+base_url: https://api.anthropic.com
+api_key: replace-with-your-anthropic-key
+~~~
+
+~~~yaml
+# OpenAI Responses：只填写官网根地址，程序自动请求 /v1/responses。
+protocol: openai
+model: gpt-5.4-mini
+base_url: https://api.openai.com
+api_key: replace-with-your-openai-key
 ~~~
 
 配置采用严格校验：未知字段、缺失必填字段或无效取值会在模型请求前失败。完整字段和默认值以配置模板为准，常用配置包括：
@@ -83,6 +92,8 @@ api_key: replace-with-your-api-key
 | permissions.mode | 规则未命中时的策略：strict、default（默认）或 relaxed。 |
 | mcp_servers | MCP 服务定义；支持 stdio 与 http，配置值可引用环境变量。 |
 | worktree | 本地文件复制、依赖目录链接及临时 Worktree 保留时间。 |
+
+`base_url` 只填写 Provider 的 API 根地址：Anthropic 使用 `https://api.anthropic.com`，程序追加 `/v1/messages`；OpenAI Responses 使用 `https://api.openai.com`，程序追加 `/v1/responses`。使用兼容网关时，提供其 API 根地址，不要在配置中加入 `/v1`。
 
 主配置的 mcp_servers 只取自本次选定的主配置文件；项目级配置不会追加它。发现后的 MCP 工具名固定为 <server>__<tool>，默认按有副作用工具处理，仍须通过权限检查。
 

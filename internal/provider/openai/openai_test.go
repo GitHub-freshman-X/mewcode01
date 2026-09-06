@@ -20,7 +20,7 @@ import (
 func TestRequestStream(t *testing.T) {
 	var got requestBody
 	s := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.URL.Path != "/proxy/responses" || r.Header.Get("Authorization") != "Bearer canary" {
+		if r.URL.Path != "/proxy/v1/responses" || r.Header.Get("Authorization") != "Bearer canary" {
 			t.Errorf("request path/headers wrong")
 		}
 		if err := json.NewDecoder(r.Body).Decode(&got); err != nil {

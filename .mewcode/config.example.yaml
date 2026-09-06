@@ -78,8 +78,8 @@ mcp_servers:
     headers:
       Authorization: Bearer ${MCP_ISSUES_TOKEN}
 
-# For OpenAI Responses API, remove the thinking section and use values like:
+# OpenAI 与 Anthropic 均只填写官网根地址；程序分别追加 /v1/responses 和 /v1/messages。
 # protocol: openai
 # model: gpt-4.1-mini
-# base_url: https://api.openai-proxy.org/v1
+# base_url: https://api.openai.com
 # api_key: replace-with-your-openai-key

@@ -114,7 +114,7 @@ mcp_servers:
 # openai-supported.yaml
 protocol: openai
 model: gpt-5.4-mini
-base_url: https://api.openai.com/v1
+base_url: https://api.openai.com
 api_key: <OPENAI_API_KEY>
 max_tokens: 1024
 tool_search: auto
@@ -130,7 +130,7 @@ mcp_servers:
 # openai-unsupported.yaml
 protocol: openai
 model: gpt-4.1
-base_url: https://api.openai.com/v1
+base_url: https://api.openai.com
 api_key: <OPENAI_API_KEY>
 max_tokens: 1024
 tool_search: auto

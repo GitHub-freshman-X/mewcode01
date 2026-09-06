@@ -31,7 +31,7 @@ type Client struct {
 
 func New(options Options) provider.Provider {
 	u := *options.BaseURL
-	u.Path = path.Join(u.Path, "/responses")
+	u.Path = path.Join(u.Path, "/v1/responses")
 	client := options.HTTPClient
 	if client == nil {
 		client = http.DefaultClient
