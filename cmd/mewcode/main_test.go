@@ -32,10 +32,20 @@ func (stubProvider) Stream(_ context.Context, _ provider.ChatRequest) (<-chan pr
 }
 
 func TestRunConfigOverride(t *testing.T) {
-	origDefault, origLoad, origNew, origTUI, origPaths := defaultConfigPath, loadConfig, newProvider, runTUI, permissionFilePaths
+	origDefault, origLoad, origNew, origTUI, origPaths, origUserDir := defaultConfigPath, loadConfig, newProvider, runTUI, permissionFilePaths, userConfigDir
 	defer func() {
-		defaultConfigPath, loadConfig, newProvider, runTUI, permissionFilePaths = origDefault, origLoad, origNew, origTUI, origPaths
+		defaultConfigPath, loadConfig, newProvider, runTUI, permissionFilePaths, userConfigDir = origDefault, origLoad, origNew, origTUI, origPaths, origUserDir
 	}()
+	root := t.TempDir()
+	userRoot := t.TempDir()
+	origWD, err := os.Getwd()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chdir(root); err != nil {
+		t.Fatal(err)
+	}
+	defer os.Chdir(origWD)
 	defaultConfigPath = func() (string, error) { return "default", nil }
 	var loaded string
 	loadConfig = func(path string) (config.Config, error) {
@@ -46,6 +56,7 @@ func TestRunConfigOverride(t *testing.T) {
 		return stubProvider{}, nil
 	}
 	permissionFilePaths = func(string) (permissions.FilePaths, error) { return permissions.FilePaths{}, nil }
+	userConfigDir = func() (string, error) { return userRoot, nil }
 	runTUI = func(*agent.Runner, *conversation.Session, *tui.PermissionBridge) error { return nil }
 	if code := run([]string{"--config", "custom.yaml"}, &bytes.Buffer{}); code != 0 || loaded != "custom.yaml" {
 		t.Fatalf("code=%d loaded=%s", code, loaded)
@@ -185,8 +196,20 @@ func TestAgentContextConfig(t *testing.T) {
 }
 
 func TestRunPermissionRulesMissingAllowed(t *testing.T) {
-	origLoad, origNew, origTUI, origPaths := loadConfig, newProvider, runTUI, permissionFilePaths
-	defer func() { loadConfig, newProvider, runTUI, permissionFilePaths = origLoad, origNew, origTUI, origPaths }()
+	origLoad, origNew, origTUI, origPaths, origUserDir := loadConfig, newProvider, runTUI, permissionFilePaths, userConfigDir
+	defer func() {
+		loadConfig, newProvider, runTUI, permissionFilePaths, userConfigDir = origLoad, origNew, origTUI, origPaths, origUserDir
+	}()
+	root := t.TempDir()
+	userRoot := t.TempDir()
+	origWD, err := os.Getwd()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chdir(root); err != nil {
+		t.Fatal(err)
+	}
+	defer os.Chdir(origWD)
 	dir := t.TempDir()
 	permissionFilePaths = func(string) (permissions.FilePaths, error) {
 		return permissions.FilePaths{
@@ -198,6 +221,7 @@ func TestRunPermissionRulesMissingAllowed(t *testing.T) {
 	newProvider = func(config.Config, *http.Client, *logging.Logger) (provider.Provider, error) {
 		return stubProvider{}, nil
 	}
+	userConfigDir = func() (string, error) { return userRoot, nil }
 	called := false
 	runTUI = func(*agent.Runner, *conversation.Session, *tui.PermissionBridge) error {
 		called = true
@@ -241,8 +265,20 @@ func TestRunIgnoresProjectMCPConfig(t *testing.T) {
 }
 
 func TestRunPermissionInvalidRuleFails(t *testing.T) {
-	origLoad, origNew, origTUI, origPaths := loadConfig, newProvider, runTUI, permissionFilePaths
-	defer func() { loadConfig, newProvider, runTUI, permissionFilePaths = origLoad, origNew, origTUI, origPaths }()
+	origLoad, origNew, origTUI, origPaths, origUserDir := loadConfig, newProvider, runTUI, permissionFilePaths, userConfigDir
+	defer func() {
+		loadConfig, newProvider, runTUI, permissionFilePaths, userConfigDir = origLoad, origNew, origTUI, origPaths, origUserDir
+	}()
+	root := t.TempDir()
+	userRoot := t.TempDir()
+	origWD, err := os.Getwd()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chdir(root); err != nil {
+		t.Fatal(err)
+	}
+	defer os.Chdir(origWD)
 	dir := t.TempDir()
 	bad := filepath.Join(dir, "permissions.yaml")
 	if err := os.WriteFile(bad, []byte("rules:\n  run_command: allow\n"), 0o644); err != nil {
@@ -255,6 +291,7 @@ func TestRunPermissionInvalidRuleFails(t *testing.T) {
 	newProvider = func(config.Config, *http.Client, *logging.Logger) (provider.Provider, error) {
 		return stubProvider{}, nil
 	}
+	userConfigDir = func() (string, error) { return userRoot, nil }
 	runTUI = func(*agent.Runner, *conversation.Session, *tui.PermissionBridge) error { return nil }
 	var stderr bytes.Buffer
 	if code := run([]string{"--config", "x"}, &stderr); code == 0 || !strings.Contains(stderr.String(), "invalid rule") {
@@ -265,6 +302,15 @@ func TestRunPermissionInvalidRuleFails(t *testing.T) {
 func TestRunSafeFailure(t *testing.T) {
 	orig := loadConfig
 	defer func() { loadConfig = orig }()
+	root := t.TempDir()
+	origWD, err := os.Getwd()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chdir(root); err != nil {
+		t.Fatal(err)
+	}
+	defer os.Chdir(origWD)
 	loadConfig = func(string) (config.Config, error) {
 		return config.Config{}, errors.New("config: invalid field api_key")
 	}
