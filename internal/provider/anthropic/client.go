@@ -85,6 +85,7 @@ func (c *Client) Stream(ctx context.Context, input provider.ChatRequest) (<-chan
 			return
 		}
 		decoder, completed := sse.NewDecoder(resp.Body, sse.DefaultMaxEventBytes), false
+		parser := newStreamParser()
 		var usage provider.Usage
 		hasUsage := false
 		for {
@@ -101,7 +102,7 @@ func (c *Client) Stream(ctx context.Context, input provider.ChatRequest) (<-chan
 				}
 				return
 			}
-			event, emit, err := parseEvent(frame.Data)
+			event, emit, err := parser.parseEvent(frame.Data)
 			if err != nil {
 				done <- provider.Sanitize(err, c.apiKey)
 				return

@@ -338,6 +338,39 @@ func TestRunnerToolLoop(t *testing.T) {
 	}
 }
 
+func TestRunnerPreservesProviderHistoryAcrossToolRound(t *testing.T) {
+	serverUse := []byte(`{"type":"server_tool_use","id":"srvtoolu_1","name":"tool_search_tool_bm25","input":{"query":"fixture"}}`)
+	searchResult := []byte(`{"type":"tool_search_tool_result","tool_use_id":"srvtoolu_1","content":{"type":"tool_search_tool_search_result","tool_references":[{"type":"tool_reference","tool_name":"read_file"}]}}`)
+	p := &scriptedProvider{rounds: []scriptedRound{
+		{events: []provider.StreamEvent{
+			{Type: provider.EventStarted},
+			{Type: provider.EventProviderHistory, BlockIndex: 0, ProviderHistory: &provider.ProviderHistory{Provider: "anthropic", Payload: serverUse}},
+			{Type: provider.EventProviderHistory, BlockIndex: 1, ProviderHistory: &provider.ProviderHistory{Provider: "anthropic", Payload: searchResult}},
+			{Type: provider.EventToolCallStart, BlockIndex: 2, ToolCall: &provider.ToolCallDelta{ID: "toolu_1", Name: "read_file", Arguments: `{"path":"missing"}`}},
+			{Type: provider.EventCompleted},
+		}},
+		textRound("finished", provider.Usage{}),
+	}}
+	runner, _ := testRunner(t, p, Options{})
+	task, err := runner.Start(context.Background(), Request{Mode: ModeAct, Prompt: "work"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	drainTask(t, task)
+	if len(p.requests) != 2 {
+		t.Fatalf("requests=%d", len(p.requests))
+	}
+	var assistant provider.Message
+	for _, message := range p.requests[1].Messages {
+		if message.Role == provider.RoleAssistant {
+			assistant = message
+		}
+	}
+	if len(assistant.Blocks) != 3 || assistant.Blocks[0].Type != provider.BlockProviderHistory || assistant.Blocks[1].Type != provider.BlockProviderHistory || assistant.Blocks[2].Type != provider.BlockToolCall || string(assistant.Blocks[0].ProviderHistory.Payload) != string(serverUse) || string(assistant.Blocks[1].ProviderHistory.Payload) != string(searchResult) {
+		t.Fatalf("assistant=%+v", assistant)
+	}
+}
+
 func TestRunnerPermissionDeniedContinues(t *testing.T) {
 	p := &scriptedProvider{rounds: []scriptedRound{
 		toolRound(provider.ToolCall{ID: "w1", Name: "write_file", Arguments: []byte(`{"path":"x.txt","content":"no"}`)}),

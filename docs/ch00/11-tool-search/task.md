@@ -8,6 +8,7 @@
 | 修改 | `internal/tools/*`、`internal/mcp/tool.go` | MCP 来源与分组元数据。 |
 | 修改 | `internal/provider/*` | 中立定义、能力判定、namespace 调用信息。 |
 | 修改 | `internal/provider/anthropic/*` | Anthropic Tool Search 请求。 |
+| 修改 | `internal/conversation/*` | 服务端搜索历史的校验、持久化和恢复。 |
 | 修改 | `internal/provider/openai/*` | OpenAI namespace、Tool Search 与流式解析。 |
 | 修改 | `internal/agent/*` | 请求策略、提示词、执行映射。 |
 | 修改 | `.mewcode/config.example.yaml`、`README.md` | 配置与用户说明。 |
@@ -55,3 +56,19 @@
 3. 执行格式化、目标包测试、全量测试、构建和 diff 检查。
 
 **验证：** `go test ./...`、`go build ./cmd/mewcode`、`git diff --check`。
+
+## T6：Anthropic 服务端搜索历史回传
+
+**文件：** `internal/provider/message.go`、`internal/provider/event.go`、`internal/provider/anthropic/{stream,request}.go`、`internal/agent/collector.go`、`internal/conversation/*` 及相应测试。
+
+**依赖：** T3、T4。
+
+**步骤：**
+
+1. 为 Provider 服务端历史块定义中立内容和流事件，并保证克隆不共享原始 JSON。
+2. 解析 Anthropic `server_tool_use` 与 `tool_search_tool_result`，保留完整载荷但不产生本地工具调用。
+3. 扩展 Agent 收集、轮次校验、会话日志/恢复及 Anthropic 请求编码，使两种块在下一请求中按原顺序回传。
+4. 添加受控 SSE + Agent Loop 测试，覆盖服务端搜索、普通 `tool_use`、本地 MCP 结果和后续请求；断言没有对 `srvtoolu_...` 执行本地调度。
+5. 回填 Bug 记录和本章 Checklist。
+
+**验证：** `go test ./internal/provider/anthropic ./internal/agent ./internal/conversation -count=1`，随后运行 `go test ./...`。

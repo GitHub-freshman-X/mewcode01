@@ -29,17 +29,27 @@ type requestMessage struct {
 	Content []requestBlock `json:"content"`
 }
 type requestBlock struct {
-	Type      string         `json:"type"`
-	Text      string         `json:"text,omitempty"`
-	Thinking  string         `json:"thinking,omitempty"`
-	Signature string         `json:"signature,omitempty"`
-	ID        string         `json:"id,omitempty"`
-	Name      string         `json:"name,omitempty"`
-	Input     map[string]any `json:"input,omitempty"`
-	ToolUseID string         `json:"tool_use_id,omitempty"`
-	Content   string         `json:"content,omitempty"`
-	IsError   bool           `json:"is_error,omitempty"`
+	Type      string          `json:"type"`
+	Text      string          `json:"text,omitempty"`
+	Thinking  string          `json:"thinking,omitempty"`
+	Signature string          `json:"signature,omitempty"`
+	ID        string          `json:"id,omitempty"`
+	Name      string          `json:"name,omitempty"`
+	Input     map[string]any  `json:"input,omitempty"`
+	ToolUseID string          `json:"tool_use_id,omitempty"`
+	Content   string          `json:"content,omitempty"`
+	IsError   bool            `json:"is_error,omitempty"`
+	Raw       json.RawMessage `json:"-"`
 }
+
+func (b requestBlock) MarshalJSON() ([]byte, error) {
+	if len(b.Raw) > 0 {
+		return b.Raw, nil
+	}
+	type plain requestBlock
+	return json.Marshal(plain(b))
+}
+
 type thinkingConfig struct {
 	Type         string `json:"type"`
 	BudgetTokens int    `json:"budget_tokens"`
@@ -128,6 +138,11 @@ func buildRequest(model string, req provider.ChatRequest) (requestBody, error) {
 					return body, requestErr("user tool result block is invalid", nil)
 				}
 				out.Content = append(out.Content, requestBlock{Type: "tool_result", ToolUseID: block.ToolResult.CallID, Content: block.ToolResult.Content, IsError: block.ToolResult.IsError})
+			case provider.BlockProviderHistory:
+				if message.Role != provider.RoleAssistant || block.ProviderHistory == nil || block.ProviderHistory.Provider != "anthropic" || !json.Valid(block.ProviderHistory.Payload) {
+					return body, requestErr("Anthropic provider history block is invalid", nil)
+				}
+				out.Content = append(out.Content, requestBlock{Raw: append(json.RawMessage(nil), block.ProviderHistory.Payload...)})
 			default:
 				return body, requestErr(fmt.Sprintf("unsupported content block %q", block.Type), nil)
 			}

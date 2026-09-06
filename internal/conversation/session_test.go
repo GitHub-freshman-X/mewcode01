@@ -60,6 +60,27 @@ func TestJSONLJournalEncodesProviderNeutralRound(t *testing.T) {
 	}
 }
 
+func TestJSONLJournalPreservesProviderHistory(t *testing.T) {
+	var output bytes.Buffer
+	journal := NewJSONLJournal(&output)
+	payload := []byte(`{"type":"server_tool_use","id":"srvtoolu_1"}`)
+	message := provider.Message{Role: provider.RoleAssistant, Blocks: []provider.ContentBlock{{Type: provider.BlockProviderHistory, ProviderHistory: &provider.ProviderHistory{Provider: "anthropic", Payload: payload}}, {Type: provider.BlockToolCall, ToolCall: &provider.ToolCall{ID: "toolu_1", Name: "read_file", Arguments: []byte(`{}`)}}}}
+	if err := journal.Append([]provider.Message{message}, JournalPurposeHistory); err != nil {
+		t.Fatal(err)
+	}
+	var record JournalRecord
+	if err := json.Unmarshal(output.Bytes(), &record); err != nil {
+		t.Fatal(err)
+	}
+	if len(record.ProviderHistory) != 1 || record.ProviderHistory[0].Provider != "anthropic" || string(record.ProviderHistory[0].Payload) != string(payload) || record.ProviderHistory[0].Position != 0 {
+		t.Fatalf("record=%+v", record)
+	}
+	restored := recordMessage(record)
+	if len(restored.Blocks) != 2 || restored.Blocks[0].Type != provider.BlockProviderHistory || string(restored.Blocks[0].ProviderHistory.Payload) != string(payload) || restored.Blocks[1].Type != provider.BlockToolCall {
+		t.Fatalf("restored=%+v", restored)
+	}
+}
+
 func TestSessionRecordUsagePersistsCacheTokenCounts(t *testing.T) {
 	var output bytes.Buffer
 	journal := NewJSONLJournal(&output)

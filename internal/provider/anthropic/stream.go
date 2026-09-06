@@ -8,15 +8,10 @@ import (
 )
 
 type streamEnvelope struct {
-	Type         string `json:"type"`
-	Index        int    `json:"index"`
-	ContentBlock struct {
-		Type  string          `json:"type"`
-		ID    string          `json:"id"`
-		Name  string          `json:"name"`
-		Input json.RawMessage `json:"input"`
-	} `json:"content_block"`
-	Delta struct {
+	Type         string          `json:"type"`
+	Index        int             `json:"index"`
+	ContentBlock json.RawMessage `json:"content_block"`
+	Delta        struct {
 		Type        string `json:"type"`
 		Text        string `json:"text"`
 		Thinking    string `json:"thinking"`
@@ -44,7 +39,25 @@ type rawUsage struct {
 	} `json:"cache_creation"`
 }
 
+type streamParser struct {
+	serverToolUses map[int]serverToolUse
+}
+
+type serverToolUse struct {
+	ID    string
+	Name  string
+	Input string
+}
+
+func newStreamParser() *streamParser {
+	return &streamParser{serverToolUses: make(map[int]serverToolUse)}
+}
+
 func parseEvent(data []byte) (provider.StreamEvent, bool, error) {
+	return newStreamParser().parseEvent(data)
+}
+
+func (p *streamParser) parseEvent(data []byte) (provider.StreamEvent, bool, error) {
 	var e streamEnvelope
 	if err := json.Unmarshal(data, &e); err != nil {
 		return provider.StreamEvent{}, false, &provider.AppError{Stage: provider.StageStream, Message: "invalid Anthropic stream event", Cause: err}
@@ -63,20 +76,41 @@ func parseEvent(data []byte) (provider.StreamEvent, bool, error) {
 		case "signature_delta":
 			return provider.StreamEvent{Type: provider.EventSignatureDelta, BlockIndex: e.Index, Delta: e.Delta.Signature}, true, nil
 		case "input_json_delta":
+			if server, ok := p.serverToolUses[e.Index]; ok {
+				server.Input += e.Delta.PartialJSON
+				p.serverToolUses[e.Index] = server
+				return provider.StreamEvent{}, false, nil
+			}
 			return provider.StreamEvent{Type: provider.EventToolCallDelta, BlockIndex: e.Index, ToolCall: &provider.ToolCallDelta{ArgumentsDelta: e.Delta.PartialJSON}}, true, nil
 		default:
 			return provider.StreamEvent{}, false, nil
 		}
 	case "content_block_start":
-		if e.ContentBlock.Type == "tool_use" {
+		var block struct {
+			Type  string          `json:"type"`
+			ID    string          `json:"id"`
+			Name  string          `json:"name"`
+			Input json.RawMessage `json:"input"`
+		}
+		if err := json.Unmarshal(e.ContentBlock, &block); err != nil {
+			return provider.StreamEvent{}, false, &provider.AppError{Stage: provider.StageStream, Message: "invalid Anthropic content block", Cause: err}
+		}
+		if block.Type == "tool_use" {
 			args := "{}"
-			if len(e.ContentBlock.Input) > 0 {
-				args = string(e.ContentBlock.Input)
+			if len(block.Input) > 0 {
+				args = string(block.Input)
 			}
 			if args == "null" {
 				args = "{}"
 			}
-			return provider.StreamEvent{Type: provider.EventToolCallStart, BlockIndex: e.Index, ToolCall: &provider.ToolCallDelta{ID: e.ContentBlock.ID, Name: e.ContentBlock.Name, Arguments: args}}, true, nil
+			return provider.StreamEvent{Type: provider.EventToolCallStart, BlockIndex: e.Index, ToolCall: &provider.ToolCallDelta{ID: block.ID, Name: block.Name, Arguments: args}}, true, nil
+		}
+		if block.Type == "server_tool_use" {
+			p.serverToolUses[e.Index] = serverToolUse{ID: block.ID, Name: block.Name}
+			return provider.StreamEvent{}, false, nil
+		}
+		if block.Type == "tool_search_tool_result" {
+			return provider.StreamEvent{Type: provider.EventProviderHistory, BlockIndex: e.Index, ProviderHistory: &provider.ProviderHistory{Provider: "anthropic", Payload: append([]byte(nil), e.ContentBlock...)}}, true, nil
 		}
 		return provider.StreamEvent{}, false, nil
 	case "error":
@@ -90,7 +124,26 @@ func parseEvent(data []byte) (provider.StreamEvent, bool, error) {
 			return provider.StreamEvent{Type: provider.EventUsage, Usage: usage}, true, nil
 		}
 		return provider.StreamEvent{}, false, nil
-	case "ping", "content_block_stop":
+	case "content_block_stop":
+		if server, ok := p.serverToolUses[e.Index]; ok {
+			delete(p.serverToolUses, e.Index)
+			input := json.RawMessage(server.Input)
+			if len(input) == 0 {
+				input = json.RawMessage(`{}`)
+			}
+			payload, err := json.Marshal(struct {
+				Type  string          `json:"type"`
+				ID    string          `json:"id"`
+				Name  string          `json:"name"`
+				Input json.RawMessage `json:"input"`
+			}{Type: "server_tool_use", ID: server.ID, Name: server.Name, Input: input})
+			if err != nil {
+				return provider.StreamEvent{}, false, &provider.AppError{Stage: provider.StageStream, Message: "encode Anthropic server tool use", Cause: err}
+			}
+			return provider.StreamEvent{Type: provider.EventProviderHistory, BlockIndex: e.Index, ProviderHistory: &provider.ProviderHistory{Provider: "anthropic", Payload: payload}}, true, nil
+		}
+		return provider.StreamEvent{}, false, nil
+	case "ping":
 		return provider.StreamEvent{}, false, nil
 	default:
 		if e.Type == "" {

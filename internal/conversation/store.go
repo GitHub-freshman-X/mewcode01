@@ -481,6 +481,28 @@ func sessionUsage(records []JournalRecord) provider.Usage {
 }
 
 func recordMessage(record JournalRecord) provider.Message {
+	if len(record.ProviderHistory) > 0 {
+		type indexedBlock struct {
+			position int
+			block    provider.ContentBlock
+		}
+		indexed := make([]indexedBlock, 0, 1+len(record.ToolUses)+len(record.ProviderHistory))
+		if record.Content != "" {
+			indexed = append(indexed, indexedBlock{block: provider.ContentBlock{Type: provider.BlockText, Text: record.Content}})
+		}
+		for _, history := range record.ProviderHistory {
+			indexed = append(indexed, indexedBlock{position: history.Position, block: provider.ContentBlock{Type: provider.BlockProviderHistory, ProviderHistory: &provider.ProviderHistory{Provider: history.Provider, Payload: append([]byte(nil), history.Payload...)}}})
+		}
+		for _, call := range record.ToolUses {
+			indexed = append(indexed, indexedBlock{position: call.Position, block: provider.ContentBlock{Type: provider.BlockToolCall, ToolCall: &provider.ToolCall{ID: call.ID, Name: call.Name, Arguments: append([]byte(nil), call.Arguments...)}}})
+		}
+		sort.SliceStable(indexed, func(i, j int) bool { return indexed[i].position < indexed[j].position })
+		blocks := make([]provider.ContentBlock, len(indexed))
+		for i := range indexed {
+			blocks[i] = indexed[i].block
+		}
+		return provider.Message{Role: record.Role, Blocks: blocks}
+	}
 	blocks := make([]provider.ContentBlock, 0, 1+len(record.ToolUses)+len(record.ToolResults))
 	if record.Content != "" {
 		blocks = append(blocks, provider.ContentBlock{Type: provider.BlockText, Text: record.Content})

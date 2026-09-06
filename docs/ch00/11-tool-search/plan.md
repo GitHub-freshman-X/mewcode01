@@ -32,9 +32,15 @@ Responses function_call(namespace, name) ──映射──> server__tool
 
 ### Provider 编码与解码
 
-- Anthropic 编码器增加 Tool Search 工具及 deferred 标志。
+- Anthropic 编码器增加 Tool Search 工具及 deferred 标志，并将服务端搜索历史块无损编码回 assistant 消息。
 - OpenAI 编码器支持顶层 function、namespace、Tool Search 三类对象；解码器读取 `function_call.namespace`。
 - 流事件层可观测但不执行 `tool_search_call` / `tool_search_output`。
+
+### Anthropic 服务端搜索历史
+
+中立内容模型增加“Provider 服务端历史块”：保存 Provider 名称、块类型与原始 JSON。该块只允许位于 assistant 消息，克隆、会话持久化和恢复必须复制其原始载荷；它不进入本地工具调度，也不产生用户可见工具事件。
+
+Anthropic 流解析在收到 `server_tool_use` 与 `tool_search_tool_result` 的 `content_block_start` 时产生对应的中立历史事件。`server_tool_use` 的输入 JSON 与搜索结果块的嵌套 `content` 均以原始 JSON 保存。Anthropic 请求编码器按原始块类型、ID、名称、输入和结果内容重新构造 API 块，保持与普通 `tool_use` 的顺序交错。
 
 ### 配置与提示词
 
@@ -48,6 +54,7 @@ Responses function_call(namespace, name) ──映射──> server__tool
 | `internal/tools`、`internal/mcp` | 保留远端工具来源与 Server 分组信息。 |
 | `internal/provider` | 扩展工具定义和工具调用的 namespace 字段；增加纯能力解析/namespace 规划接口。 |
 | `internal/provider/anthropic` | 编码官方 Tool Search 与 deferred 工具。 |
+| `internal/conversation` | 持久化、恢复与校验 Anthropic 服务端搜索历史。 |
 | `internal/provider/openai` | 编码 namespace、服务端 Tool Search，解析最终 namespaced call。 |
 | `internal/agent` | 在构造请求前解析模式、选择提示词规则，并按 namespace 映射执行。 |
 | `.mewcode/config.example.yaml`、`README.md` | 更新配置和兼容性说明。 |
@@ -58,7 +65,8 @@ Responses function_call(namespace, name) ──映射──> server__tool
 2. 传播 MCP 来源信息，实施 namespace 规划与双向映射。
 3. 扩展 Anthropic/OpenAI 请求与流式响应编解码。
 4. 接入 Agent Loop、提示词与执行映射，补充端到端受控 MCP 测试。
-5. 更新 README、示例配置和本章 Checklist，执行全量验证。
+5. 为 Anthropic 服务端搜索历史补齐中立事件、会话持久化和下一请求回传，验证它不触发本地执行。
+6. 更新 README、示例配置和本章 Checklist，执行全量验证。
 
 ## 技术决策
 
@@ -70,3 +78,4 @@ Responses function_call(namespace, name) ──映射──> server__tool
 | 内置工具 | 始终立即加载 | 高频、数量小且避免额外搜索回合。 |
 | 模型兼容 | 明确白名单 | beta 能力和兼容网关差异不能安全推断。 |
 | 分组上限 | 10 | 遵循 OpenAI 官方的 namespace 建议。 |
+| Anthropic 搜索历史 | Provider 专用原始块 | API 要求原样回传，且不能误当成本地工具调用。 |

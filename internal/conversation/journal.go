@@ -23,6 +23,7 @@ type ToolUseRecord struct {
 	ID        string          `json:"tool_use_id"`
 	Name      string          `json:"tool_name"`
 	Arguments json.RawMessage `json:"arguments"`
+	Position  int             `json:"position,omitempty"`
 }
 
 type ToolResultRecord struct {
@@ -30,6 +31,12 @@ type ToolResultRecord struct {
 	Name    string `json:"tool_name"`
 	Content string `json:"content"`
 	IsError bool   `json:"is_error"`
+}
+
+type ProviderHistoryRecord struct {
+	Provider string          `json:"provider"`
+	Payload  json.RawMessage `json:"payload"`
+	Position int             `json:"position"`
 }
 
 type UsageRecord struct {
@@ -42,13 +49,14 @@ type UsageRecord struct {
 }
 
 type JournalRecord struct {
-	Role        provider.Role      `json:"role"`
-	Content     string             `json:"content"`
-	ToolUses    []ToolUseRecord    `json:"tool_uses,omitempty"`
-	ToolResults []ToolResultRecord `json:"tool_results,omitempty"`
-	Purpose     JournalPurpose     `json:"purpose"`
-	Usage       *UsageRecord       `json:"usage,omitempty"`
-	Timestamp   int64              `json:"ts"`
+	Role            provider.Role           `json:"role"`
+	Content         string                  `json:"content"`
+	ToolUses        []ToolUseRecord         `json:"tool_uses,omitempty"`
+	ToolResults     []ToolResultRecord      `json:"tool_results,omitempty"`
+	ProviderHistory []ProviderHistoryRecord `json:"provider_history,omitempty"`
+	Purpose         JournalPurpose          `json:"purpose"`
+	Usage           *UsageRecord            `json:"usage,omitempty"`
+	Timestamp       int64                   `json:"ts"`
 }
 
 type Journal interface {
@@ -85,7 +93,7 @@ func (j *JSONLJournal) Append(messages []provider.Message, purpose JournalPurpos
 			Purpose:   purpose,
 			Timestamp: timestamp,
 		}
-		for _, block := range message.Blocks {
+		for position, block := range message.Blocks {
 			switch block.Type {
 			case provider.BlockText:
 				record.Content += block.Text
@@ -95,6 +103,7 @@ func (j *JSONLJournal) Append(messages []provider.Message, purpose JournalPurpos
 						ID:        block.ToolCall.ID,
 						Name:      block.ToolCall.Name,
 						Arguments: json.RawMessage(block.ToolCall.Arguments),
+						Position:  position,
 					})
 				}
 			case provider.BlockToolResult:
@@ -105,6 +114,10 @@ func (j *JSONLJournal) Append(messages []provider.Message, purpose JournalPurpos
 						Content: block.ToolResult.Content,
 						IsError: block.ToolResult.IsError,
 					})
+				}
+			case provider.BlockProviderHistory:
+				if block.ProviderHistory != nil {
+					record.ProviderHistory = append(record.ProviderHistory, ProviderHistoryRecord{Provider: block.ProviderHistory.Provider, Payload: json.RawMessage(block.ProviderHistory.Payload), Position: position})
 				}
 			}
 		}

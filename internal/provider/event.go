@@ -9,15 +9,16 @@ import (
 type EventType string
 
 const (
-	EventStarted        EventType = "started"
-	EventThinkingDelta  EventType = "thinking_delta"
-	EventTextDelta      EventType = "text_delta"
-	EventSignatureDelta EventType = "signature_delta"
-	EventToolCallStart  EventType = "tool_call_start"
-	EventToolCallDelta  EventType = "tool_call_delta"
-	EventToolCallDone   EventType = "tool_call_done"
-	EventUsage          EventType = "usage"
-	EventCompleted      EventType = "completed"
+	EventStarted         EventType = "started"
+	EventThinkingDelta   EventType = "thinking_delta"
+	EventTextDelta       EventType = "text_delta"
+	EventSignatureDelta  EventType = "signature_delta"
+	EventToolCallStart   EventType = "tool_call_start"
+	EventToolCallDelta   EventType = "tool_call_delta"
+	EventToolCallDone    EventType = "tool_call_done"
+	EventProviderHistory EventType = "provider_history"
+	EventUsage           EventType = "usage"
+	EventCompleted       EventType = "completed"
 )
 
 type Usage struct {
@@ -54,11 +55,12 @@ func (u Usage) CacheHitRate() (int, bool) {
 }
 
 type StreamEvent struct {
-	Type       EventType
-	BlockIndex int
-	Delta      string
-	ToolCall   *ToolCallDelta
-	Usage      *Usage
+	Type            EventType
+	BlockIndex      int
+	Delta           string
+	ToolCall        *ToolCallDelta
+	ProviderHistory *ProviderHistory
+	Usage           *Usage
 }
 
 type ToolCallDelta struct {

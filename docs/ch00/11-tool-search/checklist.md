@@ -13,6 +13,9 @@
 
 - [ ] 请求包含官方 Tool Search，内置工具没有 `defer_loading`，MCP 工具均为 deferred。
 - [ ] 最终 `tool_use` 仍以 Registry 唯一名经本地 MCP Client 成功执行。
+- [ ] `server_tool_use` 和 `tool_search_tool_result` 被保留在 assistant 历史，并按原顺序编码到执行本地 MCP 工具后的下一次 Messages 请求。
+- [ ] Anthropic 服务端搜索块不触发本地执行、权限确认或 `tool_result`；仅最终普通 `tool_use` 进入本地 MCP Client。
+- [ ] 保存、恢复和克隆会话后，Anthropic 服务端搜索历史仍可无损回传。
 
 ## OpenAI
 
@@ -39,3 +42,5 @@
 - [x] 已执行 `go test ./...`、`go build -o /private/tmp/mewcode-tool-search-verify ./cmd/mewcode` 和 `git diff --check`，均通过。
 - [x] 2026-09-06 修复 OpenAI hosted Tool Search 流解析后，已执行 `go test ./internal/provider/openai -count=1`、`go test ./internal/provider/... -count=1`、`go test ./...` 和 `go build -o /private/tmp/mewcode-openai-tool-search-verify ./cmd/mewcode`，均通过；临时构建产物已删除。
 - [x] 已使用官方 OpenAI 账户完成 `gpt-5.4-mini` 支持路径和 `gpt-4.1` 自动回退路径的真实 MCP 调用；详情见 [人工测试方案](manual_scenarios.md) 的实际执行记录。Anthropic 场景与 `disabled` / `enabled` 模式检查仍未执行。
+- [x] Anthropic 服务端搜索历史已由官方 SSE 样例覆盖：`server_tool_use` 在输入流结束后完整保存，`tool_search_tool_result` 原样回传，且两者不触发本地工具调度；`go test ./internal/provider/anthropic ./internal/agent ./internal/conversation -count=1` 通过。
+- [x] Anthropic 服务端搜索历史修复后，已执行 `go test ./...`、`go build -o /private/tmp/mewcode-anthropic-tool-search-verify ./cmd/mewcode` 和 `git diff --check`，均通过；临时构建产物已删除。

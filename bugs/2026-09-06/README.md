@@ -6,4 +6,4 @@
 | 002 | `cmd/mewcode` 包测试在源码目录遗留运行目录 | 已修复 |
 | 003 | Slash Command 启动 Agent 后错误同步 Worktree | 已修复 |
 | 004 | OpenAI Hosted Tool Search 流事件参数无法解析 | 已修复 |
-| 005 | Anthropic Tool Search 服务端历史块被丢弃 | 待处理 |
+| 005 | Anthropic Tool Search 服务端历史块被丢弃 | 已修复 |

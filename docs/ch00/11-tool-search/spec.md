@@ -21,7 +21,7 @@
 
 - **F2 能力判定与回退**：能力判定在请求构造前完成。OpenAI 仅对 Responses API 且白名单模型启用；模型未知、第三方 OpenAI 兼容端点或不支持模型均不携带 `tool_search`、`defer_loading` 或 namespace，直接发送平铺完整 function tools。模型快照按其所属稳定模型族判定。
 
-- **F3 Anthropic 请求**：内置工具保持非延迟；MCP 工具完整定义带 `defer_loading: true`；请求加入 Anthropic 官方 Tool Search。服务端搜索后扩展 `tool_reference`，后续普通 `tool_use` 仍以现有唯一工具名进入本地执行。
+- **F3 Anthropic 请求与服务端历史**：内置工具保持非延迟；MCP 工具完整定义带 `defer_loading: true`；请求加入 Anthropic 官方 Tool Search。服务端搜索后扩展 `tool_reference`，后续普通 `tool_use` 仍以现有唯一工具名进入本地执行。流中的 `server_tool_use` 与 `tool_search_tool_result` 必须作为服务端搜索历史无损保存；本地 MCP 工具执行后的下一次 Messages 请求必须原样回传这两个块及其相对顺序，且不得为 `srvtoolu_...` 生成本地 `tool_result` 或权限确认。
 
 - **F4 OpenAI 请求**：内置工具保持顶层、完整且立即可调用。每个 MCP Server 的远端工具形成一个或多个 `namespace`，namespace 暴露稳定名称和简短能力描述，成员 function 均带 `defer_loading: true`，请求另带 `{"type":"tool_search","execution":"server"}`。不得把本地 MCP Server 直接编码为 OpenAI `mcp` 工具。
 
@@ -29,7 +29,7 @@
 
 - **F6 本地执行映射**：OpenAI 返回的 `function_call.namespace + name` 映射回 Registry 中唯一的 `<server>__<tool>` 名称，之后继续经过现有权限检查、输入校验、`RemoteToolAdapter` 与本地 MCP Client。不得将工具调用委托给 Provider。
 
-- **F7 响应与会话兼容**：OpenAI 流式解析能忽略服务端 Tool Search 的观测事件，并保留最终 function call 的 namespace 信息。历史回放仍以本地统一工具调用/结果模型保存；已发现工具无需被误存为用户可执行调用。
+- **F7 响应与会话兼容**：OpenAI 流式解析能忽略服务端 Tool Search 的观测事件，并保留最终 function call 的 namespace 信息。Anthropic 服务端搜索块必须在流解析、任务历史、会话持久化、克隆、上下文回放和请求编码中保持完整；它们无需展示为本地工具调用。已发现工具无需被误存为用户可执行调用。
 
 - **F8 提示词行为**：在启用 Tool Search 时，稳定提示词包含“当前可见工具不足以完成任务时，使用 Tool Search 发现相关能力”的规则；不得要求模型猜测具体隐藏工具名。
 
@@ -44,7 +44,7 @@ OpenAI `auto` 白名单为 `gpt-6-astra`、`gpt-5.6` / `gpt-5.6-sol` / `gpt-5.6-
 - **N1 缓存稳定性**：支持路径的新发现定义由 Provider 加入上下文末尾；内置工具、系统提示词和 namespace 目录保持确定排序。回退路径维持当前语义。
 - **N2 安全性**：日志仅记录 Provider、模式、能力判定、namespace 数、工具数、阶段、状态和耗时；不得记录工具 schema 正文、工具调用参数、结果、密钥或 HTTP headers。
 - **N3 确定性**：相同 Registry、配置和模型名必须产生相同的工具请求布局与映射。
-- **N4 可测试性**：所有 Provider 请求体、回退、namespace 分块和最终本地 MCP 调用均由离线受控测试覆盖。
+- **N4 可测试性**：所有 Provider 请求体、回退、namespace 分块和最终本地 MCP 调用均由离线受控测试覆盖。Anthropic 测试必须以官方 SSE 样例覆盖“服务端搜索 → 本地工具调用 → 下一请求回传服务端搜索历史”的完整链路。
 
 ## 不做的事
 
@@ -64,3 +64,4 @@ OpenAI `auto` 白名单为 `gpt-6-astra`、`gpt-5.6` / `gpt-5.6-sol` / `gpt-5.6-
 - **AC6**：namespace 的名称、成员和分块结果在多次构造中稳定，且单组不超过 10 个成员。
 - **AC7**：服务端 Tool Search 事件不会被当作本地工具调用或写入错误的历史块。
 - **AC8**：现有 Provider、Registry、MCP、权限与 Agent Loop 回归测试通过；README 和配置示例反映新增配置。
+- **AC9**：Anthropic Tool Search 的 `server_tool_use` 与 `tool_search_tool_result` 在后续请求中原样存在，且不被本地执行、权限确认或伪造的 `tool_result` 处理。

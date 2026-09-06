@@ -1,6 +1,6 @@
 # Anthropic Tool Search 服务端历史块被丢弃
 
-- 状态：待处理
+- 状态：已修复
 - 发现日期：2026-09-06
 - 影响范围：使用官方 Anthropic API、支持 Tool Search 的模型，并在同一任务中执行发现后的本地 MCP 工具调用。
 
@@ -20,4 +20,6 @@ Anthropic 官方要求在后续请求中原样回传上述块，并且不能为 
 
 ## 验证进展
 
-2026-09-06：依据 Anthropic 官方 Tool Search 流式样例构造两个 `content_block_start` 事件；临时测试 `TestDiagnosisToolSearchServerBlocksArePreserved` 运行 `go test ./internal/provider/anthropic -run TestDiagnosisToolSearchServerBlocksArePreserved -count=1` 稳定失败，错误为“Anthropic Tool Search block was dropped instead of being preserved for the next request”。临时测试已移除，尚未实施修复。
+2026-09-06：依据 Anthropic 官方 Tool Search 流式样例构造两个 `content_block_start` 事件；临时测试 `TestDiagnosisToolSearchServerBlocksArePreserved` 运行 `go test ./internal/provider/anthropic -run TestDiagnosisToolSearchServerBlocksArePreserved -count=1` 稳定失败，错误为“Anthropic Tool Search block was dropped instead of being preserved for the next request”。临时测试已移除。
+
+2026-09-06：新增 Provider 服务端历史块。Anthropic 流解析按块索引暂存 `server_tool_use` 的输入 JSON，在 `content_block_stop` 时生成完整历史块；`tool_search_tool_result` 直接保留。Agent、会话 JSONL 与 Anthropic 请求编码均原样传递该载荷，且不触发本地工具调度。`go test ./internal/provider/anthropic ./internal/agent ./internal/conversation -count=1`、`go test ./...`、`go build -o /private/tmp/mewcode-anthropic-tool-search-verify ./cmd/mewcode` 与 `git diff --check` 均通过；临时构建产物已删除。

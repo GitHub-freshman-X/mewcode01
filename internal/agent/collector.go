@@ -118,6 +118,17 @@ func applyProviderEvent(result *roundResult, event provider.StreamEvent, iterati
 				block.ToolCall.Arguments = append(block.ToolCall.Arguments, event.ToolCall.ArgumentsDelta...)
 			}
 		}
+	case provider.EventProviderHistory:
+		block, err := roundBlockAt(&result.Assistant, event.BlockIndex, provider.BlockProviderHistory)
+		if err != nil {
+			return err
+		}
+		if event.ProviderHistory == nil {
+			return errors.New("provider history event is missing payload")
+		}
+		history := *event.ProviderHistory
+		history.Payload = append([]byte(nil), history.Payload...)
+		block.ProviderHistory = &history
 	case provider.EventUsage:
 		if event.Usage != nil {
 			result.Usage.Add(*event.Usage)

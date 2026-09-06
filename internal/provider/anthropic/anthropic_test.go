@@ -143,3 +143,38 @@ func TestBuildRequestDefersOnlyMCPTools(t *testing.T) {
 		t.Fatalf("tools=%+v", body.Tools)
 	}
 }
+
+func TestToolSearchHistoryIsParsedAndReplayed(t *testing.T) {
+	serverUse := []byte(`{"type":"server_tool_use","id":"srvtoolu_1","name":"tool_search_tool_bm25","input":{"query":"fixture"}}`)
+	searchResult := []byte(`{"type":"tool_search_tool_result","tool_use_id":"srvtoolu_1","content":{"type":"tool_search_tool_search_result","tool_references":[{"type":"tool_reference","tool_name":"demo__lookup_fixture"}]}}`)
+	parser := newStreamParser()
+	for _, frame := range [][]byte{
+		[]byte(fmt.Sprintf(`{"type":"content_block_start","index":0,"content_block":{"type":"server_tool_use","id":"srvtoolu_1","name":"tool_search_tool_bm25"}}`)),
+		[]byte(`{"type":"content_block_delta","index":0,"delta":{"type":"input_json_delta","partial_json":"{\"query\":\"fixture\"}"}}`),
+		[]byte(`{"type":"content_block_stop","index":0}`),
+	} {
+		event, emit, err := parser.parseEvent(frame)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if string(frame) == `{"type":"content_block_stop","index":0}` && (!emit || event.Type != provider.EventProviderHistory || event.ProviderHistory == nil || string(event.ProviderHistory.Payload) != string(serverUse)) {
+			t.Fatalf("event=%+v emit=%v", event, emit)
+		}
+	}
+	event, emit, err := parser.parseEvent([]byte(fmt.Sprintf(`{"type":"content_block_start","index":1,"content_block":%s}`, searchResult)))
+	if err != nil || !emit || event.Type != provider.EventProviderHistory || event.ProviderHistory == nil || string(event.ProviderHistory.Payload) != string(searchResult) {
+		t.Fatalf("event=%+v emit=%v err=%v", event, emit, err)
+	}
+	body, err := buildRequest("claude", provider.ChatRequest{Messages: []provider.Message{{Role: provider.RoleAssistant, Blocks: []provider.ContentBlock{
+		{Type: provider.BlockProviderHistory, ProviderHistory: &provider.ProviderHistory{Provider: "anthropic", Payload: serverUse}},
+		{Type: provider.BlockProviderHistory, ProviderHistory: &provider.ProviderHistory{Provider: "anthropic", Payload: searchResult}},
+		{Type: provider.BlockToolCall, ToolCall: &provider.ToolCall{ID: "toolu_1", Name: "demo__lookup_fixture", Arguments: []byte(`{}`)}},
+	}}}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	encoded, err := json.Marshal(body.Messages[0].Content)
+	if err != nil || !strings.Contains(string(encoded), string(serverUse)) || !strings.Contains(string(encoded), string(searchResult)) {
+		t.Fatalf("content=%s err=%v", encoded, err)
+	}
+}
