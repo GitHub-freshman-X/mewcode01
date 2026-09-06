@@ -27,6 +27,7 @@
 - [ ] 内置工具、权限确认、输入校验、MCP 调用及历史回放回归通过。
 - [ ] 日志不含 schema 正文、工具参数、结果、凭据或请求头。
 - [ ] `.mewcode/config.example.yaml`、README 与本章文档描述一致。
+- [ ] 真实 Anthropic / OpenAI 的支持与自动回退场景按 [人工测试方案](manual_scenarios.md) 执行并记录。
 - [ ] `go test ./...`、`go build ./cmd/mewcode`、`git diff --check` 通过。
 
 ## 本次执行记录（2026-09-06）
@@ -34,5 +35,7 @@
 - [x] `auto`、`enabled`、`disabled`、OpenAI 支持/不支持型号、官方端点与兼容网关回退，已由 `go test ./internal/provider -run TestResolveToolSearch -count=1` 覆盖。
 - [x] Anthropic 请求仅将 MCP 工具标记为 deferred，并加入官方 Tool Search，已由 `go test ./internal/provider/anthropic -run TestBuildRequestDefersOnlyMCPTools -count=1` 覆盖。
 - [x] OpenAI 请求将 MCP 工具稳定分组为最多 10 个成员的 namespace，并加入服务端 Tool Search；回退请求保持平铺 function，已由 `go test ./internal/provider/openai -run 'TestBuildRequest(UsesNamespacesForDeferredMCPTools|FallbackKeepsFlatTools)' -count=1` 覆盖。
+- [x] OpenAI hosted `tool_search_call` 的结构化 `arguments` 被流解析器安全忽略，最终 `function_call` 的字符串参数保持可用；由 `TestHostedToolSearchEventsAreIgnored` 覆盖。
 - [x] 已执行 `go test ./...`、`go build -o /private/tmp/mewcode-tool-search-verify ./cmd/mewcode` 和 `git diff --check`，均通过。
-- [ ] 未对真实 Anthropic/OpenAI 账户发送请求；验证使用离线请求体与受控流测试。
+- [x] 2026-09-06 修复 OpenAI hosted Tool Search 流解析后，已执行 `go test ./internal/provider/openai -count=1`、`go test ./internal/provider/... -count=1`、`go test ./...` 和 `go build -o /private/tmp/mewcode-openai-tool-search-verify ./cmd/mewcode`，均通过；临时构建产物已删除。
+- [x] 已使用官方 OpenAI 账户完成 `gpt-5.4-mini` 支持路径和 `gpt-4.1` 自动回退路径的真实 MCP 调用；详情见 [人工测试方案](manual_scenarios.md) 的实际执行记录。Anthropic 场景与 `disabled` / `enabled` 模式检查仍未执行。

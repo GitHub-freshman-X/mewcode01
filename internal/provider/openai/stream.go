@@ -10,18 +10,18 @@ type streamEnvelope struct {
 	Delta       string `json:"delta"`
 	OutputIndex int    `json:"output_index"`
 	Item        struct {
-		Type      string `json:"type"`
-		ID        string `json:"id"`
-		CallID    string `json:"call_id"`
-		Name      string `json:"name"`
-		Arguments string `json:"arguments"`
+		Type      string          `json:"type"`
+		ID        string          `json:"id"`
+		CallID    string          `json:"call_id"`
+		Name      string          `json:"name"`
+		Arguments json.RawMessage `json:"arguments"`
 	} `json:"item"`
 	ResponseOutput struct {
-		Type      string `json:"type"`
-		ID        string `json:"id"`
-		CallID    string `json:"call_id"`
-		Name      string `json:"name"`
-		Arguments string `json:"arguments"`
+		Type      string          `json:"type"`
+		ID        string          `json:"id"`
+		CallID    string          `json:"call_id"`
+		Name      string          `json:"name"`
+		Arguments json.RawMessage `json:"arguments"`
 	} `json:"output"`
 	Error struct {
 		Message string `json:"message"`
@@ -60,7 +60,7 @@ func parseEvent(data []byte) (provider.StreamEvent, bool, error) {
 			if id == "" {
 				id = e.Item.ID
 			}
-			return provider.StreamEvent{Type: provider.EventToolCallStart, BlockIndex: e.OutputIndex, ToolCall: &provider.ToolCallDelta{ID: id, Name: e.Item.Name, Arguments: e.Item.Arguments}}, true, nil
+			return provider.StreamEvent{Type: provider.EventToolCallStart, BlockIndex: e.OutputIndex, ToolCall: &provider.ToolCallDelta{ID: id, Name: e.Item.Name, Arguments: stringArgument(e.Item.Arguments)}}, true, nil
 		}
 		return provider.StreamEvent{}, false, nil
 	case "response.function_call_arguments.delta":
@@ -71,14 +71,14 @@ func parseEvent(data []byte) (provider.StreamEvent, bool, error) {
 		}
 		return provider.StreamEvent{}, false, nil
 	case "response.function_call_arguments.done":
-		args := e.Item.Arguments
+		args := stringArgument(e.Item.Arguments)
 		name := e.Item.Name
 		id := e.Item.CallID
 		if id == "" {
 			id = e.Item.ID
 		}
 		if args == "" {
-			args = e.ResponseOutput.Arguments
+			args = stringArgument(e.ResponseOutput.Arguments)
 			name = e.ResponseOutput.Name
 			id = e.ResponseOutput.CallID
 			if id == "" {
@@ -90,14 +90,14 @@ func parseEvent(data []byte) (provider.StreamEvent, bool, error) {
 		if e.Item.Type != "function_call" && e.ResponseOutput.Type != "function_call" {
 			return provider.StreamEvent{}, false, nil
 		}
-		args := e.Item.Arguments
+		args := stringArgument(e.Item.Arguments)
 		name := e.Item.Name
 		id := e.Item.CallID
 		if id == "" {
 			id = e.Item.ID
 		}
 		if args == "" {
-			args = e.ResponseOutput.Arguments
+			args = stringArgument(e.ResponseOutput.Arguments)
 			name = e.ResponseOutput.Name
 			id = e.ResponseOutput.CallID
 			if id == "" {
@@ -132,4 +132,12 @@ func parseEvent(data []byte) (provider.StreamEvent, bool, error) {
 	default:
 		return provider.StreamEvent{}, false, nil
 	}
+}
+
+func stringArgument(raw json.RawMessage) string {
+	var argument string
+	if json.Unmarshal(raw, &argument) != nil {
+		return ""
+	}
+	return argument
 }

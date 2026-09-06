@@ -114,8 +114,22 @@ func TestFunctionOutputItemDoneEmitsToolDone(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !emit || event.Type != provider.EventToolCallDone || event.BlockIndex != 2 || event.ToolCall.ID != "call_1" || event.ToolCall.Name != "read_file" {
+	if !emit || event.Type != provider.EventToolCallDone || event.BlockIndex != 2 || event.ToolCall.ID != "call_1" || event.ToolCall.Name != "read_file" || event.ToolCall.Arguments != `{"path":"README.md"}` {
 		t.Fatalf("event=%+v emit=%v", event, emit)
+	}
+}
+
+func TestHostedToolSearchEventsAreIgnored(t *testing.T) {
+	frames := [][]byte{
+		[]byte(`{"type":"response.output_item.added","output_index":0,"item":{"type":"tool_search_call","execution":"server","call_id":null,"status":"in_progress","arguments":{"paths":["mcp_demo"]}}}`),
+		[]byte(`{"type":"response.output_item.done","output_index":0,"item":{"type":"tool_search_call","execution":"server","call_id":null,"status":"completed","arguments":{"paths":["mcp_demo"]}}}`),
+		[]byte(`{"type":"response.output_item.done","output_index":1,"item":{"type":"tool_search_output","execution":"server","call_id":null,"status":"completed","tools":[]}}`),
+	}
+	for _, frame := range frames {
+		event, emit, err := parseEvent(frame)
+		if err != nil || emit || event.Type != "" {
+			t.Fatalf("event=%+v emit=%v err=%v", event, emit, err)
+		}
 	}
 }
 
