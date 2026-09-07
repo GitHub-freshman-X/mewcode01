@@ -1,74 +1,93 @@
-# 原生 Tool Search 与 MCP 工具延迟加载 Tasks
+# 原生与本地 Tool Search 的 MCP 工具加载 Tasks
 
 ## 文件清单
 
-| 操作 | 位置 | 职责 |
+| 操作 | 文件 | 职责 |
 |---|---|---|
-| 修改 | `internal/config/*` | 模式配置、默认值、校验。 |
-| 修改 | `internal/tools/*`、`internal/mcp/tool.go` | MCP 来源与分组元数据。 |
-| 修改 | `internal/provider/*` | 中立定义、能力判定、namespace 调用信息。 |
-| 修改 | `internal/provider/anthropic/*` | Anthropic Tool Search 请求。 |
-| 修改 | `internal/conversation/*` | 服务端搜索历史的校验、持久化和恢复。 |
-| 修改 | `internal/provider/openai/*` | OpenAI namespace、Tool Search 与流式解析。 |
-| 修改 | `internal/agent/*` | 请求策略、提示词、执行映射。 |
-| 修改 | `.mewcode/config.example.yaml`、`README.md` | 配置与用户说明。 |
-| 新建/修改 | 相应 `*_test.go` | 离线单元、请求体与端到端测试。 |
+| 修改 | `internal/provider/{provider,tool_search}.go` | 用策略取代二元 ToolSearch 状态。 |
+| 新建 | `internal/toolsearch/catalog.go` | 本地目录、虚拟定义、检索和目标解析。 |
+| 修改 | `internal/agent/{runner,scheduler}.go` | 本地目录提示、虚拟调用处理和安全分发。 |
+| 修改 | `internal/provider/{anthropic,openai}/request.go` | 仅 Native 策略发送官方字段。 |
+| 修改 | `internal/prompt/tools.go` | 避免对隐藏 MCP schema 施加无关工具规则。 |
+| 修改 | 对应 `*_test.go` | 单元、请求体与 Agent Loop 覆盖。 |
+| 修改 | `.mewcode/config.example.yaml`、`README.md` 与章节文档 | 用户说明、人工方案、验收记录。 |
 
-## T1：配置、能力判定与中立模型
+## T1：策略模型与 Provider 编码
 
-1. 定义 `auto`、`enabled`、`disabled` 及默认值。
-2. 实现 Provider/模型/端点能力解析器和 OpenAI 白名单快照归一化。
-3. 扩展中立工具、调用定义以携带 MCP 来源和 namespace。
-4. 测试所有模式、明确支持、不支持、未知与兼容端点。
+**文件：** `internal/provider/{provider,tool_search}.go`、`internal/provider/tool_search_test.go`、`internal/provider/{anthropic,openai}/{request,openai}_test.go`
 
-**验证：** 相关 config/provider 单元测试通过。
-
-## T2：MCP 来源传播与 namespace 规划
-
-1. 从 `RemoteToolAdapter` 至 Registry Definitions 传播 Server 和远端名称。
-2. 实现稳定分组、类别分块、最大 10 成员限制和双向映射。
-3. 验证工具名冲突、同名远端工具、空描述和大目录。
-
-**验证：** `go test ./internal/mcp ./internal/tools ./internal/provider -run 'Test.*(Namespace|ToolSearch|Definition)' -count=1`。
-
-## T3：Provider 编码和响应解析
-
-1. Anthropic 请求加入官方 Tool Search，并只 defer MCP 工具。
-2. OpenAI 请求生成顶层内置函数、MCP namespaces 和 `execution: "server"` Tool Search。
-3. 解析 OpenAI 最终 namespaced `function_call`，忽略搜索观测事件。
-4. 覆盖精确 JSON 请求体与流事件序列。
-
-**验证：** `go test ./internal/provider/... -count=1`。
-
-## T4：Agent Loop、本地执行与提示词
-
-1. 在构造请求前选择模式，并只在启用时插入 Tool Search 指令。
-2. 将 OpenAI `namespace + name` 转回 Registry 唯一名。
-3. 经受控 MCP Client 验证最终调用仍通过本地权限、校验和 RPC。
-4. 验证回退路径与当前平铺工具调用完全兼容。
-
-**验证：** `go test ./internal/agent ./internal/mcp -count=1`。
-
-## T5：文档和回归
-
-1. 更新 `.mewcode/config.example.yaml` 与 README。
-2. 回填本章 Checklist 的实际命令和结果。
-3. 执行格式化、目标包测试、全量测试、构建和 diff 检查。
-
-**验证：** `go test ./...`、`go build ./cmd/mewcode`、`git diff --check`。
-
-## T6：Anthropic 服务端搜索历史回传
-
-**文件：** `internal/provider/message.go`、`internal/provider/event.go`、`internal/provider/anthropic/{stream,request}.go`、`internal/agent/collector.go`、`internal/conversation/*` 及相应测试。
-
-**依赖：** T3、T4。
+**依赖：** 无
 
 **步骤：**
 
-1. 为 Provider 服务端历史块定义中立内容和流事件，并保证克隆不共享原始 JSON。
-2. 解析 Anthropic `server_tool_use` 与 `tool_search_tool_result`，保留完整载荷但不产生本地工具调用。
-3. 扩展 Agent 收集、轮次校验、会话日志/恢复及 Anthropic 请求编码，使两种块在下一请求中按原顺序回传。
-4. 添加受控 SSE + Agent Loop 测试，覆盖服务端搜索、普通 `tool_use`、本地 MCP 结果和后续请求；断言没有对 `srvtoolu_...` 执行本地调度。
-5. 回填 Bug 记录和本章 Checklist。
+1. 用四值 ToolSearch 策略替换 `Enabled`，并保持 `disabled` 选择 Full。
+2. 令官方支持组合选择现有 Native 策略，其余有效组合选择 Local。
+3. 限制 Anthropic/OpenAI 原生编码仅在相应 Native 策略出现。
+4. 为 Full、Native 与 Local 的请求布局和模型/端点判定编写精确测试。
 
-**验证：** `go test ./internal/provider/anthropic ./internal/agent ./internal/conversation -count=1`，随后运行 `go test ./...`。
+**验证：** `go test ./internal/provider ./internal/provider/anthropic ./internal/provider/openai -count=1`。
+
+## T2：本地目录与虚拟工具定义
+
+**文件：** `internal/toolsearch/catalog.go`、`internal/toolsearch/catalog_test.go`
+
+**依赖：** T1
+
+**步骤：**
+
+1. 从已排序的 Registry definitions 提取 MCP 工具，并定义 `tool_search` 与 `mcp_call` schema。
+2. 构建稳定名称目录和 Local 路径的可见 definitions。
+3. 实现完整唯一名的精确 schema 加载，拒绝关键词、自然语言与带前缀的名称。
+4. 校验 `mcp_call` 的 server、工具名与 arguments，并拒绝内置工具和不一致的 server/tool 组合。
+
+**验证：** `go test ./internal/toolsearch -count=1`。
+
+## T3：Agent Loop 与安全分发
+
+**文件：** `internal/agent/{runner,scheduler}.go`、`internal/agent/{runner,scheduler}_test.go`
+
+**依赖：** T1、T2
+
+**步骤：**
+
+1. 在会话初始化时创建稳定 LocalCatalog，并只在 Local 策略生成名称目录提示和虚拟 tools。
+2. 让 `tool_search` 的结果由现有工具结果历史写回下一轮请求。
+3. 在 Scheduler 中解析 `mcp_call`，再针对真实 MCP 工具执行已有 Hook、权限、schema 校验和 Executor。
+4. 保持原调用 ID 的结果关联，覆盖无效调用、权限拒绝和成功 RPC。
+
+**验证：** `go test ./internal/agent ./internal/mcp -count=1`。
+
+## T4：提示词、用户文档与人工方案
+
+**文件：** `internal/prompt/tools.go`、`.mewcode/config.example.yaml`、`README.md`、`docs/ch00/11-tool-search/{manual_scenarios,checklist}.md`
+
+**依赖：** T3
+
+**步骤：**
+
+1. 将 Local 路径提示限定为“从名称目录选择完整名称，再以该名称调用 tool_search，最后用 mcp_call”。
+2. 更新配置说明：`auto` 和 `enabled` 为原生优先、本地兜底；`disabled` 全量加载。
+3. 将人工回退场景改为验证本地搜索、schema 工具结果和 mcp_call，而非平铺 MCP 工具。
+4. 记录不会在日志中暴露 schema、查询、参数或结果正文的验证方式。
+
+**验证：** 文档与测试命令一致；`git diff --check` 通过。
+
+## T5：全量回归与验收记录
+
+**文件：** 本章 `checklist.md`、必要的 bug 记录
+
+**依赖：** T1–T4
+
+**步骤：**
+
+1. 执行格式化、目标测试、全量测试、构建和 diff 检查。
+2. 根据实际输出回填 checklist；若发现缺陷，按 `bugs/README.md` 记录状态、证据和修复。
+3. 清理本轮验证生成且与交付无关的临时产物。
+
+**验证：** `go test ./...`、`go build ./cmd/mewcode`、`git diff --check`。
+
+## 执行顺序
+
+```text
+T1 → T2 → T3 → T4 → T5
+```

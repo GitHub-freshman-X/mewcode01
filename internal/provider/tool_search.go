@@ -1,7 +1,6 @@
 package provider
 
 import (
-	"fmt"
 	"net/url"
 	"strings"
 )
@@ -18,14 +17,16 @@ func ResolveToolSearch(protocol, model, baseURL string, mode ToolSearchMode) (To
 	if mode == "" {
 		mode = ToolSearchAuto
 	}
-	supported := officialEndpoint(protocol, baseURL) && supportsToolSearch(protocol, model)
 	if mode == ToolSearchDisabled {
-		return ToolSearchConfig{}, nil
+		return ToolSearchConfig{Mode: ToolSearchFull}, nil
 	}
-	if mode == ToolSearchEnabled && !supported {
-		return ToolSearchConfig{}, fmt.Errorf("tool_search enabled but unsupported for %s model %q", protocol, model)
+	if !officialEndpoint(protocol, baseURL) || !supportsToolSearch(protocol, model) {
+		return ToolSearchConfig{Mode: ToolSearchLocal}, nil
 	}
-	return ToolSearchConfig{Enabled: supported}, nil
+	if protocol == "anthropic" {
+		return ToolSearchConfig{Mode: ToolSearchNativeAnthropic}, nil
+	}
+	return ToolSearchConfig{Mode: ToolSearchNativeOpenAI}, nil
 }
 
 func officialEndpoint(protocol, rawURL string) bool {

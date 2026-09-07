@@ -7,7 +7,8 @@ max_tokens: 4096
 thinking:
   enabled: true
   budget_tokens: 2048
-# auto：仅官方支持模型自动启用服务端 Tool Search；未知模型和兼容网关回退全量工具定义。
+# auto/enabled：官方支持模型使用服务端 Tool Search；其余模型和兼容网关使用本地 ToolSearch，不发送 MCP schema。
+# disabled：始终发送全量工具定义。
 # 可选值：auto、enabled、disabled。
 tool_search: auto
 agent:

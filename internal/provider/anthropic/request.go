@@ -83,13 +83,13 @@ func buildRequest(model string, req provider.ChatRequest) (requestBody, error) {
 		}
 	}
 	for i, tool := range req.Tools {
-		requestTool := requestTool{Name: tool.Name, Description: tool.Description, InputSchema: tool.Schema, DeferLoading: req.ToolSearch.Enabled && tool.MCPServer != ""}
+		requestTool := requestTool{Name: tool.Name, Description: tool.Description, InputSchema: tool.Schema, DeferLoading: req.ToolSearch.NativeAnthropic() && tool.MCPServer != ""}
 		if i == lastCacheableTool {
 			requestTool.CacheControl = &cacheControl{Type: "ephemeral"}
 		}
 		body.Tools = append(body.Tools, requestTool)
 	}
-	if req.ToolSearch.Enabled {
+	if req.ToolSearch.NativeAnthropic() {
 		body.Tools = append(body.Tools, requestTool{Type: "tool_search_tool_bm25_20251119", Name: "tool_search_tool_bm25"})
 	}
 	if req.Prompt.StableSystem != "" {

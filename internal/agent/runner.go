@@ -20,6 +20,7 @@ import (
 	"github.com/GitHub-freshman-X/mewcode01/internal/status"
 	"github.com/GitHub-freshman-X/mewcode01/internal/subagent"
 	"github.com/GitHub-freshman-X/mewcode01/internal/tools"
+	"github.com/GitHub-freshman-X/mewcode01/internal/toolsearch"
 	"github.com/GitHub-freshman-X/mewcode01/internal/worktree"
 )
 
@@ -568,11 +569,18 @@ func (r *Runner) run(ctx context.Context, mode Mode, prepared preparedRequest, e
 		if r.options.SystemPrompt != "" {
 			bundle.StableSystem = r.options.SystemPrompt
 		}
-		if r.options.ToolSearch.Enabled {
+		if r.options.ToolSearch.NativeAnthropic() || r.options.ToolSearch.NativeOpenAI() {
 			bundle.StableSystem += "\n\n当完成任务需要当前未见的 MCP 能力时，先使用 Tool Search 发现相关工具；不要因为当前工具列表未展示具体工具而放弃。"
 		}
 		r.rememberSystemPrompt(bundle.StableSystem)
 		definitions := prompt.EnhanceDefinitions(visibleRegistry.Definitions(), promptMode)
+		var localCatalog *toolsearch.Catalog
+		if r.options.ToolSearch.Local() {
+			catalog := toolsearch.New(definitions)
+			localCatalog = &catalog
+			definitions = catalog.Visible(definitions)
+			bundle.StableSystem += "\n\n以下是可按需加载的 MCP 工具名称目录：\n" + strings.Join(catalog.Names(), "\n") + "\n需要 MCP 能力时，必须先从目录中选择最合适的完整名称，再调用 tool_search 并把该名称原样填入 tool_name。不要用关键词、自然语言或 select: 前缀调用 tool_search。取得 schema 后使用 mcp_call 调用。"
+		}
 		var round roundResult
 		for {
 			roundCtx, cancelRound := context.WithCancel(ctx)
@@ -672,6 +680,7 @@ func (r *Runner) run(ctx context.Context, mode Mode, prepared preparedRequest, e
 			return
 		}
 		scheduler := NewScheduler(visibleRegistry, r.executor, r.options.Permissions, r.options.Confirmer)
+		scheduler.Catalog = localCatalog
 		scheduler.Hooks = r.options.Hooks
 		scheduleCtx := ctx
 		scheduleCtx = skills.WithForkSkillHost(scheduleCtx, forkSkillHost{runner: r, mode: mode})

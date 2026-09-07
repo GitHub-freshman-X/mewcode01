@@ -31,5 +31,22 @@ type ToolDefinition struct {
 }
 
 type ToolSearchConfig struct {
+	Mode ToolSearchStrategy
+	// Enabled preserves compatibility for callers constructing native requests directly.
 	Enabled bool
 }
+
+type ToolSearchStrategy string
+
+const (
+	ToolSearchFull            ToolSearchStrategy = "full"
+	ToolSearchNativeAnthropic ToolSearchStrategy = "native_anthropic"
+	ToolSearchNativeOpenAI    ToolSearchStrategy = "native_openai"
+	ToolSearchLocal           ToolSearchStrategy = "local"
+)
+
+func (c ToolSearchConfig) NativeAnthropic() bool {
+	return c.Enabled || c.Mode == ToolSearchNativeAnthropic
+}
+func (c ToolSearchConfig) NativeOpenAI() bool { return c.Enabled || c.Mode == ToolSearchNativeOpenAI }
+func (c ToolSearchConfig) Local() bool        { return c.Mode == ToolSearchLocal }

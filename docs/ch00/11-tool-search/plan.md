@@ -1,81 +1,94 @@
-# 原生 Tool Search 与 MCP 工具延迟加载 Plan
+# 原生与本地 Tool Search 的 MCP 工具加载 Plan
 
-## 架构
+## 架构概览
 
-在 `tools.Metadata → Registry → provider.ToolDefinition → Provider request/response` 的现有链路中引入“工具来源与呈现分组”元数据。Registry 继续以 `<server>__<tool>` 保存和执行工具；Provider 仅在序列化阶段将同一 MCP Server 的定义组织成对应厂商的延迟加载结构。
+保留现有 `Registry → Provider request → Agent Scheduler → 本地 MCP Client` 主链路。在请求构造前，将 Tool Search 策略解析为三种呈现方式：全量、原生和本地。原生策略沿用现有 Provider 编码；全量策略沿用现有平铺定义；本地策略由一个只读 MCP 目录和两个虚拟工具构成，MCP 工具本身不进入 Provider 工具列表。
 
 ```text
-MCP tools/list → RemoteToolAdapter(server__tool) → Registry
-                                              │
-                                      ToolDefinition（来源/分组）
-                                      ├─ Anthropic：单工具 deferred
-                                      └─ OpenAI：namespace → deferred functions
-                                                            │
-Responses function_call(namespace, name) ──映射──> server__tool
-                                                            │
-                                               Registry / permission / MCP Client
+Registry（内置工具 + RemoteToolAdapter）
+                 │
+        ToolSearch 策略与目录快照
+        ├─ Full：全部定义
+        ├─ Native：全部定义 + Provider defer/search
+        └─ Local：内置定义 + tool_search + mcp_call
+                                      │
+                        tool_search → schema 工具结果
+                        mcp_call → 目标唯一工具名
+                                      │
+                     Scheduler 权限/校验 → MCP Client
 ```
 
-## 核心数据与职责
+## 核心数据结构
 
-### 工具呈现元数据
+### ToolSearchStrategy
 
-扩展 Provider 中立的工具定义，使其表达本地唯一名称、来源类型、MCP Server、远端原始名称和可供模型使用的 namespace 描述。Registry 由 `RemoteToolAdapter` 的 metadata 传播这些信息；内置工具保持本地来源。
+在 Provider 中立层取代现有单一 `Enabled` 标志，表示 `Full`、`NativeAnthropic`、`NativeOpenAI` 或 `Local`。能力解析器根据配置、协议、官方端点和模型白名单确定策略：`disabled` 返回 Full；支持的官方组合返回各自 Native；其他组合返回 Local。
 
-### Tool Search 能力解析器
+### LocalCatalog
 
-新增纯函数能力解析器，输入 Provider、端点性质、模型名和模式，输出：禁用、启用 Anthropic、启用 OpenAI，或本地配置错误。OpenAI 模型白名单与快照归一化在此集中维护。
+以一次会话中 Registry 的 MCP `ToolDefinition` 为输入，保存按唯一名排序的不可变条目。它提供本地路径 Provider 可见定义、稳定名称目录和按完整唯一名加载 schema 的能力；不承担关键词、自然语言或语义检索。
 
-### OpenAI namespace 规划器
+### LocalToolCall
 
-输入已排序的 MCP 工具定义，输出确定的 namespace 及成员。首先按显式/可识别类别归类，再按固定大小分块；为每个成员保存 `namespace + remote name → local name` 映射。内置工具不进入 namespace。
+定义两个虚拟工具的输入：
 
-### Provider 编码与解码
+- `tool_search`：`tool_name` 字符串，必须与名称目录的一项完全一致。
+- `mcp_call`：`server`、`tool` 与对象形式的 `arguments`。
 
-- Anthropic 编码器增加 Tool Search 工具及 deferred 标志，并将服务端搜索历史块无损编码回 assistant 消息。
-- OpenAI 编码器支持顶层 function、namespace、Tool Search 三类对象；解码器读取 `function_call.namespace`。
-- 流事件层可观测但不执行 `tool_search_call` / `tool_search_output`。
+`mcp_call` 的 `server + tool` 必须解析到同一 Registry 中的 MCP adapter，且不接受内置工具。
 
-### Anthropic 服务端搜索历史
+## 模块设计
 
-中立内容模型增加“Provider 服务端历史块”：保存 Provider 名称、块类型与原始 JSON。该块只允许位于 assistant 消息，克隆、会话持久化和恢复必须复制其原始载荷；它不进入本地工具调度，也不产生用户可见工具事件。
+### `internal/provider`
 
-Anthropic 流解析在收到 `server_tool_use` 与 `tool_search_tool_result` 的 `content_block_start` 时产生对应的中立历史事件。`server_tool_use` 的输入 JSON 与搜索结果块的嵌套 `content` 均以原始 JSON 保存。Anthropic 请求编码器按原始块类型、ID、名称、输入和结果内容重新构造 API 块，保持与普通 `tool_use` 的顺序交错。
+**职责：** 解析策略并保留 Provider 原生能力判断。
 
-### 配置与提示词
+**改动：** 将二元配置升级为策略；更新测试覆盖官方支持、非原生、禁用和未知配置。Anthropic/OpenAI 仅在各自 Native 策略下发送官方字段；Local 和 Full 的请求编码均不带原生字段。
 
-配置默认 `auto`，示例文件列出三种模式。仅在实际启用时，稳定提示词添加使用 Tool Search 的行为规则；回退请求不带该规则，以维持现有模型行为。
+### `internal/toolsearch`
 
-## 模块改动
+**职责：** 构建本地 MCP 工具目录和 Provider 可见虚拟工具定义；处理按名称的 schema 加载与 `mcp_call` 目标解析。
 
-| 模块 | 改动 |
+**接口：** 输入 `[]provider.ToolDefinition`，输出可见 definitions、稳定目录文本、工具结果及目标 MCP 唯一名。该包不执行工具、不访问 Provider、不记录 schema 或查询正文。
+
+### `internal/agent`
+
+**职责：** 在每轮构造请求时使用稳定的策略与目录；将本地虚拟调用纳入现有 Agent Loop。
+
+**改动：** Local 策略添加目录提示；请求仅使用 LocalCatalog 的可见 definitions。Scheduler 截获 `tool_search` 并生成普通工具结果；截获 `mcp_call`，先解析并校验目标，再以原调用 ID 经目标工具的现有权限、Hook、输入校验和 Executor 执行。原生与全量路径不使用这些截获逻辑。
+
+### `internal/prompt`、配置与用户文档
+
+**职责：** 提示模型先搜索再分发，并准确公开策略行为。
+
+**改动：** 本地路径稳定系统提示列出 MCP 工具名，并强制模型先选目录名称、再调用 `tool_search`；README、示例配置、人工测试方案与 checklist 改写回退场景为本地精确加载，保留 `disabled` 全量场景。
+
+## 模块交互
+
+1. MCP 连接完成后，Registry 仍保留所有 RemoteToolAdapter。
+2. Agent 创建策略和 LocalCatalog；同一会话内策略与目录顺序固定。
+3. Native 请求编码完整 MCP schema；Local 请求编码内置工具、`tool_search` 和 `mcp_call`。
+4. 模型调用 `tool_search` 后，Scheduler 将命中的 schema 序列化为该调用的普通结果；下一次请求通过既有 history 提交该结果。
+5. 模型调用 `mcp_call` 后，Scheduler 将其解析到唯一 MCP 工具，并对该目标执行既有权限决策和 MCP RPC；结果仍以原 `mcp_call` 调用 ID 回传。
+
+## 文件组织
+
+| 操作 | 文件 |
 |---|---|
-| `internal/config` | Tool Search 模式解析、默认值和校验。 |
-| `internal/tools`、`internal/mcp` | 保留远端工具来源与 Server 分组信息。 |
-| `internal/provider` | 扩展工具定义和工具调用的 namespace 字段；增加纯能力解析/namespace 规划接口。 |
-| `internal/provider/anthropic` | 编码官方 Tool Search 与 deferred 工具。 |
-| `internal/conversation` | 持久化、恢复与校验 Anthropic 服务端搜索历史。 |
-| `internal/provider/openai` | 编码 namespace、服务端 Tool Search，解析最终 namespaced call。 |
-| `internal/agent` | 在构造请求前解析模式、选择提示词规则，并按 namespace 映射执行。 |
-| `.mewcode/config.example.yaml`、`README.md` | 更新配置和兼容性说明。 |
-
-## 执行顺序
-
-1. 定义中立数据结构、配置模式和能力解析器，并为回退语义建测试。
-2. 传播 MCP 来源信息，实施 namespace 规划与双向映射。
-3. 扩展 Anthropic/OpenAI 请求与流式响应编解码。
-4. 接入 Agent Loop、提示词与执行映射，补充端到端受控 MCP 测试。
-5. 为 Anthropic 服务端搜索历史补齐中立事件、会话持久化和下一请求回传，验证它不触发本地执行。
-6. 更新 README、示例配置和本章 Checklist，执行全量验证。
+| 修改 | `internal/provider/{provider,tool_search}.go` 与测试 |
+| 新建 | `internal/toolsearch/catalog.go` 与测试 |
+| 修改 | `internal/agent/{runner,scheduler}.go` 与测试 |
+| 修改 | `internal/prompt/tools.go` 与测试 |
+| 修改 | `internal/provider/{anthropic,openai}/request.go` 与测试 |
+| 修改 | `.mewcode/config.example.yaml`、`README.md`、`docs/ch00/11-tool-search/{task,checklist,manual_scenarios}.md` |
 
 ## 技术决策
 
-| 决策 | 选择 | 原因 |
+| 决策点 | 选择 | 理由 |
 |---|---|---|
-| OpenAI 搜索执行方 | `execution: "server"` | 使用官方服务端搜索，不要求本地模糊匹配。 |
-| OpenAI MCP 呈现 | namespace | 保留本地 MCP Client 执行边界。 |
-| 默认策略 | `auto` | 支持模型获得优化，未知组合零风险回退。 |
-| 内置工具 | 始终立即加载 | 高频、数量小且避免额外搜索回合。 |
-| 模型兼容 | 明确白名单 | beta 能力和兼容网关差异不能安全推断。 |
-| 分组上限 | 10 | 遵循 OpenAI 官方的 namespace 建议。 |
-| Anthropic 搜索历史 | Provider 专用原始块 | API 要求原样回传，且不能误当成本地工具调用。 |
+| 非原生策略 | 本地 ToolSearch | 避免发送不可控的 MCP schema，同时不依赖兼容网关支持 beta 字段。 |
+| schema 回传方式 | 普通工具结果 | 不修改会话中 Provider 的 `tools[]`，适配普通工具调用协议。 |
+| 最终调用入口 | 常驻 `mcp_call` | 已返回的 schema 本身不可直接调用，且可保持工具列表稳定。 |
+| 权限检查对象 | 被分发的真实 MCP 工具 | 防止把 `mcp_call` 误当成无风险代理而绕过目标权限。 |
+| 加载算法 | 名称目录的精确查找 | 避免模型自然语言查询与 schema 描述语言不一致导致的歧义。 |
+| `enabled` 语义 | 与 `auto` 相同的原生优先、本地兜底 | 用户要求所有非原生组合不再回退全量。 |

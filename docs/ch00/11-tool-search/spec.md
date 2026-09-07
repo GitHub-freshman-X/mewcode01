@@ -1,67 +1,52 @@
-# 原生 Tool Search 与 MCP 工具延迟加载 Spec
+# 原生与本地 Tool Search 的 MCP 工具加载 Spec
 
 ## 背景
 
-当前 Agent 在每次 Provider 请求中平铺发送 Registry 内所有工具的完整定义。MCP Server 的工具数量增长后，这会扩大模型初始上下文，并且任何工具目录变化都会改变工具前缀。Anthropic 与 OpenAI Responses API 均提供服务端 Tool Search：完整目录仍提交给 API 服务端，但只将需要的工具定义放入模型上下文。
+当前 MCP 工具在 `auto` 模式下仅对明确支持的官方 Anthropic 与 OpenAI Provider 启用服务端 Tool Search；其他端点、未知模型与不支持模型会发送全部工具定义。这会让第三方兼容端点的初始上下文随 MCP 工具目录增长。
 
-本章为现有本地 MCP 执行模型接入两家原生 Tool Search。OpenAI 的托管 MCP 工具会由 OpenAI 连接和执行远端 Server，不符合本项目由本地 MCP Client 执行的边界；因此 OpenAI 路径使用 function namespace，而不使用 OpenAI `mcp` 工具类型。
-
-官方参考：<https://platform.claude.com/docs/en/agents-and-tools/tool-use/tool-search-tool>、<https://developers.openai.com/api/docs/guides/tools-tool-search>。
+官方 Provider 的原生延迟加载不能由客户端替代：完整 MCP schema 必须仍发送给 Provider，并以 `defer_loading` 让服务端控制模型可见性。对不支持原生能力、但可调用普通工具的端点，需要在本地检索 MCP 工具定义，而不把 MCP schema 发送给模型。
 
 ## 目标
 
-- 在支持模型上自动使用 Provider 服务端 Tool Search，延迟 MCP 工具的模型上下文加载。
-- 保持 Registry、权限门禁与本地 MCP Client 的实际调用路径不变。
-- 对不支持、未知模型或兼容网关无错误地回退到现有全量工具定义。
-- 保持内置工具立即可见，并通过稳定前缀改善缓存复用条件。
+- 在官方端点与明确支持的模型组合上继续使用各 Provider 的原生 Tool Search。
+- 在其他可用 Provider 组合上使用本地 Tool Search，初始请求不发送 MCP 工具的完整 schema。
+- 让本地检索得到的 schema 仅作为模型下一轮可读的工具结果，而不在会话中动态修改 Provider 的工具列表。
+- 保持真实 MCP 调用始终经过本地 Registry、权限确认、输入校验与 MCP Client。
+- 保留显式关闭 Tool Search 后的全量工具加载，用作兼容和诊断开关。
 
 ## 功能需求
 
-- **F1 配置模式**：新增 Tool Search 模式 `auto`、`enabled`、`disabled`，默认 `auto`。`disabled` 始终使用现有全量工具定义；`auto` 仅在明确支持的官方 Provider/模型组合启用；`enabled` 在不支持的组合上返回本地配置错误，不向 API 发送不兼容字段。
-
-- **F2 能力判定与回退**：能力判定在请求构造前完成。OpenAI 仅对 Responses API 且白名单模型启用；模型未知、第三方 OpenAI 兼容端点或不支持模型均不携带 `tool_search`、`defer_loading` 或 namespace，直接发送平铺完整 function tools。模型快照按其所属稳定模型族判定。
-
-- **F3 Anthropic 请求与服务端历史**：内置工具保持非延迟；MCP 工具完整定义带 `defer_loading: true`；请求加入 Anthropic 官方 Tool Search。服务端搜索后扩展 `tool_reference`，后续普通 `tool_use` 仍以现有唯一工具名进入本地执行。流中的 `server_tool_use` 与 `tool_search_tool_result` 必须作为服务端搜索历史无损保存；本地 MCP 工具执行后的下一次 Messages 请求必须原样回传这两个块及其相对顺序，且不得为 `srvtoolu_...` 生成本地 `tool_result` 或权限确认。
-
-- **F4 OpenAI 请求**：内置工具保持顶层、完整且立即可调用。每个 MCP Server 的远端工具形成一个或多个 `namespace`，namespace 暴露稳定名称和简短能力描述，成员 function 均带 `defer_loading: true`，请求另带 `{"type":"tool_search","execution":"server"}`。不得把本地 MCP Server 直接编码为 OpenAI `mcp` 工具。
-
-- **F5 OpenAI namespace 分块**：每个 namespace 目标不超过 10 个成员。优先用稳定的功能类别拆分；无法可靠分类时，按稳定排序分块。namespace 名必须可逆映射到 MCP Server 与分块，并避免和内置工具、其他 namespace 冲突。
-
-- **F6 本地执行映射**：OpenAI 返回的 `function_call.namespace + name` 映射回 Registry 中唯一的 `<server>__<tool>` 名称，之后继续经过现有权限检查、输入校验、`RemoteToolAdapter` 与本地 MCP Client。不得将工具调用委托给 Provider。
-
-- **F7 响应与会话兼容**：OpenAI 流式解析能忽略服务端 Tool Search 的观测事件，并保留最终 function call 的 namespace 信息。Anthropic 服务端搜索块必须在流解析、任务历史、会话持久化、克隆、上下文回放和请求编码中保持完整；它们无需展示为本地工具调用。已发现工具无需被误存为用户可执行调用。
-
-- **F8 提示词行为**：在启用 Tool Search 时，稳定提示词包含“当前可见工具不足以完成任务时，使用 Tool Search 发现相关能力”的规则；不得要求模型猜测具体隐藏工具名。
-
-## 支持范围
-
-OpenAI `auto` 白名单为 `gpt-6-astra`、`gpt-5.6` / `gpt-5.6-sol` / `gpt-5.6-terra` / `gpt-5.6-luna`、`gpt-5.6-cyber`、`gpt-daybreak-red-latest`、`gpt-daybreak-blue-latest`、`gpt-5.5`、`gpt-5.4`、`gpt-5.4-pro`、`gpt-5.4-mini` 及对应快照。Daybreak 仍受 OpenAI 专项准入限制。
-
-`gpt-5.5-pro`、`gpt-5.4-nano`、`chat-latest` 明确不启用；GPT-5.3 及更早模型、未知名称及第三方兼容网关一律按不支持处理。白名单必须集中维护并有单元测试，不能由字符串版本比较推导。
+- **F1 配置与策略选择**：保留 `auto`、`enabled`、`disabled` 三种配置。`disabled` 始终发送当前平铺的完整工具定义。`auto` 与 `enabled` 均优先使用明确支持的官方原生 Tool Search；其余 Provider/模型组合选择本地 Tool Search，而不是全量加载。配置校验继续拒绝未知取值。
+- **F2 原生路径**：对官方 Anthropic 与 OpenAI 的支持组合，完整 MCP schema 仍发送给 Provider；MCP 工具带相应的 `defer_loading` 标记，并使用 Provider 官方 Tool Search。内置工具保持立即可见，最终 MCP 调用仍由本地执行。
+- **F3 本地工具目录与决策规则**：本地路径的 Provider 请求只包含内置工具、`tool_search` 与 `mcp_call`，不包含任一 MCP 工具 schema。稳定系统提示包含可检索 MCP 工具的完整、稳定名称清单，并明确要求模型先从该目录选择最合适的名称，再加载定义；不得以自然语言查询替代名称选择。
+- **F4 本地精确加载**：`tool_search` 只接受目录中某个 MCP 工具的完整唯一名，并返回该工具的完整 schema。输入不再接受关键词、自然语言查询或 `select:` 前缀。名称不在目录中时返回可理解错误。检索结果作为该工具调用的普通结果进入下一轮模型输入，不加入或改写 Provider 的 `tools[]`。
+- **F5 本地分发调用**：`mcp_call` 始终可见，接收目标 MCP Server、工具唯一名或该 Server 的原始工具名与工具参数。它只允许调用当前 Registry 中存在的 MCP 工具，并将请求转交现有权限门禁、输入校验和本地 MCP Client；不得绕过这些边界或执行内置工具。
+- **F6 回合与错误行为**：本地检索无命中、精确工具不存在、目标并非 MCP 工具或 `mcp_call` 参数不合法时，向模型返回可理解的普通工具错误结果，并允许 Agent Loop 继续。Provider 请求中的工具布局在同一会话中保持不变。
+- **F7 文档与可观测性**：README、配置示例、人工测试方案与本章文档应反映三种配置及两类搜索路径。日志只能记录策略、阶段、状态、工具计数、命中计数和耗时等安全元数据，不得记录 schema 正文、查询内容、参数、结果、密钥或请求头。
 
 ## 非功能需求
 
-- **N1 缓存稳定性**：支持路径的新发现定义由 Provider 加入上下文末尾；内置工具、系统提示词和 namespace 目录保持确定排序。回退路径维持当前语义。
-- **N2 安全性**：日志仅记录 Provider、模式、能力判定、namespace 数、工具数、阶段、状态和耗时；不得记录工具 schema 正文、工具调用参数、结果、密钥或 HTTP headers。
-- **N3 确定性**：相同 Registry、配置和模型名必须产生相同的工具请求布局与映射。
-- **N4 可测试性**：所有 Provider 请求体、回退、namespace 分块和最终本地 MCP 调用均由离线受控测试覆盖。Anthropic 测试必须以官方 SSE 样例覆盖“服务端搜索 → 本地工具调用 → 下一请求回传服务端搜索历史”的完整链路。
+- **N1 上下文控制**：本地路径初始请求的 MCP schema 数量为零；仅工具名目录及两个常驻本地工具进入初始上下文。
+- **N2 确定性**：相同 Registry、配置、Provider 与模型必须生成相同的工具目录；相同工具名必须加载相同的 schema。
+- **N3 兼容性**：`disabled` 的工具请求与改动前的全量加载布局保持等价；官方原生路径的请求与既有原生 Tool Search 行为保持兼容。
+- **N4 安全性**：本地 ToolSearch 是只读目录查询；所有真正的 MCP 调用继续复用既有安全控制。
+- **N5 可测试性**：策略选择、本地工具布局、检索、无命中、分发、权限与最终本地 MCP 调用均由离线受控测试覆盖。
 
 ## 不做的事
 
-- 不实现 OpenAI `execution: "client"` Tool Search，也不实现本地模糊检索。
-- 不把 MCP URL、认证头或连接职责交给 OpenAI。
-- 不延迟内置工具，不改变现有权限确认策略。
-- 不通过“请求失败后重试”探测能力，也不对未知模型乐观发送 beta 字段。
-- 不新增跨请求的工具搜索结果缓存或改变 MCP 工具发现生命周期。
+- 不改变官方 Provider 原生 Tool Search 的请求格式、搜索算法或服务端历史处理。
+- 不在本地路径中将搜索结果动态追加到 Provider `tools[]`。
+- 不延迟内置工具，不增加跨会话的检索缓存，也不修改 MCP Server 发现生命周期。
+- 不实现关键词、自然语言或语义检索，也不引入远程索引或对 MCP schema/description 的额外配置副本；本地加载只使用 Registry 中已有的唯一名称。
+- 不把 MCP 连接、认证或真实执行交给 Provider。
 
 ## 验收标准
 
-- **AC1**：Anthropic 支持模型的请求包含官方 Tool Search；MCP 工具为 deferred，内置工具非 deferred。
-- **AC2**：OpenAI 支持模型的 Responses 请求包含顶层内置 function、服务端 `tool_search` 和按 MCP Server 分组的 deferred namespaces。
-- **AC3**：OpenAI 最终 `namespace + name` 调用可映射到唯一的 `<server>__<tool>`，并由本地受控 MCP Client 收到调用。
-- **AC4**：不支持、未知模型和兼容端点请求完全不含 Tool Search、namespace 与 `defer_loading`，且全量工具可照常调用。
-- **AC5**：`disabled` 始终回退；`enabled` 遇不支持组合在本地明确失败。
-- **AC6**：namespace 的名称、成员和分块结果在多次构造中稳定，且单组不超过 10 个成员。
-- **AC7**：服务端 Tool Search 事件不会被当作本地工具调用或写入错误的历史块。
-- **AC8**：现有 Provider、Registry、MCP、权限与 Agent Loop 回归测试通过；README 和配置示例反映新增配置。
-- **AC9**：Anthropic Tool Search 的 `server_tool_use` 与 `tool_search_tool_result` 在后续请求中原样存在，且不被本地执行、权限确认或伪造的 `tool_result` 处理。
+- **AC1**：官方 Anthropic/OpenAI 的支持组合保留完整 deferred MCP schema 和官方 Tool Search；最终 MCP 调用仍由本地 Client 处理。
+- **AC2**：`auto` 或 `enabled` 的非原生组合初始请求不含 MCP schema，仅含内置工具、`tool_search` 与 `mcp_call`。
+- **AC3**：本地 `tool_search` 仅可按目录中的完整唯一名返回对应工具 schema；关键词、自然语言和带 `select:` 前缀的输入均被明确拒绝。
+- **AC4**：本地 ToolSearch 结果作为下一轮模型输入的工具结果存在，但 Provider 工具列表在会话内不因该结果改变。
+- **AC5**：模型可通过 `mcp_call` 触发命中的 MCP 工具，且该调用经过现有权限、校验与本地 MCP Client。
+- **AC6**：`disabled` 始终发送全量定义；未知配置值被本地拒绝。
+- **AC7**：无命中、无效精确选择与无效分发均产生可理解错误，且不会执行未注册工具或绕过权限。
+- **AC8**：配置示例、README、人工测试方案和自动化测试与实际行为一致；相关目标测试、全量测试、构建和 diff 检查通过。

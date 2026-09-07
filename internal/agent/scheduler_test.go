@@ -12,6 +12,7 @@ import (
 	"github.com/GitHub-freshman-X/mewcode01/internal/permissions"
 	"github.com/GitHub-freshman-X/mewcode01/internal/provider"
 	"github.com/GitHub-freshman-X/mewcode01/internal/tools"
+	"github.com/GitHub-freshman-X/mewcode01/internal/toolsearch"
 )
 
 type blockingTool struct {
@@ -76,6 +77,31 @@ func TestSchedulerReadOnlyConcurrentAndResultOrder(t *testing.T) {
 	results := <-done
 	if maximum.Load() != 2 || results[0].CallID != "1" || results[1].CallID != "2" {
 		t.Fatalf("max=%d results=%+v", maximum.Load(), results)
+	}
+}
+
+func TestSchedulerLocalToolSearchReturnsAResultForEveryCall(t *testing.T) {
+	registry := tools.NewRegistry()
+	var executed atomic.Int32
+	if err := registry.Register(countingTool{name: "context7__resolve-library-id", safety: tools.SafetyReadOnly, count: &executed}); err != nil {
+		t.Fatal(err)
+	}
+	s := NewScheduler(registry, tools.NewExecutor(time.Second), nil, nil)
+	catalog := toolsearch.New([]provider.ToolDefinition{
+		{Name: "context7__resolve-library-id", MCPServer: "context7", RemoteName: "resolve-library-id", Description: "resolve a library", Schema: map[string]any{"type": "object"}},
+		{Name: "context7__query-docs", MCPServer: "context7", RemoteName: "query-docs", Description: "query documentation", Schema: map[string]any{"type": "object"}},
+	})
+	s.Catalog = &catalog
+
+	results, err := s.Execute(context.Background(), []provider.ToolCall{
+		{ID: "call_1", Name: toolsearch.SearchToolName, Arguments: []byte(`{"tool_name":"context7__resolve-library-id"}`)},
+		{ID: "call_2", Name: toolsearch.CallToolName, Arguments: []byte(`{"server":"context7","tool":"resolve-library-id","arguments":{}}`)},
+	}, func(Event) bool { return true })
+	if err != nil {
+		t.Fatalf("Execute returned error: %v", err)
+	}
+	if len(results) != 2 || results[0].CallID != "call_1" || results[1].CallID != "call_2" || results[0].IsError || results[1].IsError || executed.Load() != 1 {
+		t.Fatalf("results=%+v", results)
 	}
 }
 

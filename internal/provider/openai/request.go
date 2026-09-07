@@ -43,7 +43,7 @@ func buildRequest(model string, req provider.ChatRequest) (requestBody, error) {
 		model = req.Model
 	}
 	body := requestBody{Model: model, MaxOutputTokens: req.MaxTokens, Stream: true}
-	body.Tools = openAITools(req.Tools, req.ToolSearch.Enabled)
+	body.Tools = openAITools(req.Tools, req.ToolSearch.NativeOpenAI())
 	if strings.TrimSpace(req.Prompt.StableSystem) != "" {
 		body.Input = append(body.Input, inputItem{Role: "system", Content: []inputBlock{{Type: "input_text", Text: req.Prompt.StableSystem}}})
 	}

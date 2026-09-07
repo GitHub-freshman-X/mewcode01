@@ -10,6 +10,7 @@ import (
 	"github.com/GitHub-freshman-X/mewcode01/internal/permissions"
 	"github.com/GitHub-freshman-X/mewcode01/internal/provider"
 	"github.com/GitHub-freshman-X/mewcode01/internal/tools"
+	"github.com/GitHub-freshman-X/mewcode01/internal/toolsearch"
 )
 
 type Scheduler struct {
@@ -18,6 +19,7 @@ type Scheduler struct {
 	gate      *permissions.Engine
 	confirmer PermissionBridge
 	Hooks     *hooks.Engine
+	Catalog   *toolsearch.Catalog
 }
 
 type scheduledCall struct {
@@ -49,7 +51,65 @@ func (s *Scheduler) batches(calls []provider.ToolCall) []toolBatch {
 
 func (s *Scheduler) Execute(ctx context.Context, calls []provider.ToolCall, emit func(Event) bool) ([]provider.ToolResult, error) {
 	results := make([]provider.ToolResult, len(calls))
-	for _, batch := range s.batches(calls) {
+	executable := make([]provider.ToolCall, 0, len(calls))
+	executableIndexes := make([]int, 0, len(calls))
+	if s.Catalog != nil {
+		for i := range calls {
+			if calls[i].Name == toolsearch.SearchToolName {
+				var input struct {
+					ToolName string `json:"tool_name"`
+				}
+				if err := json.Unmarshal(calls[i].Arguments, &input); err != nil {
+					results[i] = provider.ToolResult{CallID: calls[i].ID, Name: calls[i].Name, Content: tools.Failure(calls[i].Name, tools.ErrorValidation, "invalid tool_search arguments", nil).JSON(), IsError: true}
+					continue
+				}
+				found, err := s.Catalog.Load(input.ToolName)
+				if err != nil {
+					results[i] = provider.ToolResult{CallID: calls[i].ID, Name: calls[i].Name, Content: tools.Failure(calls[i].Name, tools.ErrorNotFound, err.Error(), nil).JSON(), IsError: true}
+					continue
+				}
+				results[i] = provider.ToolResult{CallID: calls[i].ID, Name: calls[i].Name, Content: tools.Success(calls[i].Name, map[string]any{"tool": found}).JSON()}
+				continue
+			}
+			if calls[i].Name == toolsearch.CallToolName {
+				var input struct {
+					Server    string          `json:"server"`
+					Tool      string          `json:"tool"`
+					Arguments json.RawMessage `json:"arguments"`
+				}
+				if err := json.Unmarshal(calls[i].Arguments, &input); err != nil {
+					results[i] = provider.ToolResult{CallID: calls[i].ID, Name: calls[i].Name, Content: tools.Failure(calls[i].Name, tools.ErrorValidation, "invalid mcp_call arguments", nil).JSON(), IsError: true}
+					continue
+				}
+				def, err := s.Catalog.Resolve(input.Server, input.Tool)
+				if err != nil {
+					results[i] = provider.ToolResult{CallID: calls[i].ID, Name: calls[i].Name, Content: tools.Failure(calls[i].Name, tools.ErrorNotFound, err.Error(), nil).JSON(), IsError: true}
+					continue
+				}
+				calls[i].Name = def.Name
+				calls[i].Arguments = input.Arguments
+			}
+			executable = append(executable, calls[i])
+			executableIndexes = append(executableIndexes, i)
+		}
+	} else {
+		executable = calls
+		executableIndexes = make([]int, len(calls))
+		for i := range calls {
+			executableIndexes[i] = i
+		}
+	}
+	for i, result := range results {
+		if result.CallID == "" {
+			continue
+		}
+		call := calls[i]
+		if !emit(Event{Type: EventToolCall, Phase: PhaseRunningTools, ToolCall: &call}) || !emit(Event{Type: EventToolResult, Phase: PhaseRunningTools, ToolResult: &result}) {
+			return nil, context.Canceled
+		}
+	}
+	executedResults := make([]provider.ToolResult, len(executable))
+	for _, batch := range s.batches(executable) {
 		if err := ctx.Err(); err != nil {
 			return nil, err
 		}
@@ -73,7 +133,7 @@ func (s *Scheduler) Execute(ctx context.Context, calls []provider.ToolCall, emit
 						stop.Do(func() { errCh <- err })
 						return
 					}
-					results[item.index] = result
+					executedResults[item.index] = result
 				}()
 			}
 			wg.Wait()
@@ -91,18 +151,22 @@ func (s *Scheduler) Execute(ctx context.Context, calls []provider.ToolCall, emit
 				if err != nil {
 					return nil, err
 				}
-				results[item.index] = result
+				executedResults[item.index] = result
 			}
 		}
 		if err := ctx.Err(); err != nil {
 			return nil, err
 		}
 		for _, item := range batch.calls {
-			result := results[item.index]
+			result := executedResults[item.index]
+			results[executableIndexes[item.index]] = result
 			if !emit(Event{Type: EventToolResult, Phase: PhaseRunningTools, ToolResult: &result}) {
 				return nil, context.Canceled
 			}
 		}
+	}
+	for i := range executedResults {
+		results[executableIndexes[i]] = executedResults[i]
 	}
 	return results, nil
 }

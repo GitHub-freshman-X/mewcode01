@@ -29,6 +29,7 @@ bugs/
 
 | 日期 | 数量 | 摘要 |
 |---|---:|---|
+| [2026-09-07](2026-09-07/README.md) | 1 | 人工 ToolSearch fixture 的 MCP 脚本路径仍为占位值，导致目录为空。 |
 | [2026-09-06](2026-09-06/README.md) | 5 | fork Skill 隔离执行、测试运行目录、Slash Command Worktree 同步，以及 OpenAI / Anthropic Tool Search 流处理。 |
 | [2026-08-31](2026-08-31/README.md) | 1 | 过期会话清理未删除对应的大工具结果目录。 |
 | [2026-08-30](2026-08-30/README.md) | 1 | OpenAI 缓存命中率重复计算缓存读取 Token。 |
